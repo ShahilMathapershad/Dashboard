@@ -1,0 +1,165 @@
+:root {
+    --bg-dark: #020617;
+    --card-bg: rgba(15, 23, 42, 0.75);
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --accent: #38bdf8;
+    --accent-glow: rgba(56, 189, 248, 0.4);
+    --border: rgba(51, 65, 85, 0.6);
+    --input-bg: rgba(2, 6, 23, 0.6);
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+}
+
+.login-container {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 0% 0%, #1e293b 0%, #020617 100%);
+    position: relative;
+}
+
+.login-container::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: url('background.png') center/cover no-repeat;
+    opacity: 0.15;
+    z-index: 0;
+    filter: saturate(0.5);
+}
+
+.login-card {
+    position: relative;
+    z-index: 10;
+    background: var(--card-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding: 3.5rem 2.5rem;
+    border-radius: 2rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7),
+                0 0 40px rgba(2, 6, 23, 0.5);
+    width: 100%;
+    max-width: 400px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    animation: slideUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.logo-img {
+    background-color: transparent !important;
+    object-fit: contain;
+    display: block;
+    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.2));
+    max-height: 100px;
+    width: auto;
+    transition: transform 0.3s ease;
+}
+
+.logo-img:hover {
+    transform: scale(1.05);
+}
+
+.login-title {
+    text-align: center;
+    font-size: 1.85rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.02em;
+    color: #ffffff;
+}
+
+.form-input {
+    background-color: var(--input-bg) !important;
+    border: 1px solid var(--border) !important;
+    color: #ffffff !important;
+    padding: 0.75rem 1.25rem !important;
+    font-size: 1rem !important;
+    border-radius: 0.75rem !important;
+    margin-bottom: 1.25rem !important;
+    width: 100%;
+    height: 3.5rem !important;
+    transition: all 0.25s ease !important;
+    outline: none !important;
+    font-family: inherit !important;
+    box-shadow: none !important;
+}
+
+.form-input:hover {
+    border-color: rgba(56, 189, 248, 0.4) !important;
+}
+
+.form-input:focus {
+    border-color: var(--accent) !important;
+    background-color: rgba(2, 6, 23, 0.8) !important;
+    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15) !important;
+}
+
+.form-input::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.5;
+}
+
+.login-button {
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9) !important;
+    border: none !important;
+    color: #ffffff !important;
+    padding: 0.875rem !important;
+    border-radius: 0.75rem !important;
+    font-weight: 600 !important;
+    font-size: 1rem !important;
+    width: 100%;
+    height: 3.5rem !important;
+    cursor: pointer;
+    transition: all 0.25s ease !important;
+    margin-top: 0.5rem !important;
+    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.2) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.login-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 16px rgba(56, 189, 248, 0.3) !important;
+    filter: brightness(1.05);
+}
+
+.login-button:active {
+    transform: translateY(0);
+}
+
+.login-error:not(:empty) {
+    margin-top: 1.25rem;
+    text-align: center;
+    color: #fda4af;
+    background: rgba(225, 29, 72, 0.1);
+    padding: 0.75rem;
+    border-radius: 0.6rem;
+    border: 1px solid rgba(225, 29, 72, 0.2);
+    font-size: 0.85rem;
+}
+
+/* Dashboard styles */
+.navbar-custom {
+    background-color: var(--card-bg);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 2rem;
+}
+
+.content-area {
+    padding: 2rem;
+}
