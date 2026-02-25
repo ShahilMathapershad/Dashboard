@@ -29,6 +29,7 @@ app.layout = html.Div(id='theme-main-container', children=[
     )
 ])
 
+
 @callback(
     Output('theme-main-container', 'className'),
     Output('theme-switch-button', 'children'),
@@ -46,10 +47,11 @@ def update_theme(n_clicks, stored_theme):
             theme = 'light' if stored_theme == 'dark' else 'dark'
         else:
             theme = stored_theme or 'dark'
-            
+
     icon = "☀️" if theme == 'light' else "🌙"
     class_name = 'light-theme' if theme == 'light' else ''
     return class_name, icon, theme
+
 
 if __name__ == '__main__':
     app.run(debug=True)
