@@ -1,9 +1,15 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State
-import pandas as pd
+from supabase import create_client
 import os
 
 dash.register_page(__name__, path='/registration')
+
+# Initialize Supabase client
+url = os.environ.get("SUPABASE_URL")
+key = os.environ.get("SUPABASE_KEY")
+supabase = create_client(url, key) if url and key else None
+
 
 def layout():
     return html.Div([
@@ -12,17 +18,21 @@ def layout():
                 html.Img(src=dash.get_asset_url('logo.svg'), className='logo-img'),
             ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
             html.H2("Create Account", className='login-title'),
-            html.P("Enter a username and password to register", 
-                   style={'textAlign': 'center', 'color': 'var(--text-secondary)', 'marginBottom': '2rem', 'fontSize': '0.95rem'}),
-            dcc.Input(id='reg-username', type='text', placeholder='Username', className='form-input', autoComplete='off'),
+            html.P("Register to access the ZAR/USD prediction model",
+                   style={'textAlign': 'center', 'color': 'var(--text-secondary)', 'marginBottom': '2rem',
+                          'fontSize': '0.95rem'}),
+            dcc.Input(id='reg-username', type='text', placeholder='Username', className='form-input',
+                      autoComplete='off'),
             dcc.Input(id='reg-password', type='password', placeholder='Password', className='form-input'),
             html.Button('Register', id='register-button', n_clicks=0, className='login-button'),
             html.Div(id='register-output', className='login-error'),
             html.Div([
-                html.A("Back to Sign In", href="/", style={'color': 'var(--accent)', 'fontSize': '0.9rem', 'textDecoration': 'none'})
+                html.A("Back to Sign In", href="/",
+                       style={'color': 'var(--accent)', 'fontSize': '0.9rem', 'textDecoration': 'none'})
             ], style={'textAlign': 'center', 'marginTop': '1.5rem'})
         ], className='login-card')
     ], className='login-container')
+
 
 @callback(
     Output('register-output', 'children'),
@@ -36,33 +46,26 @@ def register_user(n_clicks, username, password):
     if n_clicks > 0:
         if not username or not password:
             return "Please enter both username and password", {}
-        
-        try:
-            if not os.path.exists('data/users.csv'):
-                os.makedirs('data', exist_ok=True)
-                df = pd.DataFrame(columns=['username', 'password'])
-                df.to_csv('data/users.csv', index=False)
 
-            users_df = pd.read_csv('data/users.csv')
-            
-            # Check if username already exists
-            if username in users_df['username'].values.astype(str):
+        if not supabase:
+            return "Database connection not configured", {}
+
+        try:
+            # Check if username exists in Supabase
+            existing = supabase.table("users").select("username").eq("username", username).execute()
+            if existing.data:
                 return "Username already exists. Please choose another one.", {}
-            
-            # Create new user dataframe row
-            new_user = pd.DataFrame([[username, password]], columns=['username', 'password'])
-            
-            # Append new user and save back to csv
-            users_df = pd.concat([users_df, new_user], ignore_index=True)
-            users_df.to_csv('data/users.csv', index=False)
-            
+
+            # Insert new user into Supabase
+            supabase.table("users").insert({"username": username, "password": password}).execute()
+
             return "Registration successful! You can now log in.", {
-                'color': '#4ade80', 
-                'background': 'rgba(34, 197, 94, 0.1)', 
+                'color': '#4ade80',
+                'background': 'rgba(34, 197, 94, 0.1)',
                 'border': '1px solid rgba(34, 197, 94, 0.2)'
             }
-            
+
         except Exception as e:
             return f"System error: {str(e)}", {}
-            
+
     return "", {}

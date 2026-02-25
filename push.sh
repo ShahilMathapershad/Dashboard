@@ -8,10 +8,14 @@ echo "--- Starting Auto-Push ---"
 # 1. Add all changes
 git add .
 
-# 2. Commit with message
+# 2. Commit with message (if there are changes)
 git commit -m "$MESSAGE"
 
-# 3. Push to GitHub
+# 3. Pull latest changes (rebase to keep a clean history)
+echo "Pulling latest changes from GitHub to avoid conflicts..."
+git pull origin main --rebase
+
+# 4. Push to GitHub
 echo "Pushing to GitHub (Render will auto-deploy once this finishes)..."
 git push origin main
 
