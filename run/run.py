@@ -1,6 +1,7 @@
 import os
 import sys
 import webbrowser
+import subprocess
 import threading
 import time
 
@@ -24,6 +25,19 @@ except ImportError as e:
     print(f"Details: {e}")
     sys.exit(1)
 
+def run_autopush():
+    """Runs the push.sh script to update the site on GitHub/Render."""
+    print("--- Autopush to GitHub/Render started in background ---")
+    try:
+        # Check if the push script exists before running
+        if os.path.exists("./push.sh"):
+            # We explicitly use /bin/bash to run the script
+            subprocess.run(["/bin/bash", "./push.sh", "Autopush from local run"], check=False)
+        else:
+            print("--- Autopush skipped: push.sh not found ---")
+    except Exception as e:
+        print(f"--- Autopush failed: {e} ---")
+
 def open_browser():
     """Opens the web browser after a short delay to allow the server to start."""
     # A short delay ensures the Dash server is up and listening
@@ -33,6 +47,9 @@ def open_browser():
     webbrowser.open(url)
 
 if __name__ == "__main__":
+    # Start the autopush in a background thread so the app starts immediately
+    threading.Thread(target=run_autopush, daemon=True).start()
+    
     # Start the browser-opening thread in the background
     threading.Thread(target=open_browser, daemon=True).start()
     

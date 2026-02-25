@@ -7,6 +7,29 @@
     --accent-glow: rgba(56, 189, 248, 0.4);
     --border: rgba(51, 65, 85, 0.6);
     --input-bg: rgba(2, 6, 23, 0.6);
+    --btn-bg: linear-gradient(135deg, #38bdf8, #0ea5e9);
+    --error-bg: rgba(225, 29, 72, 0.1);
+    --error-text: #fda4af;
+    --error-border: rgba(225, 29, 72, 0.2);
+    --gradient-start: #1e293b;
+    --gradient-end: #020617;
+}
+
+.light-theme {
+    --bg-dark: #f8fafc;
+    --card-bg: rgba(255, 255, 255, 0.9);
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --accent: #0284c7;
+    --accent-glow: rgba(2, 132, 199, 0.15);
+    --border: rgba(203, 213, 225, 0.8);
+    --input-bg: rgba(241, 245, 249, 0.9);
+    --btn-bg: linear-gradient(135deg, #0ea5e9, #0284c7);
+    --error-bg: rgba(251, 113, 133, 0.1);
+    --error-text: #e11d48;
+    --error-border: rgba(251, 113, 133, 0.2);
+    --gradient-start: #e2e8f0;
+    --gradient-end: #f8fafc;
 }
 
 body {
@@ -24,7 +47,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: radial-gradient(circle at 0% 0%, #1e293b 0%, #020617 100%);
+    background: radial-gradient(circle at 0% 0%, var(--gradient-start) 0%, var(--gradient-end) 100%);
     position: relative;
 }
 
@@ -79,13 +102,13 @@ body {
     font-weight: 700;
     margin-bottom: 0.5rem;
     letter-spacing: -0.02em;
-    color: #ffffff;
+    color: var(--text-primary);
 }
 
 .form-input {
     background-color: var(--input-bg) !important;
     border: 1px solid var(--border) !important;
-    color: #ffffff !important;
+    color: var(--text-primary) !important;
     padding: 0.75rem 1.25rem !important;
     font-size: 1rem !important;
     border-radius: 0.75rem !important;
@@ -104,8 +127,8 @@ body {
 
 .form-input:focus {
     border-color: var(--accent) !important;
-    background-color: rgba(2, 6, 23, 0.8) !important;
-    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15) !important;
+    background-color: var(--input-bg) !important;
+    box-shadow: 0 0 0 4px var(--accent-glow) !important;
 }
 
 .form-input::placeholder {
@@ -114,7 +137,7 @@ body {
 }
 
 .login-button {
-    background: linear-gradient(135deg, #38bdf8, #0ea5e9) !important;
+    background: var(--btn-bg) !important;
     border: none !important;
     color: #ffffff !important;
     padding: 0.875rem !important;
@@ -126,14 +149,14 @@ body {
     cursor: pointer;
     transition: all 0.25s ease !important;
     margin-top: 0.5rem !important;
-    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.2) !important;
+    box-shadow: 0 4px 12px var(--accent-glow) !important;
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
 .login-button:hover {
     transform: translateY(-1px);
-    box-shadow: 0 8px 16px rgba(56, 189, 248, 0.3) !important;
+    box-shadow: 0 8px 16px var(--accent-glow) !important;
     filter: brightness(1.05);
 }
 
@@ -144,11 +167,11 @@ body {
 .login-error:not(:empty) {
     margin-top: 1.25rem;
     text-align: center;
-    color: #fda4af;
-    background: rgba(225, 29, 72, 0.1);
+    color: var(--error-text);
+    background: var(--error-bg);
     padding: 0.75rem;
     border-radius: 0.6rem;
-    border: 1px solid rgba(225, 29, 72, 0.2);
+    border: 1px solid var(--error-border);
     font-size: 0.85rem;
 }
 
@@ -160,6 +183,43 @@ body {
     padding: 0.75rem 2rem;
 }
 
-.content-area {
-    padding: 2rem;
+/* Theme Switcher Button */
+.theme-switch-btn {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    z-index: 9999;
+    width: 3.5rem;
+    height: 3.5rem;
+    border-radius: 50%;
+    background: var(--card-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 1.2rem;
+    outline: none;
+}
+
+.theme-switch-btn:hover {
+    transform: scale(1.1) rotate(15deg);
+    border-color: var(--accent);
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+
+.theme-switch-btn:active {
+    transform: scale(0.95);
+}
+
+#theme-main-container {
+    min-height: 100vh;
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    transition: background-color 0.4s ease, color 0.4s ease;
 }
