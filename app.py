@@ -3,6 +3,13 @@ from dash import Dash, html, dcc, Input, Output, State, callback, callback_conte
 import dash_bootstrap_components as dbc
 from flask import Flask
 from dotenv import load_dotenv
+import os
+import sys
+
+# Ensure project root is in sys.path for Render
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 load_dotenv()
 
