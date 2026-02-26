@@ -1,7 +1,5 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State
-import pandas as pd
-import os
 
 dash.register_page(__name__, path='/registration')
 
@@ -26,7 +24,7 @@ def layout():
     ], className='login-container')
 
 
-from logic.git_sync import sync_push
+from logic.supabase_client import supabase
 
 @callback(
     Output('register-output', 'children'),
@@ -41,32 +39,33 @@ def register_user(n_clicks, username, password):
         if not username or not password:
             return "Please enter both username and password", {}
 
+        if not supabase:
+            return "System error: Supabase connection not established.", {}
+
         try:
-            os.makedirs('data', exist_ok=True)
-            file_path = 'data/users.csv'
-
-            if not os.path.exists(file_path):
-                df = pd.DataFrame(columns=['username', 'password'])
-                df.to_csv(file_path, index=False)
-
-            users_df = pd.read_csv(file_path)
-
-            if username in users_df['username'].values.astype(str):
+            # Check if username exists
+            print(f"--- Registration: Checking if username '{username}' exists ---")
+            response = supabase.table('users').select("username").eq('username', str(username)).execute()
+            
+            if response.data:
+                print(f"--- Registration: Username '{username}' already exists ---")
                 return "Username already exists. Please choose another one.", {}
 
-            new_user = pd.DataFrame([[username, password]], columns=['username', 'password'])
-            users_df = pd.concat([users_df, new_user], ignore_index=True)
-            users_df.to_csv(file_path, index=False)
+            # Insert new user
+            print(f"--- Registration: Inserting new user '{username}' ---")
+            supabase.table('users').insert({
+                "username": str(username), 
+                "password": str(password)
+            }).execute()
 
-            # Trigger push to GitHub using the new robust sync
-            sync_push(f"New user registered: {username}")
-
+            print(f"--- Registration: Successfully inserted user '{username}' ---")
             return "Registration successful! You can now log in.", {
                 'color': '#4ade80',
                 'background': 'rgba(34, 197, 94, 0.1)',
                 'border': '1px solid rgba(34, 197, 94, 0.2)'
             }
         except Exception as e:
+            print(f"--- Registration Error: {str(e)} ---")
             return f"System error: {str(e)}", {}
 
     return "", {}

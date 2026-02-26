@@ -1,7 +1,6 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State
-import pandas as pd
-import os
+from logic.supabase_client import supabase
 
 dash.register_page(__name__, path='/')
 
@@ -40,15 +39,22 @@ def login_auth(n_clicks, username, password):
         if not username or not password:
             return None, "Please enter both username and password", dash.no_update
 
-        try:
-            users_df = pd.read_csv('data/users.csv')
-            user = users_df[(users_df['username'] == str(username)) & (users_df['password'] == str(password))]
+        if not supabase:
+            return None, "System error: Supabase connection not established.", dash.no_update
 
-            if not user.empty:
+        try:
+            # Check credentials in Supabase
+            print(f"--- Login: Checking credentials for '{username}' ---")
+            response = supabase.table('users').select("username").eq('username', str(username)).eq('password', str(password)).execute()
+
+            if response.data:
+                print(f"--- Login: Successful for '{username}' ---")
                 return {'username': username}, "", '/dashboard'
             else:
+                print(f"--- Login: Failed for '{username}' ---")
                 return None, "Invalid credentials. Please try again.", dash.no_update
         except Exception as e:
+            print(f"--- Login Error: {str(e)} ---")
             return None, f"System error: {str(e)}", dash.no_update
 
     return None, "", dash.no_update

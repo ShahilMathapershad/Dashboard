@@ -2,18 +2,9 @@ import dash
 from dash import Dash, html, dcc, Input, Output, State, callback, callback_context
 import dash_bootstrap_components as dbc
 from flask import Flask
-import os
 from dotenv import load_dotenv
-import threading
-import subprocess
-import time
-
-from logic.git_sync import sync_pull_periodic
 
 load_dotenv()
-
-# Start periodic autopull
-sync_pull_periodic()
 
 server = Flask(__name__)
 app = Dash(

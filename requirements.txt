@@ -3,4 +3,4 @@ dash-bootstrap-components
 pandas
 python-dotenv
 gunicorn
-GitPython
+supabase

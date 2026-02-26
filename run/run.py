@@ -1,7 +1,6 @@
 import os
 import sys
 import webbrowser
-import subprocess
 import threading
 import time
 
@@ -20,7 +19,6 @@ if PROJECT_ROOT not in sys.path:
 
 try:
     from app import app
-    from logic.git_sync import sync_push
 except ImportError as e:
     print(f"Error: Could not import 'app' from 'app.py'. Ensure you are running this from the project structure.")
     print(f"Details: {e}")
@@ -35,9 +33,6 @@ def open_browser():
     webbrowser.open(url)
 
 if __name__ == "__main__":
-    # Start the initial autopush/sync to ensure remote is up to date
-    sync_push("Initial sync from local run")
-    
     # Start the browser-opening thread in the background
     threading.Thread(target=open_browser, daemon=True).start()
     
