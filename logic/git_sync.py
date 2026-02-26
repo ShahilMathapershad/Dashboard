@@ -27,14 +27,24 @@ def configure_git_remote(repo):
         return
 
     try:
-        # Get the current remote URL (origin)
-        origin = repo.remote(name='origin')
-        url = origin.url
+        # Look for 'origin', or fall back to the first available remote
+        remote = None
+        try:
+            remote = repo.remote(name='origin')
+        except:
+            if repo.remotes:
+                remote = repo.remotes[0]
+        
+        if not remote:
+            print("--- GitSync Error: No remotes found to configure ---")
+            return
+
+        url = remote.url
         
         # Only update if it's a GitHub URL and doesn't already have a token
         if "github.com" in url and "https://" in url and "@" not in url:
             new_url = url.replace("https://", f"https://{token}@")
-            origin.set_url(new_url)
+            remote.set_url(new_url)
             print(f"--- GitSync: Remote URL updated with GITHUB_TOKEN ---")
         elif "@github.com" in url:
             # print("--- GitSync: Remote URL already contains a token or is SSH ---")
@@ -102,7 +112,7 @@ def sync_push(message):
             
             try:
                 # 1. Add changes
-                repo.git.add('.')
+                repo.git.add(A=True)
                 
                 # 2. Check if there are changes to commit
                 if repo.is_dirty(index=True, working_tree=True, untracked_files=True):
@@ -111,13 +121,21 @@ def sync_push(message):
                 else:
                     print("--- GitSync: [PUSH] No changes to commit ---")
 
+                # Get remote name
+                remote_name = 'origin'
+                try:
+                    repo.remote(name='origin')
+                except:
+                    if repo.remotes:
+                        remote_name = repo.remotes[0].name
+
                 # 3. Pull latest (rebase)
                 print(f"--- GitSync: [PUSH] Pulling latest changes from {branch} before push ---")
-                repo.git.pull('origin', branch, rebase=True)
+                repo.git.pull(remote_name, branch, rebase=True)
 
                 # 4. Push
                 print(f"--- GitSync: [PUSH] Pushing to GitHub ---")
-                repo.git.push('origin', branch)
+                repo.git.push(remote_name, branch)
                 print("--- GitSync: [PUSH] Push successful! ---")
             except Exception as e:
                 print(f"--- GitSync Error during push: {e} ---")
@@ -128,6 +146,8 @@ def sync_push(message):
 def sync_pull_periodic(interval=60):
     """Periodically pulls changes in a background thread."""
     def _run_pull():
+        # Short initial delay to allow app to start
+        time.sleep(5)
         print(f"--- GitSync: Background pull started (interval: {interval}s) ---")
         while True:
             with git_lock:
@@ -135,10 +155,26 @@ def sync_pull_periodic(interval=60):
                 if repo:
                     try:
                         configure_git_remote(repo)
+                        configure_git_user(repo)
                         handle_shallow_repo(repo)
+                        
+                        # NEW: Automatically commit changes so pull doesn't fail
+                        if repo.is_dirty(untracked_files=True):
+                            repo.git.add(A=True)
+                            repo.index.commit("Render: Syncing local changes before pull")
+                            print("--- GitSync: [PULL] Committed local changes before pulling ---")
+
                         branch = get_branch(repo)
-                        # print(f"--- GitSync: [PULL] Checking for updates on {branch}... ---")
-                        repo.git.pull('origin', branch, rebase=True)
+                        
+                        # Get remote name
+                        remote_name = 'origin'
+                        try:
+                            repo.remote(name='origin')
+                        except:
+                            if repo.remotes:
+                                remote_name = repo.remotes[0].name
+                        
+                        repo.git.pull(remote_name, branch, rebase=True)
                     except Exception as e:
                         # Log errors that are not just "already up to date"
                         err_msg = str(e).lower()
