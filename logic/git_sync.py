@@ -2,11 +2,18 @@ import os
 import git
 import threading
 import time
+import sys
 from dotenv import load_dotenv
+
+# Try to import fcntl for file locking (Linux/MacOS), fallback for Windows
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 load_dotenv()
 
-# Global lock to prevent concurrent Git operations in background threads
+# Global lock to prevent concurrent Git operations within the same process
 git_lock = threading.Lock()
 
 def get_repo():
@@ -19,6 +26,30 @@ def get_repo():
     except Exception as e:
         print(f"--- GitSync Error: Could not initialize repo: {e} ---")
         return None
+
+def get_tokenized_url(url, token):
+    """Safely adds GITHUB_TOKEN to a URL, handling both SSH and HTTPS formats."""
+    if not token or not url:
+        return url
+    
+    # 1. Handle SSH format: git@github.com:user/repo.git
+    if url.startswith("git@"):
+        # Remove "git@" and replace ":" with "/"
+        url = url.replace("git@github.com:", "github.com/")
+        if "https://" not in url:
+            url = "https://" + url
+    
+    # 2. Normalize HTTPS: remove any existing tokens
+    if "@" in url:
+        # Extract the base URL (after the @)
+        parts = url.split("@")
+        url = "https://" + parts[-1]
+    
+    # 3. Add the new token
+    if "github.com" in url:
+        return url.replace("https://", f"https://{token}@")
+    
+    return url
 
 def configure_git_remote(repo):
     """Updates the remote URL with GITHUB_TOKEN if available (for Render)."""
@@ -46,23 +77,12 @@ def configure_git_remote(repo):
                 print("--- GitSync Error: No remotes found to configure. Set GITHUB_REPO_URL if this persists. ---")
                 return
 
-        url = remote.url
+        current_url = remote.url
+        new_url = get_tokenized_url(current_url, token)
         
-        # Only update if it's a GitHub URL and doesn't already have a token
-        if "github.com" in url and "https://" in url and "@" not in url:
-            new_url = url.replace("https://", f"https://{token}@")
+        if current_url != new_url:
             remote.set_url(new_url)
             print(f"--- GitSync: Remote URL updated with GITHUB_TOKEN (using {remote.name}) ---")
-        elif "@github.com" in url:
-            # Refresh token if it's different
-            parts = url.split('@')
-            current_token = parts[0].replace("https://", "")
-            if current_token != token:
-                new_url = f"https://{token}@{parts[1]}"
-                remote.set_url(new_url)
-                print(f"--- GitSync: Remote URL refreshed with new GITHUB_TOKEN ---")
-        else:
-            pass
     except Exception as e:
         print(f"--- GitSync Error: Remote configuration failed: {e} ---")
 
@@ -149,41 +169,34 @@ def sync_push(message):
                 else:
                     print("--- GitSync: [PUSH] No changes to commit ---")
 
-                # Re-configure remote right before push to ensure token is fresh and remote is correct
-                configure_git_remote(repo)
-
-                # Get remote name and URL
+                # Get the current remote URL and tokenize it
                 remote_name = 'origin'
-                remote_url = os.environ.get('GITHUB_REPO_URL')
-                remote_obj = None
+                remote_url = None
                 
                 try:
                     remote_obj = repo.remote(name='origin')
-                    remote_name = 'origin'
                     remote_url = remote_obj.url
                 except:
                     if repo.remotes:
                         remote_obj = repo.remotes[0]
                         remote_name = remote_obj.name
                         remote_url = remote_obj.url
+                    else:
+                        remote_url = os.environ.get('GITHUB_REPO_URL')
                 
-                # Explicitly use the tokenized URL if we have a token
                 token = os.environ.get('GITHUB_TOKEN')
-                push_target = remote_name
+                push_target = get_tokenized_url(remote_url, token) or remote_name
                 
-                if token and remote_url and "github.com" in remote_url:
-                    # Construct explicit URL to bypass any remote config issues
-                    base_url = remote_url.split('@')[-1] if '@' in remote_url else remote_url.replace("https://", "")
-                    push_target = f"https://{token}@{base_url}"
+                if "@" in push_target:
                     print(f"--- GitSync: [PUSH] Using explicit tokenized URL for push ---")
-                elif not remote_obj and not remote_url:
+                elif not remote_url:
                     print("--- GitSync Error: [PUSH] No remote found and GITHUB_REPO_URL not set ---")
                     return
 
                 # 3. Pull latest (rebase)
                 print(f"--- GitSync: [PUSH] Pulling latest changes from {branch} before push ---")
                 try:
-                    repo.git.pull(push_target if push_target.startswith('http') else remote_name, branch, rebase=True)
+                    repo.git.pull(push_target, branch, rebase=True)
                 except Exception as pull_e:
                     print(f"--- GitSync [PUSH] Pull warning: {pull_e} ---")
 
@@ -198,11 +211,27 @@ def sync_push(message):
     threading.Thread(target=_run_push, daemon=True).start()
 
 def sync_pull_periodic(interval=60):
-    """Periodically pulls changes in a background thread."""
+    """Periodically pulls changes in a background thread, using a file lock for Gunicorn multi-worker safety."""
     def _run_pull():
         # Short initial delay to allow app to start
         time.sleep(5)
-        print(f"--- GitSync: Background pull started (interval: {interval}s) ---")
+        
+        # Lock to ensure only one gunicorn worker runs this periodic pull
+        lock_file_path = "/tmp/git_sync_periodic.lock"
+        lock_fd = None
+        
+        if fcntl:
+            try:
+                lock_fd = open(lock_file_path, "w")
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                print(f"--- GitSync: Background pull started (interval: {interval}s) ---")
+            except (IOError, OSError):
+                # Lock could not be acquired, another worker is already running this
+                if lock_fd: lock_fd.close()
+                return
+        else:
+            print(f"--- GitSync: Background pull started (No fcntl support) ---")
+
         while True:
             with git_lock:
                 repo = get_repo()
@@ -220,34 +249,20 @@ def sync_pull_periodic(interval=60):
 
                         branch = get_branch(repo)
                         
-                        # Get remote name and URL
-                        remote_name = 'origin'
-                        remote_url = os.environ.get('GITHUB_REPO_URL')
-                        remote_obj = None
-                        
+                        # Get remote URL
+                        remote_url = None
                         try:
                             remote_obj = repo.remote(name='origin')
-                            remote_name = 'origin'
                             remote_url = remote_obj.url
                         except:
                             if repo.remotes:
-                                remote_obj = repo.remotes[0]
-                                remote_name = remote_obj.name
-                                remote_url = remote_obj.url
+                                remote_url = repo.remotes[0].url
+                            else:
+                                remote_url = os.environ.get('GITHUB_REPO_URL')
                         
-                        # Use explicit URL for pull as well
                         token = os.environ.get('GITHUB_TOKEN')
-                        pull_target = remote_name
+                        pull_target = get_tokenized_url(remote_url, token) or 'origin'
                         
-                        if token and remote_url and "github.com" in remote_url:
-                            base_url = remote_url.split('@')[-1] if '@' in remote_url else remote_url.replace("https://", "")
-                            pull_target = f"https://{token}@{base_url}"
-                        elif not remote_obj and not remote_url:
-                            # If no remote and no GITHUB_REPO_URL, we can't pull
-                            # But maybe we don't need to pull if we just started
-                            time.sleep(interval)
-                            continue
-
                         repo.git.pull(pull_target, branch, rebase=True)
                     except Exception as e:
                         # Log errors that are not just "already up to date"
