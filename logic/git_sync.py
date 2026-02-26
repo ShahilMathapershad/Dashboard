@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Global lock to prevent concurrent Git operations in background threads
+git_lock = threading.Lock()
+
 def get_repo():
     """Initializes and returns the Git repository instance, searching upwards if necessary."""
     try:
@@ -21,7 +24,6 @@ def configure_git_remote(repo):
     """Updates the remote URL with GITHUB_TOKEN if available (for Render)."""
     token = os.environ.get('GITHUB_TOKEN')
     if not token:
-        print("--- GitSync: No GITHUB_TOKEN found in environment ---")
         return
 
     try:
@@ -35,7 +37,8 @@ def configure_git_remote(repo):
             origin.set_url(new_url)
             print(f"--- GitSync: Remote URL updated with GITHUB_TOKEN ---")
         elif "@github.com" in url:
-            print("--- GitSync: Remote URL already contains a token or is SSH ---")
+            # print("--- GitSync: Remote URL already contains a token or is SSH ---")
+            pass
     except Exception as e:
         print(f"--- GitSync Error: Remote configuration failed: {e} ---")
 
@@ -79,45 +82,45 @@ def handle_shallow_repo(repo):
     try:
         if os.path.exists(os.path.join(repo.git_dir, 'shallow')):
             print("--- GitSync: Shallow repository detected. Attempting to fetch unshallow... ---")
-            repo.git.fetch('--unshallow')
+            repo.git.fetch('--unshallow', '--update-head-ok')
     except Exception as e:
         print(f"--- GitSync Warning: Could not unshallow repo: {e} ---")
 
 def sync_push(message):
     """Performs a pull-rebase and then a push."""
     def _run_push():
-        repo = get_repo()
-        if not repo: return
-        
-        configure_git_remote(repo)
-        configure_git_user(repo)
-        handle_shallow_repo(repo)
-        
-        branch = get_branch(repo)
-        print(f"--- GitSync: Using branch '{branch}' ---")
-        
-        try:
-            # 1. Add changes
-            repo.git.add('.')
+        with git_lock:
+            repo = get_repo()
+            if not repo: return
             
-            # 2. Check if there are changes to commit
-            if repo.is_dirty(untracked_files=True):
-                repo.index.commit(message)
-                print(f"--- GitSync: Committed: {message} ---")
-            else:
-                print("--- GitSync: No changes to commit ---")
-                return
+            configure_git_remote(repo)
+            configure_git_user(repo)
+            handle_shallow_repo(repo)
+            
+            branch = get_branch(repo)
+            print(f"--- GitSync: [PUSH] Using branch '{branch}' ---")
+            
+            try:
+                # 1. Add changes
+                repo.git.add('.')
+                
+                # 2. Check if there are changes to commit
+                if repo.is_dirty(index=True, working_tree=True, untracked_files=True):
+                    repo.index.commit(message)
+                    print(f"--- GitSync: [PUSH] Committed: {message} ---")
+                else:
+                    print("--- GitSync: [PUSH] No changes to commit ---")
 
-            # 3. Pull latest (rebase)
-            print(f"--- GitSync: Pulling latest changes from {branch} ---")
-            repo.git.pull('origin', branch, rebase=True)
+                # 3. Pull latest (rebase)
+                print(f"--- GitSync: [PUSH] Pulling latest changes from {branch} before push ---")
+                repo.git.pull('origin', branch, rebase=True)
 
-            # 4. Push
-            print(f"--- GitSync: Pushing to GitHub ---")
-            repo.git.push('origin', branch)
-            print("--- GitSync: Push successful! ---")
-        except Exception as e:
-            print(f"--- GitSync Error during push: {e} ---")
+                # 4. Push
+                print(f"--- GitSync: [PUSH] Pushing to GitHub ---")
+                repo.git.push('origin', branch)
+                print("--- GitSync: [PUSH] Push successful! ---")
+            except Exception as e:
+                print(f"--- GitSync Error during push: {e} ---")
 
     # Run in background to not block the app
     threading.Thread(target=_run_push, daemon=True).start()
@@ -127,16 +130,22 @@ def sync_pull_periodic(interval=60):
     def _run_pull():
         print(f"--- GitSync: Background pull started (interval: {interval}s) ---")
         while True:
-            repo = get_repo()
-            if repo:
-                try:
-                    handle_shallow_repo(repo)
-                    branch = get_branch(repo)
-                    repo.git.pull('origin', branch, rebase=True)
-                except Exception as e:
-                    pass
+            with git_lock:
+                repo = get_repo()
+                if repo:
+                    try:
+                        configure_git_remote(repo)
+                        handle_shallow_repo(repo)
+                        branch = get_branch(repo)
+                        # print(f"--- GitSync: [PULL] Checking for updates on {branch}... ---")
+                        repo.git.pull('origin', branch, rebase=True)
+                    except Exception as e:
+                        # Log errors that are not just "already up to date"
+                        err_msg = str(e).lower()
+                        if "already up to date" not in err_msg:
+                            print(f"--- GitSync [PULL] Error: {e} ---")
             time.sleep(interval)
 
-    # Only start pull thread if not on Render (unless RUN_AUTOPULL is set)
-    if os.environ.get('RUN_AUTOPULL') == 'true' or not os.environ.get('RENDER'):
-        threading.Thread(target=_run_pull, daemon=True).start()
+    # Enable periodic pull on all environments (Render and Local)
+    # This ensures a two-way sync is always active.
+    threading.Thread(target=_run_pull, daemon=True).start()
