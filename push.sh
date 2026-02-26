@@ -5,6 +5,14 @@ MESSAGE=${1:-"Update site: $(date +'%Y-%m-%d %H:%M:%S')"}
 
 echo "--- Starting Auto-Push ---"
 
+# 0. Set Git user config if not set
+if [ -z "$(git config user.email)" ]; then
+  git config user.email "render-bot@example.com"
+fi
+if [ -z "$(git config user.name)" ]; then
+  git config user.name "Render Bot"
+fi
+
 # 1. Add all changes
 git add .
 

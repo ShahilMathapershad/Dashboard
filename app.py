@@ -4,8 +4,28 @@ import dash_bootstrap_components as dbc
 from flask import Flask
 import os
 from dotenv import load_dotenv
+import threading
+import subprocess
+import time
 
 load_dotenv()
+
+def run_autopull():
+    """Periodically pulls changes from GitHub to stay updated with remote registrations."""
+    # This is mainly useful for local runs to reflect changes from Render/GitHub
+    print("--- Autopull from GitHub started in background ---")
+    while True:
+        try:
+            # We use git pull directly
+            subprocess.run(["git", "pull", "origin", "main", "--rebase"], check=False)
+            time.sleep(60)  # Pull every minute
+        except Exception as e:
+            print(f"--- Autopull failed: {e} ---")
+            time.sleep(60)
+
+# Start autopull thread if we are running the server (useful for local development)
+if os.environ.get('RUN_AUTOPULL') == 'true' or not os.environ.get('RENDER'):
+    threading.Thread(target=run_autopull, daemon=True).start()
 
 server = Flask(__name__)
 app = Dash(
