@@ -23,6 +23,8 @@ def get_repo():
 def configure_git_remote(repo):
     """Updates the remote URL with GITHUB_TOKEN if available (for Render)."""
     token = os.environ.get('GITHUB_TOKEN')
+    repo_url = os.environ.get('GITHUB_REPO_URL')
+    
     if not token:
         return
 
@@ -36,8 +38,13 @@ def configure_git_remote(repo):
                 remote = repo.remotes[0]
         
         if not remote:
-            print("--- GitSync Error: No remotes found to configure ---")
-            return
+            if repo_url:
+                print(f"--- GitSync: Creating 'origin' remote using GITHUB_REPO_URL ---")
+                repo.create_remote('origin', repo_url)
+                remote = repo.remote(name='origin')
+            else:
+                print("--- GitSync Error: No remotes found to configure. Set GITHUB_REPO_URL if this persists. ---")
+                return
 
         url = remote.url
         
@@ -47,11 +54,14 @@ def configure_git_remote(repo):
             remote.set_url(new_url)
             print(f"--- GitSync: Remote URL updated with GITHUB_TOKEN (using {remote.name}) ---")
         elif "@github.com" in url:
-            # print("--- GitSync: Remote URL already contains a token or is SSH ---")
-            pass
+            # Refresh token if it's different
+            parts = url.split('@')
+            current_token = parts[0].replace("https://", "")
+            if current_token != token:
+                new_url = f"https://{token}@{parts[1]}"
+                remote.set_url(new_url)
+                print(f"--- GitSync: Remote URL refreshed with new GITHUB_TOKEN ---")
         else:
-            # If the URL is already tokenized but the token might be old, we could refresh it here
-            # But for now, let's just log it
             pass
     except Exception as e:
         print(f"--- GitSync Error: Remote configuration failed: {e} ---")
@@ -59,13 +69,27 @@ def configure_git_remote(repo):
 def configure_git_user(repo):
     """Sets git user configuration if not already set."""
     try:
-        with repo.config_writer() as cw:
-            if not cw.get_value('user', 'email', None):
+        # Check if user.email and user.name are set globally or locally
+        try:
+            email = repo.git.config('--get', 'user.email')
+            name = repo.git.config('--get', 'user.name')
+        except:
+            email = None
+            name = None
+
+        if not email or not name:
+            with repo.config_writer() as cw:
                 cw.set_value('user', 'email', 'render-bot@example.com')
-            if not cw.get_value('user', 'name', None):
                 cw.set_value('user', 'name', 'Render Bot')
+            print("--- GitSync: User configuration updated ---")
     except Exception as e:
-        print(f"--- GitSync Error: User configuration failed: {e} ---")
+        # Fallback if config_writer fails (e.g. read-only filesystem or missing config)
+        try:
+            repo.git.config('user.email', 'render-bot@example.com')
+            repo.git.config('user.name', 'Render Bot')
+            print("--- GitSync: User configuration updated via CLI fallback ---")
+        except Exception as e2:
+            print(f"--- GitSync Error: User configuration failed completely: {e2} ---")
 
 def get_branch(repo):
     """Detects the current branch name."""
@@ -128,24 +152,33 @@ def sync_push(message):
                 # Re-configure remote right before push to ensure token is fresh and remote is correct
                 configure_git_remote(repo)
 
-                # Get remote name
+                # Get remote name and URL
                 remote_name = 'origin'
+                remote_url = os.environ.get('GITHUB_REPO_URL')
+                remote_obj = None
+                
                 try:
                     remote_obj = repo.remote(name='origin')
                     remote_name = 'origin'
+                    remote_url = remote_obj.url
                 except:
                     if repo.remotes:
                         remote_obj = repo.remotes[0]
                         remote_name = remote_obj.name
+                        remote_url = remote_obj.url
                 
                 # Explicitly use the tokenized URL if we have a token
                 token = os.environ.get('GITHUB_TOKEN')
                 push_target = remote_name
-                if token and remote_obj and "github.com" in remote_obj.url:
+                
+                if token and remote_url and "github.com" in remote_url:
                     # Construct explicit URL to bypass any remote config issues
-                    base_url = remote_obj.url.split('@')[-1] if '@' in remote_obj.url else remote_obj.url.replace("https://", "")
+                    base_url = remote_url.split('@')[-1] if '@' in remote_url else remote_url.replace("https://", "")
                     push_target = f"https://{token}@{base_url}"
                     print(f"--- GitSync: [PUSH] Using explicit tokenized URL for push ---")
+                elif not remote_obj and not remote_url:
+                    print("--- GitSync Error: [PUSH] No remote found and GITHUB_REPO_URL not set ---")
+                    return
 
                 # 3. Pull latest (rebase)
                 print(f"--- GitSync: [PUSH] Pulling latest changes from {branch} before push ---")
@@ -187,23 +220,33 @@ def sync_pull_periodic(interval=60):
 
                         branch = get_branch(repo)
                         
-                        # Get remote name
+                        # Get remote name and URL
                         remote_name = 'origin'
+                        remote_url = os.environ.get('GITHUB_REPO_URL')
                         remote_obj = None
+                        
                         try:
                             remote_obj = repo.remote(name='origin')
                             remote_name = 'origin'
+                            remote_url = remote_obj.url
                         except:
                             if repo.remotes:
                                 remote_obj = repo.remotes[0]
                                 remote_name = remote_obj.name
+                                remote_url = remote_obj.url
                         
                         # Use explicit URL for pull as well
                         token = os.environ.get('GITHUB_TOKEN')
                         pull_target = remote_name
-                        if token and remote_obj and "github.com" in remote_obj.url:
-                            base_url = remote_obj.url.split('@')[-1] if '@' in remote_obj.url else remote_obj.url.replace("https://", "")
+                        
+                        if token and remote_url and "github.com" in remote_url:
+                            base_url = remote_url.split('@')[-1] if '@' in remote_url else remote_url.replace("https://", "")
                             pull_target = f"https://{token}@{base_url}"
+                        elif not remote_obj and not remote_url:
+                            # If no remote and no GITHUB_REPO_URL, we can't pull
+                            # But maybe we don't need to pull if we just started
+                            time.sleep(interval)
+                            continue
 
                         repo.git.pull(pull_target, branch, rebase=True)
                     except Exception as e:
