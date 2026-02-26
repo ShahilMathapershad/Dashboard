@@ -20,37 +20,11 @@ if PROJECT_ROOT not in sys.path:
 
 try:
     from app import app
+    from logic.git_sync import sync_push
 except ImportError as e:
     print(f"Error: Could not import 'app' from 'app.py'. Ensure you are running this from the project structure.")
     print(f"Details: {e}")
     sys.exit(1)
-
-def run_autopull():
-    """Periodically pulls changes from GitHub to stay updated with remote registrations."""
-    print("--- Autopull from GitHub started in background ---")
-    while True:
-        try:
-            if os.path.exists("./push.sh"):
-                # We can use git pull directly or a minimal script
-                # push.sh does a pull --rebase before pushing, but we just want to pull here
-                subprocess.run(["git", "pull", "origin", "main", "--rebase"], check=False)
-            time.sleep(60)  # Pull every minute
-        except Exception as e:
-            print(f"--- Autopull failed: {e} ---")
-            time.sleep(60)
-
-def run_autopush():
-    """Runs the push.sh script to update the site on GitHub/Render."""
-    print("--- Autopush to GitHub/Render started in background ---")
-    try:
-        # Check if the push script exists before running
-        if os.path.exists("./push.sh"):
-            # We explicitly use /bin/bash to run the script
-            subprocess.run(["/bin/bash", "./push.sh", "Initial sync from local run"], check=False)
-        else:
-            print("--- Autopush skipped: push.sh not found ---")
-    except Exception as e:
-        print(f"--- Autopush failed: {e} ---")
 
 def open_browser():
     """Opens the web browser after a short delay to allow the server to start."""
@@ -61,13 +35,8 @@ def open_browser():
     webbrowser.open(url)
 
 if __name__ == "__main__":
-    # Start the autopush in a background thread so the app starts immediately
-    threading.Thread(target=run_autopush, daemon=True).start()
-    
-    # We don't need to start run_autopull() here because it's now started in app.py 
-    # when the server starts, but we keep it here just in case run.py is run directly.
-    # However, to avoid double threads, we can check if it's already running or let it be.
-    # If app.py is imported, it starts the thread. run.py imports app.
+    # Start the initial autopush/sync to ensure remote is up to date
+    sync_push("Initial sync from local run")
     
     # Start the browser-opening thread in the background
     threading.Thread(target=open_browser, daemon=True).start()

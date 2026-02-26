@@ -26,20 +26,7 @@ def layout():
     ], className='login-container')
 
 
-import subprocess
-
-def trigger_push(message):
-    """Triggers the push script to update GitHub."""
-    try:
-        # Check if the push script exists before running
-        if os.path.exists("push.sh"):
-            # Run the push script in the background to not block the UI
-            subprocess.Popen(["/bin/bash", "push.sh", message])
-        else:
-            print("--- Push skipped: push.sh not found ---")
-    except Exception as e:
-        print(f"--- Push failed: {e} ---")
-
+from logic.git_sync import sync_push
 
 @callback(
     Output('register-output', 'children'),
@@ -71,8 +58,8 @@ def register_user(n_clicks, username, password):
             users_df = pd.concat([users_df, new_user], ignore_index=True)
             users_df.to_csv(file_path, index=False)
 
-            # Trigger push to GitHub
-            trigger_push(f"New user registered: {username}")
+            # Trigger push to GitHub using the new robust sync
+            sync_push(f"New user registered: {username}")
 
             return "Registration successful! You can now log in.", {
                 'color': '#4ade80',
