@@ -45,9 +45,13 @@ def configure_git_remote(repo):
         if "github.com" in url and "https://" in url and "@" not in url:
             new_url = url.replace("https://", f"https://{token}@")
             remote.set_url(new_url)
-            print(f"--- GitSync: Remote URL updated with GITHUB_TOKEN ---")
+            print(f"--- GitSync: Remote URL updated with GITHUB_TOKEN (using {remote.name}) ---")
         elif "@github.com" in url:
             # print("--- GitSync: Remote URL already contains a token or is SSH ---")
+            pass
+        else:
+            # If the URL is already tokenized but the token might be old, we could refresh it here
+            # But for now, let's just log it
             pass
     except Exception as e:
         print(f"--- GitSync Error: Remote configuration failed: {e} ---")
@@ -121,21 +125,38 @@ def sync_push(message):
                 else:
                     print("--- GitSync: [PUSH] No changes to commit ---")
 
+                # Re-configure remote right before push to ensure token is fresh and remote is correct
+                configure_git_remote(repo)
+
                 # Get remote name
                 remote_name = 'origin'
                 try:
-                    repo.remote(name='origin')
+                    remote_obj = repo.remote(name='origin')
+                    remote_name = 'origin'
                 except:
                     if repo.remotes:
-                        remote_name = repo.remotes[0].name
+                        remote_obj = repo.remotes[0]
+                        remote_name = remote_obj.name
+                
+                # Explicitly use the tokenized URL if we have a token
+                token = os.environ.get('GITHUB_TOKEN')
+                push_target = remote_name
+                if token and remote_obj and "github.com" in remote_obj.url:
+                    # Construct explicit URL to bypass any remote config issues
+                    base_url = remote_obj.url.split('@')[-1] if '@' in remote_obj.url else remote_obj.url.replace("https://", "")
+                    push_target = f"https://{token}@{base_url}"
+                    print(f"--- GitSync: [PUSH] Using explicit tokenized URL for push ---")
 
                 # 3. Pull latest (rebase)
                 print(f"--- GitSync: [PUSH] Pulling latest changes from {branch} before push ---")
-                repo.git.pull(remote_name, branch, rebase=True)
+                try:
+                    repo.git.pull(push_target if push_target.startswith('http') else remote_name, branch, rebase=True)
+                except Exception as pull_e:
+                    print(f"--- GitSync [PUSH] Pull warning: {pull_e} ---")
 
                 # 4. Push
-                print(f"--- GitSync: [PUSH] Pushing to GitHub ---")
-                repo.git.push(remote_name, branch)
+                print(f"--- GitSync: [PUSH] Pushing to {remote_name} {branch} ---")
+                repo.git.push(push_target, branch)
                 print("--- GitSync: [PUSH] Push successful! ---")
             except Exception as e:
                 print(f"--- GitSync Error during push: {e} ---")
@@ -168,13 +189,23 @@ def sync_pull_periodic(interval=60):
                         
                         # Get remote name
                         remote_name = 'origin'
+                        remote_obj = None
                         try:
-                            repo.remote(name='origin')
+                            remote_obj = repo.remote(name='origin')
+                            remote_name = 'origin'
                         except:
                             if repo.remotes:
-                                remote_name = repo.remotes[0].name
+                                remote_obj = repo.remotes[0]
+                                remote_name = remote_obj.name
                         
-                        repo.git.pull(remote_name, branch, rebase=True)
+                        # Use explicit URL for pull as well
+                        token = os.environ.get('GITHUB_TOKEN')
+                        pull_target = remote_name
+                        if token and remote_obj and "github.com" in remote_obj.url:
+                            base_url = remote_obj.url.split('@')[-1] if '@' in remote_obj.url else remote_obj.url.replace("https://", "")
+                            pull_target = f"https://{token}@{base_url}"
+
+                        repo.git.pull(pull_target, branch, rebase=True)
                     except Exception as e:
                         # Log errors that are not just "already up to date"
                         err_msg = str(e).lower()
