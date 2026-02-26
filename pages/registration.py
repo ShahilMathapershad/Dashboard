@@ -8,7 +8,7 @@ def layout():
     return html.Div([
         html.Div([
             html.Div([
-                html.Img(src=dash.get_asset_url('logo.svg'), className='logo-img'),
+                html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-img'),
             ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
             html.H2("Create Account", className='login-title'),
             dcc.Input(id='reg-username', type='text', placeholder='Username', className='form-input',

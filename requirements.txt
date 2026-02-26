@@ -1,6 +1,10 @@
 dash
 dash-bootstrap-components
+diskcache
+multiprocess
+psutil
 pandas
 python-dotenv
 gunicorn
 supabase
+fredapi
