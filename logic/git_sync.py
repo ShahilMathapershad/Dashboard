@@ -7,9 +7,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def get_repo():
-    """Initializes and returns the Git repository instance."""
+    """Initializes and returns the Git repository instance, searching upwards if necessary."""
     try:
-        repo = git.Repo(os.getcwd())
+        # Start searching from the current directory or the directory of this file
+        search_path = os.getcwd()
+        repo = git.Repo(search_path, search_parent_directories=True)
         return repo
     except Exception as e:
         print(f"--- GitSync Error: Could not initialize repo: {e} ---")
@@ -19,7 +21,8 @@ def configure_git_remote(repo):
     """Updates the remote URL with GITHUB_TOKEN if available (for Render)."""
     token = os.environ.get('GITHUB_TOKEN')
     if not token:
-        return # Use default remote if no token
+        print("--- GitSync: No GITHUB_TOKEN found in environment ---")
+        return
 
     try:
         # Get the current remote URL (origin)
@@ -31,6 +34,8 @@ def configure_git_remote(repo):
             new_url = url.replace("https://", f"https://{token}@")
             origin.set_url(new_url)
             print(f"--- GitSync: Remote URL updated with GITHUB_TOKEN ---")
+        elif "@github.com" in url:
+            print("--- GitSync: Remote URL already contains a token or is SSH ---")
     except Exception as e:
         print(f"--- GitSync Error: Remote configuration failed: {e} ---")
 
@@ -45,6 +50,39 @@ def configure_git_user(repo):
     except Exception as e:
         print(f"--- GitSync Error: User configuration failed: {e} ---")
 
+def get_branch(repo):
+    """Detects the current branch name."""
+    # 1. Try environment variable (Render sets this)
+    branch = os.environ.get('RENDER_GIT_BRANCH')
+    if branch:
+        return branch
+    
+    # 2. Try to get from repo
+    try:
+        return repo.active_branch.name
+    except:
+        # Detached HEAD
+        pass
+    
+    # 3. Fallback to common names
+    for b in ['main', 'master']:
+        try:
+            repo.git.rev_parse('--verify', b)
+            return b
+        except:
+            continue
+            
+    return 'main'
+
+def handle_shallow_repo(repo):
+    """Checks if the repo is shallow and tries to unshallow it if on Render."""
+    try:
+        if os.path.exists(os.path.join(repo.git_dir, 'shallow')):
+            print("--- GitSync: Shallow repository detected. Attempting to fetch unshallow... ---")
+            repo.git.fetch('--unshallow')
+    except Exception as e:
+        print(f"--- GitSync Warning: Could not unshallow repo: {e} ---")
+
 def sync_push(message):
     """Performs a pull-rebase and then a push."""
     def _run_push():
@@ -53,6 +91,10 @@ def sync_push(message):
         
         configure_git_remote(repo)
         configure_git_user(repo)
+        handle_shallow_repo(repo)
+        
+        branch = get_branch(repo)
+        print(f"--- GitSync: Using branch '{branch}' ---")
         
         try:
             # 1. Add changes
@@ -67,12 +109,12 @@ def sync_push(message):
                 return
 
             # 3. Pull latest (rebase)
-            print("--- GitSync: Pulling latest changes ---")
-            repo.git.pull('origin', 'main', rebase=True)
+            print(f"--- GitSync: Pulling latest changes from {branch} ---")
+            repo.git.pull('origin', branch, rebase=True)
 
             # 4. Push
-            print("--- GitSync: Pushing to GitHub ---")
-            repo.git.push('origin', 'main')
+            print(f"--- GitSync: Pushing to GitHub ---")
+            repo.git.push('origin', branch)
             print("--- GitSync: Push successful! ---")
         except Exception as e:
             print(f"--- GitSync Error during push: {e} ---")
@@ -88,13 +130,10 @@ def sync_pull_periodic(interval=60):
             repo = get_repo()
             if repo:
                 try:
-                    # Only pull if not on Render OR if explicitly requested
-                    # Render auto-deploys on push, so pull is mainly for local environment
-                    # to get changes made on Render.
-                    repo.git.pull('origin', 'main', rebase=True)
-                    # print("--- GitSync: Periodic pull successful ---")
+                    handle_shallow_repo(repo)
+                    branch = get_branch(repo)
+                    repo.git.pull('origin', branch, rebase=True)
                 except Exception as e:
-                    # Don't print every time to avoid log spam if it fails (e.g. no internet)
                     pass
             time.sleep(interval)
 
