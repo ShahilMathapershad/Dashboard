@@ -8,7 +8,7 @@ import time
 # This allows us to find the root folder correctly from any starting directory.
 RUN_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(RUN_DIR)
-
+#hello
 # Change the current working directory to the project root
 # This ensures Dash finds 'assets', 'pages', and 'data' correctly
 os.chdir(PROJECT_ROOT)
