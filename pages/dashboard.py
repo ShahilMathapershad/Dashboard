@@ -235,7 +235,7 @@ def fetch_data(set_progress, trigger_value, fred_key, econdata_key):
             
             print(f"DEBUG: Successfully fetched raw data with {len(raw)} rows. Processing...")
             set_progress((95, '95%', 'Processing and saving data...'))
-            processed = process_data(raw, start_date='2000-01-01', end_date='2026-12-31')
+            processed = process_data(raw, start_date='2000-01-01')
             
             if processed.empty:
                 print("DEBUG: processed_df is empty")

@@ -58,8 +58,16 @@ def fetch_fred_data(series_dict, api_key=None, progress_callback=None):
     combined_df = pd.concat(df_list, axis=1, sort=True)
     return combined_df
 
-def process_data(final_df, start_date='2000-01-01', end_date='2026-12-31'):
+def process_data(final_df, start_date='2000-01-01', end_date=None):
     """Processes the raw FRED data (sorting, resampling, filling, etc.)."""
+    
+    # If end_date is not provided, use the end of the previous month
+    if end_date is None:
+        now = pd.Timestamp.now()
+        # End of previous month: first day of current month minus one day
+        end_of_prev_month = (now.replace(day=1) - pd.Timedelta(days=1))
+        end_date = end_of_prev_month.strftime('%Y-%m-%d')
+    
     # Sort index
     final_df = final_df.sort_index()
     
