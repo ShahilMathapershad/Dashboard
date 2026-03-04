@@ -1,7 +1,7 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State, set_props
 import dash_bootstrap_components as dbc
-from logic.data_fetcher import fetch_fred_data, process_data, save_to_supabase
+from logic.data_fetcher import fetch_fred_data, fetch_econdata_data, fetch_yahoo_gold_data, process_data, save_to_supabase, FRED_API_KEY, SERIES_CONFIG
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -34,14 +34,6 @@ def sidebar(active_tab):
 def data_tab_content():
     return html.Div(className='dashboard-card', children=[
         html.H3('Data', className='section-title'),
-        html.Div(className='api-key-input', children=[
-            html.Label('FRED API Key'),
-            dcc.Input(id='fred-api-key', type='text', className='form-input', placeholder='Enter your FRED API key')
-        ]),
-        html.Div(className='api-key-input', children=[
-            html.Label('EconData API Key'),
-            dcc.Input(id='econdata-api-key', type='text', className='form-input', placeholder='Enter your EconData API key')
-        ]),
         html.Button('Fetch Data', id='fetch-data-btn', n_clicks=0, className='login-button'),
         
         # Progress Bar
@@ -158,27 +150,22 @@ def perform_signout(signout_clicks):
     return dash.no_update, dash.no_update
 
 
-# Validation callback to prevent background fetch if keys are missing
+# Validation callback to prevent background fetch if clicks is 0
 @callback(
     Output('fetch-trigger', 'data'),
     Output('data-error', 'children', allow_duplicate=True),
     Input('fetch-data-btn', 'n_clicks'),
-    State('fred-api-key', 'value'),
-    State('econdata-api-key', 'value'),
     State('fetch-trigger', 'data'),
     prevent_initial_call=True
 )
-def validate_keys(n_clicks, fred_key, econdata_key, current_trigger):
+def validate_keys(n_clicks, current_trigger):
     if not n_clicks:
         return dash.no_update, dash.no_update
-    
-    if not fred_key or not econdata_key:
-        return dash.no_update, 'Please enter both FRED and EconData API keys.'
     
     return (current_trigger or 0) + 1, ""
 
 
-# Fetch data using provided API keys
+# Fetch data using hardcoded API keys
 @callback(
     Output('fetched-data', 'data'),
     Output('data-error', 'children', allow_duplicate=True),
@@ -187,8 +174,6 @@ def validate_keys(n_clicks, fred_key, econdata_key, current_trigger):
     Output('predictor-dropdown', 'value'),
     Output('visualization-container', 'style'),
     Input('fetch-trigger', 'data'),
-    State('fred-api-key', 'value'),
-    State('econdata-api-key', 'value'),
     background=True,
     running=[
         (Output('fetch-data-btn', 'disabled'), True, False),
@@ -202,32 +187,38 @@ def validate_keys(n_clicks, fred_key, econdata_key, current_trigger):
     ],
     prevent_initial_call=True
 )
-def fetch_data(set_progress, trigger_value, fred_key, econdata_key):
+def fetch_data(set_progress, trigger_value):
     if trigger_value:
         print(f"DEBUG: fetch_data background callback started. trigger_value={trigger_value}")
         set_progress((0, '0%', 'Starting data fetch...'))
         
         try:
-            series = {
-                'EPU(USA)': 'USEPUINDXM',
-                'WUIZAF(SA)': 'WUIZAF',
-                '10_YEAR_BOND_RATES(USA)': 'GS10',
-                '10_YEAR_BOND_RATES(SA)': 'IRLTLT01ZAM156N',
-                'SA_INFLATION': 'CPALTT01ZAM659N',
-                'USA_INFLATION': 'CPALTT01USM659N',
-                'VIX': 'VIXCLS',
-                'GOLD_PRICE': 'PCU2122212122210',
-                'BRENT_OIL_PRICE': 'POILBREUSDM',
-                'ZAR_USD': 'DEXSFUS'
-            }
+            # Use unified configuration from data_fetcher
+            fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
             
             def update_progress(percent, status_msg):
                 print(f"DEBUG: Progress update: {percent}% - {status_msg}")
-                # Bar value goes from 0 to 100, and we explicitly show percentage
                 set_progress((percent, f'{percent}%', f'Processing: {percent}% - {status_msg}'))
             
-            print("DEBUG: Calling fetch_fred_data...")
-            raw = fetch_fred_data(series, api_key=str(fred_key), progress_callback=update_progress)
+            print("DEBUG: Calling fetch_fred_data and fetch_econdata_data...")
+            # Fetch EconData Business Cycles series
+            econ_business_cycles = fetch_econdata_data(SERIES_CONFIG['BUSINESS_CYCLES']['id'])
+            if econ_business_cycles.empty:
+                print("DEBUG: Retrying EconData with legacy series_id 'SARB_6006K'")
+                econ_business_cycles = fetch_econdata_data('SARB_6006K')
+            
+            raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=update_progress)
+
+            # Fetch GOLD_PRICE from Yahoo Finance (GLD), monthly mean close.
+            yahoo_gold = fetch_yahoo_gold_data(
+                ticker=SERIES_CONFIG['GOLD_PRICE']['id'],
+                start_date='2010-01-01'
+            )
+            if not yahoo_gold.empty:
+                raw['GOLD_PRICE'] = yahoo_gold
+            
+            if not econ_business_cycles.empty:
+                raw['BUSINESS_CYCLES'] = econ_business_cycles
             
             if raw.empty:
                 print("DEBUG: raw_df is empty")
