@@ -8,7 +8,7 @@ python-dotenv
 gunicorn
 supabase
 fredapi
-econdatapy
+econdatapy @ git+https://github.com/coderaanalytics/econdatapy.git
 yfinance
 requests
 openpyxl
