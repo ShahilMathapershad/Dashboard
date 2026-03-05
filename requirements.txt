@@ -9,6 +9,7 @@ gunicorn
 supabase
 fredapi
 econdatapy @ git+https://github.com/coderaanalytics/econdatapy.git
+pyjwt
 yfinance
 requests
 openpyxl

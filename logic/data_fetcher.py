@@ -13,14 +13,15 @@ import requests
 from collections.abc import Mapping
 from dotenv import load_dotenv
 from logic.supabase_client import supabase
-try:
-    from econdatapy import read as econdata_read
-except Exception:
-    econdata_read = None
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("DataFetcher")
+
+try:
+    from econdatapy import read as econdata_read
+except Exception as e:
+    logger.warning(f"Failed to import econdatapy: {e}")
+    econdata_read = None
 
 # Bypass SSL verification for FRED API calls if needed
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -160,8 +161,10 @@ def _series_from_dataframe(df):
 def _fetch_econdatapy_data(series_id, token):
     """Fetch EconData series via econdatapy, following the Colab workflow."""
     if econdata_read is None:
+        logger.debug("EconData SDK (econdatapy) not available.")
         return pd.Series(dtype='float64')
 
+    logger.info(f"Initializing EconData SDK with token length {len(token) if token else 0}.")
     bearer = token if token.startswith('Bearer ') else f"Bearer {token}"
     econdata_read.econdata_token = bearer
 
@@ -207,45 +210,72 @@ def fetch_econdata_data(series_id, token=None):
         logger.error(f"EconData token not found. Skipping {series_id}.")
         return pd.Series(dtype='float64')
 
+    # Log token prefix for diagnosis (masked)
+    token_masked = token[:10] + "..." + token[-5:] if len(token) > 15 else "SHORT_TOKEN"
+    logger.info(f"Starting EconData fetch for {series_id} using token {token_masked}")
+
     # First try the official EconData SDK flow (same path as user's working script).
     sdk_series = _fetch_econdatapy_data(series_id, token)
     if not sdk_series.empty:
         return sdk_series
     
-    # Try multiple common endpoint patterns for EconData
+    # Improved HTTP fallback using the sdmx-codera/v1 path found in the SDK source.
+    # We try both the generic and specific dataset paths.
     urls = [
-        f"https://www.econdata.co.za/api/series/{series_id}/data",
-        f"https://www.econdata.co.za/api/v1/series/{series_id}/data",
+        f"https://www.econdata.co.za/sdmx-codera/v1/datasets/ECONDATA-{series_id}-latest",
+        f"https://www.econdata.co.za/sdmx-codera/v1/datasets/ECONDATA-SARB_6006K-latest",
+        f"https://www.econdata.co.za/api/series/{series_id}/data", # older fallback
     ]
     
     headers = {
-        'Authorization': f"Bearer {token}",
+        'Authorization': token if token.startswith('Bearer ') else f"Bearer {token}",
         'Content-Type': 'application/json'
     }
+
+    # Optional: some EconData endpoints might require a signin call to initialize the session/auth
+    try:
+        requests.post("https://www.econdata.co.za/signin", headers=headers, timeout=10)
+    except Exception:
+        pass
     
     for url in urls:
-        logger.info(f"Attempting EconData fetch for {series_id} at {url}")
+        logger.info(f"Attempting EconData HTTP fetch for {series_id} at {url}")
         try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req) as response:
-                data = json.loads(response.read().decode())
+            # We use requests here as it handles JSON and auth better than urllib
+            response = requests.get(url, headers=headers, timeout=30)
+            if not response.ok:
+                logger.warning(f"Failed to fetch {series_id} from {url}: HTTP {response.status_code}")
+                continue
                 
-                df = None
-                # EconData usually returns a list of { "date": "...", "value": ... }
-                if isinstance(data, list):
-                    df = pd.DataFrame(data)
-                elif 'data' in data: # sometimes it's wrapped in a 'data' key
-                    df = pd.DataFrame(data['data'])
-                
-                if df is not None and not df.empty:
-                    series = _series_from_dataframe(df)
-                    if not series.empty:
-                        series = _to_monthly(series)
-                        logger.info(f"Successfully fetched {series_id} from EconData HTTP endpoint ({len(series)} monthly rows).")
-                        return series
-                    logger.warning(f"EconData HTTP returned data but no parsable date/value series for {series_id}")
-                else:
-                    logger.warning(f"EconData returned empty or unexpected format for {series_id}")
+            data = response.json()
+            df = None
+            
+            # EconData SDK structure: list containing dataset info
+            # The JSON structure can be complex; we try common patterns.
+            if isinstance(data, list) and len(data) > 1 and "data-sets" in data[1]:
+                # Extract first dataset's series
+                ds = data[1]["data-sets"][0][1]
+                if "series" in ds:
+                    all_dfs = []
+                    for s in ds["series"]:
+                        if "obs" in s:
+                            all_dfs.append(pd.DataFrame(s["obs"]))
+                    if all_dfs:
+                        df = pd.concat(all_dfs, ignore_index=True)
+            elif isinstance(data, list):
+                df = pd.DataFrame(data)
+            elif 'data' in data:
+                df = pd.DataFrame(data['data'])
+            
+            if df is not None and not df.empty:
+                series = _series_from_dataframe(df)
+                if not series.empty:
+                    series = _to_monthly(series)
+                    logger.info(f"Successfully fetched {series_id} from EconData HTTP endpoint ({len(series)} monthly rows).")
+                    return series
+                logger.warning(f"EconData HTTP returned data but no parsable date/value series for {series_id}")
+            else:
+                logger.warning(f"EconData returned empty or unexpected format for {series_id}")
         except Exception as e:
             logger.warning(f"Failed to fetch {series_id} from {url}: {e}")
             
