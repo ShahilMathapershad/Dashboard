@@ -54,9 +54,8 @@ def data_tab_content():
                 html.Label('Select Predictor to Compare with ZAR/USD:'),
                 dcc.Dropdown(
                     id='predictor-dropdown',
-                    className='form-input',
-                    placeholder='Select a factor...',
-                    style={'backgroundColor': 'var(--input-bg)', 'color': '#000'}
+                    className='form-input custom-dropdown',
+                    placeholder='Select a factor...'
                 )
             ]),
             dcc.Graph(id='zar-graph', className='dashboard-card')
@@ -309,6 +308,8 @@ def update_graph(predictor, data, theme):
     )
     
     template = 'plotly_dark' if theme == 'dark' else 'plotly_white'
+    hover_bgcolor = "rgba(15, 23, 42, 0.9)" if theme == 'dark' else "rgba(255, 255, 255, 0.9)"
+    hover_font_color = "#f8fafc" if theme == 'dark' else "#0f172a"
     
     fig.update_layout(
         template=template,
@@ -317,6 +318,13 @@ def update_graph(predictor, data, theme):
         margin=dict(l=40, r=40, t=40, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor=hover_bgcolor,
+            font_size=13,
+            font_family="Inter",
+            font_color=hover_font_color,
+            bordercolor="rgba(51, 65, 85, 0.6)" if theme == 'dark' else "rgba(203, 213, 225, 0.8)"
+        ),
         transition_duration=500
     )
     

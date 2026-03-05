@@ -11,6 +11,7 @@ import urllib.parse
 import logging
 import requests
 from collections.abc import Mapping
+from dotenv import load_dotenv
 from logic.supabase_client import supabase
 try:
     from econdatapy import read as econdata_read
@@ -42,6 +43,9 @@ SERIES_CONFIG = {
     'ZAR_USD': {'source': 'FRED', 'id': 'DEXSFUS', 'label': 'South African Rand to U.S. Dollar Exchange Rate'}
 }
 
+# Load environment variables explicitly for Render
+load_dotenv()
+
 def get_api_keys():
     """Reads API keys from api_keys.txt."""
     keys = {'FRED': None, 'EconData': None}
@@ -66,8 +70,14 @@ def get_api_keys():
     return keys
 
 API_KEYS = get_api_keys()
-FRED_API_KEY = os.environ.get('FRED_API_KEY', API_KEYS.get('FRED') or 'e9e60c2ca97eac250d9bdb7d22511d58')
-ECONDATA_TOKEN = os.environ.get('ECONDATA_TOKEN', API_KEYS.get('EconData'))
+# Prioritize environment variables, then fallback to api_keys.txt or hardcoded defaults
+FRED_API_KEY = os.environ.get('FRED_API_KEY', os.environ.get('FRED_API', API_KEYS.get('FRED') or 'e9e60c2ca97eac250d9bdb7d22511d58'))
+ECONDATA_TOKEN = (
+    os.environ.get('ECONDATA_TOKEN') or 
+    os.environ.get('ECONDATA_API') or 
+    os.environ.get('ECONDATA_API_KEY') or 
+    API_KEYS.get('EconData')
+)
 
 def _extract_dataframes(payload):
     """Extract DataFrames from nested dict/list payloads."""

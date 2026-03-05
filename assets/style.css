@@ -393,3 +393,70 @@ body {
     color: var(--text-secondary);
     font-size: 0.9rem;
 }
+
+/* Custom styles for dcc.Dropdown in dark/light mode */
+.custom-dropdown.form-input {
+    padding: 0 !important;
+    background-color: transparent !important;
+    border: none !important;
+}
+
+.custom-dropdown .Select-control,
+.custom-dropdown .Select-menu-outer,
+.custom-dropdown .virtualized-select,
+.custom-dropdown .Select-menu,
+.custom-dropdown .Select--single > .Select-control .Select-value,
+.custom-dropdown .Select-placeholder {
+    background-color: var(--input-bg) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+}
+
+.custom-dropdown .Select-value-label {
+    color: var(--text-primary) !important;
+}
+
+.custom-dropdown .Select-placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.6;
+}
+
+.custom-dropdown .Select-arrow {
+    border-top-color: var(--text-secondary) !important;
+}
+
+.custom-dropdown .VirtualizedSelectOption {
+    background-color: var(--input-bg) !important;
+    color: var(--text-primary) !important;
+}
+
+.custom-dropdown .VirtualizedSelectFocusedOption {
+    background-color: rgba(56, 189, 248, 0.1) !important;
+    color: var(--accent) !important;
+}
+
+.custom-dropdown .Select-control {
+    height: 3.5rem !important;
+    border-radius: 0.75rem !important;
+    display: flex !important;
+    align-items: center !important;
+    box-shadow: none !important;
+    border: 1px solid var(--border) !important;
+}
+
+.custom-dropdown .Select-value {
+    padding-left: 0.5rem !important;
+}
+
+.custom-dropdown .Select-menu-outer {
+    border-radius: 0.75rem !important;
+    margin-top: 5px !important;
+    overflow: hidden !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+    z-index: 1000 !important;
+}
+
+.custom-dropdown .VirtualizedSelectOption:hover {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+}

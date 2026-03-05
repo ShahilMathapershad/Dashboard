@@ -8,6 +8,7 @@ python-dotenv
 gunicorn
 supabase
 fredapi
+econdatapy
 yfinance
 requests
 openpyxl
