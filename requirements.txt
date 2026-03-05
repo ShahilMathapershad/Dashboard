@@ -9,3 +9,5 @@ gunicorn
 supabase
 fredapi
 yfinance
+requests
+openpyxl

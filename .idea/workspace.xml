@@ -7,11 +7,6 @@
     <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="h">
       <change beforePath="$PROJECT_DIR$/.cache/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/cache.db" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.output.txt" beforeDir="false" afterPath="$PROJECT_DIR$/.output.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/logic/data_fetcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/logic/data_fetcher.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pages/dashboard.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/dashboard.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_duplicate.py" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -115,7 +110,9 @@
       <workItem from="1772625499436" duration="115000" />
       <workItem from="1772626330457" duration="7128000" />
       <workItem from="1772633496625" duration="55000" />
-      <workItem from="1772633757988" duration="5080000" />
+      <workItem from="1772633757988" duration="5412000" />
+      <workItem from="1772697648029" duration="1306000" />
+      <workItem from="1772705162786" duration="617000" />
     </task>
     <task id="LOCAL-00001" summary="h">
       <option name="closed" value="true" />
@@ -229,7 +226,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772622248489</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL-00015" summary="h">
+      <option name="closed" value="true" />
+      <created>1772639088622</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1772639088622</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -277,6 +282,6 @@
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Dash$app.coverage" NAME="app Coverage Results" MODIFIED="1772054274074" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Dash$data_fetcher.coverage" NAME="data_fetcher Coverage Results" MODIFIED="1772122679581" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
-    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1772638536957" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
+    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1772697652695" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
   </component>
 </project>

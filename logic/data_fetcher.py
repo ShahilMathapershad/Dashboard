@@ -1,13 +1,15 @@
 import pandas as pd
 from fredapi import Fred
-import yfinance as yf
+import argparse
 import os
 import ssl
 import time
 import json
+import re
 import urllib.request
 import urllib.parse
 import logging
+import requests
 from collections.abc import Mapping
 from logic.supabase_client import supabase
 try:
@@ -34,7 +36,7 @@ SERIES_CONFIG = {
     'BUSINESS_CYCLES': {'source': 'ECONDATA', 'id': 'BUSINESS_CYCLES', 'label': 'Business Cycles (EconData)'},
     'SA_CPI_ECON': {'source': 'ECONDATA', 'id': 'SARB_6006K', 'label': 'CPI for South Africa (EconData)'},
     'VIX': {'source': 'FRED', 'id': 'VIXCLS', 'label': 'CBOE Volatility Index (VIX)'},
-    'GOLD_PRICE': {'source': 'YAHOO', 'id': 'GLD', 'label': 'SPDR Gold Shares (GLD) Monthly Mean Close (Yahoo Finance)'},
+    'GOLD_PRICE': {'source': 'WORLD_BANK', 'id': 'CMO-Historical-Data-Monthly.xlsx', 'label': 'World Bank Commodity Markets Monthly Gold Price'},
     'BRENT_OIL_PRICE': {'source': 'FRED', 'id': 'POILBREUSDM', 'label': 'Global Price of Brent Crude'},
     'US_CPI': {'source': 'FRED', 'id': 'CPIAUCSL', 'label': 'Consumer Price Index for All Urban Consumers (USA)'},
     'ZAR_USD': {'source': 'FRED', 'id': 'DEXSFUS', 'label': 'South African Rand to U.S. Dollar Exchange Rate'}
@@ -287,47 +289,99 @@ def fetch_fred_data(series_dict, api_key=None, progress_callback=None):
     combined_df = pd.concat(df_list, axis=1, sort=True)
     return combined_df
 
-def fetch_yahoo_gold_data(ticker='GLD', start_date='2010-01-01', end_date=None):
-    """Fetches GLD from Yahoo and returns monthly mean of daily close prices."""
+def _get_world_bank_gold_excel_url():
+    """Scrape the World Bank commodity markets page for the latest historical data workbook URL."""
+    page_url = "https://www.worldbank.org/en/research/commodity-markets"
+    logger.info("Fetching World Bank commodity markets page for latest gold workbook link.")
+
+    try:
+        response = requests.get(page_url, timeout=30)
+        response.raise_for_status()
+        html_content = response.text
+    except Exception as e:
+        logger.error(f"Failed to load World Bank commodity markets page: {e}")
+        return None
+
+    match = re.search(
+        r'href=["\']([^"\']*CMO-Historical-Data-Monthly\.xlsx(?:\?[^"\']*)?)["\']',
+        html_content,
+        flags=re.IGNORECASE
+    )
+    if not match:
+        logger.error("Could not find the live CMO-Historical-Data-Monthly.xlsx link on World Bank page.")
+        return None
+
+    live_url = match.group(1).strip()
+    if live_url.startswith("//"):
+        live_url = f"https:{live_url}"
+    elif not live_url.startswith("http"):
+        if live_url.startswith("/"):
+            live_url = f"https://thedocs.worldbank.org{live_url}"
+        else:
+            live_url = urllib.parse.urljoin(page_url, live_url)
+
+    logger.info(f"Resolved World Bank workbook URL: {live_url}")
+    return live_url
+
+
+def fetch_world_bank_gold_data(start_date='2010-01-01', end_date=None):
+    """Fetch GOLD_PRICE from World Bank monthly commodity workbook (Monthly Prices > Gold)."""
     if end_date is None:
         end_date = pd.Timestamp.now().strftime('%Y-%m-%d')
 
-    logger.info(f"Fetching Yahoo Finance data for {ticker} from {start_date} to {end_date}.")
+    live_url = _get_world_bank_gold_excel_url()
+    if not live_url:
+        return pd.Series(dtype='float64')
+
+    logger.info(f"Loading World Bank monthly prices workbook from {live_url}")
     try:
-        data = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
+        df = pd.read_excel(live_url, sheet_name="Monthly Prices", header=4)
     except Exception as e:
-        logger.error(f"Error fetching Yahoo data for {ticker}: {e}")
+        logger.error(f"Failed to parse World Bank monthly workbook: {e}")
         return pd.Series(dtype='float64')
 
-    if data is None or data.empty:
-        logger.warning(f"Yahoo returned no data for {ticker}.")
+    if df is None or df.empty:
+        logger.warning("World Bank workbook returned empty data.")
         return pd.Series(dtype='float64')
 
-    close_series = data.get('Close')
-    if close_series is None:
-        logger.warning(f"Yahoo data for {ticker} is missing Close.")
+    df.columns = df.columns.astype(str).str.strip()
+    df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
+
+    gold_col = None
+    for col in df.columns:
+        if str(col).strip().lower() == 'gold':
+            gold_col = col
+            break
+    if gold_col is None:
+        logger.error("Gold column not found in World Bank monthly workbook.")
         return pd.Series(dtype='float64')
 
-    if isinstance(close_series, pd.DataFrame):
-        if ticker in close_series.columns:
-            close_series = close_series[ticker]
-        else:
-            close_series = close_series.iloc[:, 0]
+    df_gold = df[['Date', gold_col]].copy()
+    # Drop the first metadata/unit row and any trailing footnotes.
+    df_gold = df_gold.iloc[1:]
+    df_gold = df_gold.dropna(subset=[gold_col])
+    df_gold['Date'] = df_gold['Date'].astype(str).str.strip().str.replace('M', '-', regex=False)
+    df_gold[gold_col] = pd.to_numeric(df_gold[gold_col], errors='coerce')
+    df_gold['Date'] = pd.to_datetime(df_gold['Date'], errors='coerce')
+    df_gold = df_gold.dropna(subset=['Date', gold_col]).sort_values('Date')
 
-    close_series = pd.to_numeric(close_series, errors='coerce').dropna()
-    if close_series.empty:
-        logger.warning(f"Yahoo Close series is empty for {ticker} after cleaning.")
+    if df_gold.empty:
+        logger.warning("World Bank gold series is empty after cleaning.")
         return pd.Series(dtype='float64')
 
-    # User requested monthly mean using daily observations.
-    try:
-        monthly_gold = close_series.resample('ME').mean()
-    except ValueError:
-        monthly_gold = close_series.resample('M').mean()
-
+    monthly_gold = df_gold.set_index('Date')[gold_col]
+    monthly_gold = _to_monthly(monthly_gold)
+    monthly_gold = monthly_gold.loc[start_date:end_date]
     monthly_gold.name = 'GOLD_PRICE'
-    logger.info(f"Fetched {len(monthly_gold)} monthly GOLD_PRICE observations from Yahoo ({ticker}).")
+
+    logger.info(f"Fetched {len(monthly_gold)} monthly GOLD_PRICE observations from World Bank.")
     return monthly_gold
+
+
+def fetch_yahoo_gold_data(ticker='GLD', start_date='2010-01-01', end_date=None):
+    """Backward-compatible alias: GOLD_PRICE now comes from World Bank monthly data."""
+    logger.warning("fetch_yahoo_gold_data is deprecated; using World Bank monthly gold data instead.")
+    return fetch_world_bank_gold_data(start_date=start_date, end_date=end_date)
 
 def process_data(final_df, start_date='2000-01-01', end_date=None):
     """Processes the raw data (sorting, resampling, filling, etc.)."""
@@ -451,6 +505,63 @@ def save_to_supabase(df):
         logger.error(f"Error saving to Supabase: {e}")
         return None
 
+
+def replace_gold_price_column_in_supabase(gold_series):
+    """Upsert only Date + GOLD_PRICE into Supabase, replacing GOLD_PRICE for existing dates."""
+    if gold_series is None or gold_series.empty:
+        logger.warning("No GOLD_PRICE series provided for Supabase replacement.")
+        return None
+
+    if not supabase:
+        logger.error("Supabase client not initialized.")
+        return None
+
+    gold_df = gold_series.dropna().to_frame(name='GOLD_PRICE').reset_index()
+    gold_df.rename(columns={gold_df.columns[0]: 'Date'}, inplace=True)
+    gold_df['Date'] = pd.to_datetime(gold_df['Date'], errors='coerce')
+    gold_df['DateKey'] = gold_df['Date'].dt.strftime('%Y-%m-%d')
+    gold_df['Date'] = gold_df['Date'].dt.strftime('%Y-%m-%dT00:00:00+00:00')
+    gold_df['GOLD_PRICE'] = pd.to_numeric(gold_df['GOLD_PRICE'], errors='coerce')
+    gold_df = gold_df.dropna(subset=['Date', 'DateKey', 'GOLD_PRICE'])
+
+    records = gold_df.to_dict('records')
+    if not records:
+        logger.warning("No valid GOLD_PRICE records to upsert.")
+        return None
+
+    # Keep updates scoped to rows that already exist in the data table.
+    try:
+        existing_resp = supabase.table('data').select('Date').gte('Date', '1900-01-01').execute()
+        existing_rows = existing_resp.data or []
+        existing_dates = {
+            str(row.get('Date'))[:10]
+            for row in existing_rows
+            if row.get('Date')
+        }
+        if existing_dates:
+            records = [row for row in records if row['DateKey'] in existing_dates]
+    except Exception as e:
+        logger.warning(f"Could not prefetch existing dates for GOLD_PRICE replacement: {e}")
+
+    if not records:
+        logger.warning("No matching Supabase dates found for GOLD_PRICE replacement.")
+        return None
+
+    for row in records:
+        row.pop('DateKey', None)
+
+    logger.info(f"Replacing GOLD_PRICE in Supabase for {len(records)} dates.")
+    try:
+        chunk_size = 500
+        for i in range(0, len(records), chunk_size):
+            chunk = records[i:i + chunk_size]
+            supabase.table('data').upsert(chunk).execute()
+        logger.info("Successfully replaced GOLD_PRICE column in Supabase.")
+        return {"updated_rows": len(records)}
+    except Exception as e:
+        logger.error(f"Error replacing GOLD_PRICE in Supabase: {e}")
+        return None
+
 def fetch_and_save_data():
     """Main function to run the fetch, process, and save workflow."""
     logger.info("Starting main data fetch and save workflow.")
@@ -470,18 +581,17 @@ def fetch_and_save_data():
     logger.info(f"Fetching {len(fred_series)} series from FRED.")
     raw_df = fetch_fred_data(fred_series)
 
-    # Fetch GOLD_PRICE from Yahoo Finance (GLD), monthly mean close.
-    yahoo_gold = fetch_yahoo_gold_data(
-        ticker=SERIES_CONFIG['GOLD_PRICE']['id'],
-        start_date='2010-01-01'
-    )
-    if not yahoo_gold.empty:
-        raw_df['GOLD_PRICE'] = yahoo_gold
+    # Fetch GOLD_PRICE from World Bank monthly commodity data.
+    wb_gold = fetch_world_bank_gold_data(start_date='2010-01-01')
+    if not wb_gold.empty:
+        # Use concat instead of assignment to allow the index to expand to the latest available data.
+        raw_df = pd.concat([raw_df, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
     else:
-        logger.warning("GOLD_PRICE could not be loaded from Yahoo Finance.")
+        logger.warning("GOLD_PRICE could not be loaded from World Bank.")
     
     if not econ_business_cycles.empty:
-        raw_df['BUSINESS_CYCLES'] = econ_business_cycles
+        # Use concat instead of assignment to ensure index alignment.
+        raw_df = pd.concat([raw_df, econ_business_cycles.to_frame(name='BUSINESS_CYCLES')], axis=1)
     
     if raw_df.empty:
         logger.error("Failed to fetch any data from FRED.")
@@ -494,7 +604,28 @@ def fetch_and_save_data():
     logger.info(f"Columns included: {processed_df.columns.tolist()}")
     
     logger.info("Saving to Supabase.")
-    return save_to_supabase(processed_df)
+    save_resp = save_to_supabase(processed_df)
+
+    # Explicitly replace only GOLD_PRICE in Supabase with the latest World Bank series.
+    replace_gold_price_column_in_supabase(wb_gold)
+    return save_resp
 
 if __name__ == "__main__":
-    fetch_and_save_data()
+    parser = argparse.ArgumentParser(description="Data fetch and Supabase sync")
+    parser.add_argument(
+        "--replace-gold-only",
+        action="store_true",
+        help="Fetch latest World Bank gold series and replace only GOLD_PRICE in Supabase."
+    )
+    parser.add_argument(
+        "--start-date",
+        default="2010-01-01",
+        help="Start date for gold replacement mode (YYYY-MM-DD)."
+    )
+    args = parser.parse_args()
+
+    if args.replace_gold_only:
+        gold_series = fetch_world_bank_gold_data(start_date=args.start_date)
+        replace_gold_price_column_in_supabase(gold_series)
+    else:
+        fetch_and_save_data()

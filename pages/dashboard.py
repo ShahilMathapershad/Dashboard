@@ -1,7 +1,7 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State, set_props
 import dash_bootstrap_components as dbc
-from logic.data_fetcher import fetch_fred_data, fetch_econdata_data, fetch_yahoo_gold_data, process_data, save_to_supabase, FRED_API_KEY, SERIES_CONFIG
+from logic.data_fetcher import fetch_fred_data, fetch_econdata_data, fetch_world_bank_gold_data, process_data, save_to_supabase, replace_gold_price_column_in_supabase, FRED_API_KEY, SERIES_CONFIG
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -209,16 +209,15 @@ def fetch_data(set_progress, trigger_value):
             
             raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=update_progress)
 
-            # Fetch GOLD_PRICE from Yahoo Finance (GLD), monthly mean close.
-            yahoo_gold = fetch_yahoo_gold_data(
-                ticker=SERIES_CONFIG['GOLD_PRICE']['id'],
-                start_date='2010-01-01'
-            )
-            if not yahoo_gold.empty:
-                raw['GOLD_PRICE'] = yahoo_gold
+            # Fetch GOLD_PRICE from World Bank monthly commodity data.
+            wb_gold = fetch_world_bank_gold_data(start_date='2010-01-01')
+            if not wb_gold.empty:
+                # Use concat instead of assignment to allow the index to expand to the latest available data.
+                raw = pd.concat([raw, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
             
             if not econ_business_cycles.empty:
-                raw['BUSINESS_CYCLES'] = econ_business_cycles
+                # Use concat instead of assignment to ensure index alignment.
+                raw = pd.concat([raw, econ_business_cycles.to_frame(name='BUSINESS_CYCLES')], axis=1)
             
             if raw.empty:
                 print("DEBUG: raw_df is empty")
@@ -237,6 +236,7 @@ def fetch_data(set_progress, trigger_value):
             try:
                 print("DEBUG: Attempting to save to Supabase...")
                 save_to_supabase(processed)
+                replace_gold_price_column_in_supabase(wb_gold)
                 print("DEBUG: Save to Supabase successful")
             except Exception as e:
                 # Non-fatal: show message but still display data
