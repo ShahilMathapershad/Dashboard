@@ -73,6 +73,23 @@ def update_theme(n_clicks, stored_theme):
     return class_name, icon, theme
 
 
+# Clientside callback to sync theme to body class for portals (like dropdown menus)
+app.clientside_callback(
+    """
+    function(theme) {
+        if (theme === 'light') {
+            document.body.classList.add('light-theme');
+        } else {
+            document.body.classList.remove('light-theme');
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('theme-switch-button', 'id'), # Dummy output
+    Input('theme-store', 'data'),
+)
+
+
 # Auth guard: separate callbacks for clearer logic and to avoid circular loops
 @callback(
     Output('url', 'pathname', allow_duplicate=True),

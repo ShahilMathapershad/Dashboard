@@ -32,6 +32,14 @@
     --gradient-end: #f8fafc;
 }
 
+/* Logo Toggling */
+/* Dark theme (default): show light logo on dark background */
+.logo-light { display: block !important; }
+.logo-dark { display: none !important; }
+/* Light theme: show dark logo on light background */
+.light-theme .logo-light { display: none !important; }
+.light-theme .logo-dark { display: block !important; }
+
 body {
     background-color: var(--bg-dark);
     color: var(--text-primary);
@@ -186,18 +194,32 @@ body {
     font-size: 0.85rem;
 }
 
-#fetch-progress-bar .progress-bar {
-    background: var(--btn-bg) !important;
-    box-shadow: 0 0 10px var(--accent-glow);
-    transition: width 0.4s ease-in-out;
+/* Progress Bar Enhancements */
+#progress-container {
+    background: var(--input-bg);
+    padding: 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--border);
+    animation: slideInDown 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-#progress-container {
-    background: var(--card-bg);
-    padding: 1.5rem;
-    border-radius: 1rem;
-    border: 1px solid var(--border);
-    animation: fadeIn 0.5s ease;
+@keyframes slideInDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+#fetch-progress-bar {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border-radius: 10px !important;
+    overflow: hidden;
+    height: 8px !important;
+}
+
+#fetch-progress-bar .progress-bar {
+    background: var(--btn-bg) !important;
+    box-shadow: 0 0 15px var(--accent-glow);
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    border-radius: 10px !important;
 }
 
 #progress-percentage {
@@ -389,74 +411,373 @@ body {
 
 .api-key-input label {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: 0.95rem;
+    font-weight: 500;
 }
 
-/* Custom styles for dcc.Dropdown in dark/light mode */
+/* Custom styles for dcc.Dropdown in dark/light mode - DEPRECATED in favour of custom-coded dropdown */
+.custom-dropdown-root {
+    position: relative;
+    width: 100%;
+    margin-bottom: 1.25rem;
+    font-family: inherit;
+    z-index: 1000;
+    isolation: isolate;
+}
+
+.custom-dropdown-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: transparent;
+}
+
+.custom-dropdown-control {
+    width: 100%;
+    background-color: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.75rem 1.25rem;
+    font-size: 1rem;
+    border-radius: 0.75rem;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    user-select: none;
+    text-align: left;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.custom-dropdown-control:hover {
+    border-color: rgba(56, 189, 248, 0.4);
+}
+
+.custom-dropdown-control:focus-visible {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-glow);
+    outline: none;
+}
+
+.custom-dropdown-selected-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-right: 0.75rem;
+}
+
+.custom-dropdown-arrow {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    transition: transform 0.3s ease;
+}
+
+.custom-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    left: 0;
+    right: 0;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    z-index: 1001;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    animation: slideInDown 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    max-height: 18rem;
+    overflow-y: auto;
+}
+
+.custom-dropdown-option {
+    padding: 0.875rem 1.25rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.light-theme .custom-dropdown-option {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.custom-dropdown-option:last-child {
+    border-bottom: none;
+}
+
+.custom-dropdown-option:hover {
+    background-color: rgba(56, 189, 248, 0.1);
+    color: var(--accent);
+}
+
+.custom-dropdown-option.active {
+    background-color: var(--accent);
+    color: white;
+}
+
+.custom-dropdown-check {
+    opacity: 0;
+    font-weight: 700;
+}
+
+.custom-dropdown-option.active .custom-dropdown-check {
+    opacity: 1;
+}
+
+.custom-dropdown-empty {
+    padding: 0.875rem 1.25rem;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+/* Original dcc.Dropdown styles kept for backward compatibility if needed elsewhere */
 .custom-dropdown.form-input {
     padding: 0 !important;
     background-color: transparent !important;
     border: none !important;
+    height: auto !important;
 }
 
-.custom-dropdown .Select-control,
-.custom-dropdown .Select-menu-outer,
-.custom-dropdown .virtualized-select,
-.custom-dropdown .Select-menu,
-.custom-dropdown .Select--single > .Select-control .Select-value,
-.custom-dropdown .Select-placeholder {
+/* Main Control Box */
+.custom-dropdown .Select-control {
     background-color: var(--input-bg) !important;
-    color: var(--text-primary) !important;
-    border-color: var(--border) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 0.75rem !important;
+    height: 3.5rem !important;
+    display: flex !important;
+    align-items: center !important;
+    transition: all 0.25s ease !important;
+    box-shadow: none !important;
 }
 
+.custom-dropdown .Select-control:hover {
+    border-color: rgba(56, 189, 248, 0.4) !important;
+}
+
+.custom-dropdown .is-focused > .Select-control {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 4px var(--accent-glow) !important;
+}
+
+/* Placeholder & Selected Value */
+.custom-dropdown .Select-placeholder,
+.custom-dropdown .Select-value,
 .custom-dropdown .Select-value-label {
     color: var(--text-primary) !important;
+    padding-left: 0.75rem !important;
+    font-size: 1rem !important;
+    line-height: 3.5rem !important;
 }
 
 .custom-dropdown .Select-placeholder {
     color: var(--text-secondary) !important;
-    opacity: 0.6;
+    opacity: 0.5;
+}
+
+/* Search Input */
+.custom-dropdown .Select-input {
+    height: 3.5rem !important;
+    padding-left: 0.75rem !important;
+    background-color: transparent !important;
+}
+
+.custom-dropdown .Select-input > input {
+    color: var(--text-primary) !important;
+    font-family: inherit !important;
+    padding: 1rem 0 !important;
+    background: transparent !important;
+}
+
+.custom-dropdown .Select-input > input::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.5;
+}
+
+/* Dropdown Menu (The Popup) */
+.custom-dropdown .Select-menu-outer {
+    background-color: var(--bg-dark) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 0.75rem !important;
+    margin-top: 0.5rem !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+    overflow: hidden !important;
+    z-index: 1001 !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+}
+
+/* Option Styles */
+.custom-dropdown .VirtualizedSelectOption {
+    background-color: transparent !important;
+    color: var(--text-primary) !important;
+    padding: 0.75rem 1.25rem !important;
+    transition: all 0.2s ease !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+}
+
+.light-theme .custom-dropdown .VirtualizedSelectOption {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.03) !important;
+}
+
+.custom-dropdown .VirtualizedSelectFocusedOption {
+    background-color: var(--accent-glow) !important;
+    color: var(--accent) !important;
+}
+
+.custom-dropdown .VirtualizedSelectOption:hover {
+    background-color: rgba(56, 189, 248, 0.1) !important;
+}
+
+/* Ensure selected option in list is also visible */
+.custom-dropdown .Select-option.is-selected {
+    background-color: var(--accent) !important;
+    color: white !important;
+}
+
+/* Arrow & Multi-select/Clear buttons */
+.custom-dropdown .Select-arrow-zone {
+    padding-right: 1rem !important;
 }
 
 .custom-dropdown .Select-arrow {
     border-top-color: var(--text-secondary) !important;
+    border-width: 6px 6px 0 !important;
 }
 
-.custom-dropdown .VirtualizedSelectOption {
-    background-color: var(--input-bg) !important;
-    color: var(--text-primary) !important;
+.custom-dropdown .is-open .Select-arrow {
+    border-top-color: var(--accent) !important;
 }
 
-.custom-dropdown .VirtualizedSelectFocusedOption {
-    background-color: rgba(56, 189, 248, 0.1) !important;
-    color: var(--accent) !important;
+.custom-dropdown .Select-clear-zone {
+    color: var(--text-secondary) !important;
 }
 
-.custom-dropdown .Select-control {
-    height: 3.5rem !important;
-    border-radius: 0.75rem !important;
-    display: flex !important;
-    align-items: center !important;
-    box-shadow: none !important;
-    border: 1px solid var(--border) !important;
+.custom-dropdown .Select-clear-zone:hover {
+    color: #f43f5e !important;
 }
 
-.custom-dropdown .Select-value {
-    padding-left: 0.5rem !important;
+/* Animation utilities */
+.page-transition {
+    animation: slideUpFade 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.custom-dropdown .Select-menu-outer {
-    border-radius: 0.75rem !important;
-    margin-top: 5px !important;
-    overflow: hidden !important;
-    border: 1px solid var(--border) !important;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
-    z-index: 1000 !important;
+@keyframes slideUpFade {
+    0% {
+        opacity: 0;
+        transform: translateY(15px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
-.custom-dropdown .VirtualizedSelectOption:hover {
-    background-color: rgba(255, 255, 255, 0.05) !important;
+/* Global Dash Loader (Top Progress Bar) */
+#_dash-loading {
+    display: block !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 4px !important;
+    z-index: 10001 !important;
+    background: transparent !important;
+    pointer-events: none !important;
+    animation: fadeIn 0.4s ease forwards !important;
+}
+
+#_dash-loading::after {
+    content: "" !important;
+    display: block !important;
+    height: 100% !important;
+    width: 0 !important;
+    background: var(--btn-bg) !important;
+    box-shadow: 0 0 10px var(--accent-glow) !important;
+    animation: loadingBar 2s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+}
+
+@keyframes loadingBar {
+    0% { width: 0; left: 0; }
+    50% { width: 70%; left: 15%; }
+    100% { width: 0; left: 100%; }
+}
+
+/* Shimmer/Skeleton loader */
+.shimmer-card {
+    background: var(--card-bg);
+    border-radius: 1rem;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--border);
+}
+
+.shimmer-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.05) 50%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmerEffect 1.5s infinite linear;
+}
+
+.light-theme .shimmer-card::before {
+    background: linear-gradient(
+        90deg,
+        rgba(0, 0, 0, 0) 0%,
+        rgba(0, 0, 0, 0.03) 50%,
+        rgba(0, 0, 0, 0) 100%
+    );
+}
+
+@keyframes shimmerEffect {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* Dedicated Top Progress Bar for Data Fetching */
+.fetch-loading-bar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 4px !important;
+    z-index: 10002 !important;
+    background: transparent !important;
+    pointer-events: none !important;
+    animation: fadeIn 0.4s ease forwards !important;
+}
+
+.fetch-loading-bar::after {
+    content: "" !important;
+    display: block !important;
+    height: 100% !important;
+    width: 0 !important;
+    background: var(--btn-bg) !important;
+    box-shadow: 0 0 10px var(--accent-glow) !important;
+    animation: loadingBar 2s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+}
+
+/* Smooth content transitions */
+.fade-in {
+    animation: fadeIn 0.5s ease forwards;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }

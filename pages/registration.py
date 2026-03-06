@@ -8,19 +8,22 @@ def layout():
     return html.Div([
         html.Div([
             html.Div([
-                html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-img'),
-            ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
-            html.H2("Create Account", className='login-title'),
-            dcc.Input(id='reg-username', type='text', placeholder='Username', className='form-input',
-                      autoComplete='off'),
-            dcc.Input(id='reg-password', type='password', placeholder='Password', className='form-input'),
-            html.Button('Register', id='register-button', n_clicks=0, className='login-button'),
-            html.Div(id='register-output', className='login-error'),
-            html.Div([
-                html.A("Back to Sign In", href="/",
-                       style={'color': 'var(--accent)', 'fontSize': '0.9rem', 'textDecoration': 'none'})
-            ], style={'textAlign': 'center', 'marginTop': '1.5rem'})
-        ], className='login-card')
+                html.Div([
+                    html.Img(src=dash.get_asset_url('logo_light.svg'), className='logo-img logo-light'),
+                    html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-img logo-dark'),
+                ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
+                html.H2("Create Account", className='login-title'),
+                dcc.Input(id='reg-username', type='text', placeholder='Username', className='form-input',
+                          autoComplete='off'),
+                dcc.Input(id='reg-password', type='password', placeholder='Password', className='form-input'),
+                html.Button('Register', id='register-button', n_clicks=0, className='login-button'),
+                html.Div(id='register-output', className='login-error'),
+                html.Div([
+                    html.A("Back to Sign In", href="/",
+                           style={'color': 'var(--accent)', 'fontSize': '0.9rem', 'textDecoration': 'none'})
+                ], style={'textAlign': 'center', 'marginTop': '1.5rem'})
+            ], className='login-card')
+        ], className='page-transition')
     ], className='login-container')
 
 

@@ -6,9 +6,15 @@
   <component name="ChangeListManager">
     <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="h">
       <change beforePath="$PROJECT_DIR$/.cache/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/cache.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.output.txt" beforeDir="false" afterPath="$PROJECT_DIR$/.output.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api_keys.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api_keys.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/assets/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/assets/style.css" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/logic/data_fetcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/logic/data_fetcher.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pages/dashboard.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/dashboard.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pages/login.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/login.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pages/registration.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/registration.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -116,7 +122,9 @@
       <workItem from="1772633757988" duration="5412000" />
       <workItem from="1772697648029" duration="1306000" />
       <workItem from="1772705162786" duration="617000" />
-      <workItem from="1772706948217" duration="2518000" />
+      <workItem from="1772706948217" duration="4481000" />
+      <workItem from="1772734278445" duration="246000" />
+      <workItem from="1772792039631" duration="4388000" />
     </task>
     <task id="LOCAL-00001" summary="h">
       <option name="closed" value="true" />
@@ -246,7 +254,39 @@
       <option name="project" value="LOCAL" />
       <updated>1772707945164</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL-00017" summary="h">
+      <option name="closed" value="true" />
+      <created>1772709788612</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1772709788612</updated>
+    </task>
+    <task id="LOCAL-00018" summary="h">
+      <option name="closed" value="true" />
+      <created>1772710084850</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1772710084850</updated>
+    </task>
+    <task id="LOCAL-00019" summary="h">
+      <option name="closed" value="true" />
+      <created>1772710758915</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1772710758915</updated>
+    </task>
+    <task id="LOCAL-00020" summary="h">
+      <option name="closed" value="true" />
+      <created>1772711324120</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1772711324120</updated>
+    </task>
+    <option name="localTasksCounter" value="21" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -294,6 +334,6 @@
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Dash$app.coverage" NAME="app Coverage Results" MODIFIED="1772054274074" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Dash$data_fetcher.coverage" NAME="data_fetcher Coverage Results" MODIFIED="1772707608345" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
-    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1772708171779" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
+    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1772796414754" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
   </component>
 </project>

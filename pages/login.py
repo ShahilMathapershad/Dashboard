@@ -9,19 +9,22 @@ def layout():
     return html.Div([
         html.Div([
             html.Div([
-                html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-img'),
-            ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
-            html.H2("Welcome Back", className='login-title'),
-            dcc.Input(id='username', type='text', placeholder='Username', className='form-input', autoComplete='off'),
-            dcc.Input(id='password', type='password', placeholder='Password', className='form-input'),
-            html.Button('Sign In', id='login-button', n_clicks=0, className='login-button'),
-            html.Div(id='login-output', className='login-error'),
-            html.Div([
-                html.Span("Don't have an account? ", style={'color': 'var(--text-secondary)', 'fontSize': '0.9rem'}),
-                html.A("Register here", href="/registration",
-                       style={'color': 'var(--accent)', 'fontSize': '0.9rem', 'textDecoration': 'none'})
-            ], style={'textAlign': 'center', 'marginTop': '1.5rem'})
-        ], className='login-card')
+                html.Div([
+                    html.Img(src=dash.get_asset_url('logo_light.svg'), className='logo-img logo-light'),
+                    html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-img logo-dark'),
+                ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
+                html.H2("Welcome Back", className='login-title'),
+                dcc.Input(id='username', type='text', placeholder='Username', className='form-input', autoComplete='off'),
+                dcc.Input(id='password', type='password', placeholder='Password', className='form-input'),
+                html.Button('Sign In', id='login-button', n_clicks=0, className='login-button'),
+                html.Div(id='login-output', className='login-error'),
+                html.Div([
+                    html.Span("Don't have an account? ", style={'color': 'var(--text-secondary)', 'fontSize': '0.9rem'}),
+                    html.A("Register here", href="/registration",
+                           style={'color': 'var(--accent)', 'fontSize': '0.9rem', 'textDecoration': 'none'})
+                ], style={'textAlign': 'center', 'marginTop': '1.5rem'})
+            ], className='login-card')
+        ], className='page-transition')
     ], className='login-container')
 
 

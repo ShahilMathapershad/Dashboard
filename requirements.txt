@@ -1,4 +1,3 @@
---extra-index-url https://test.pypi.org/simple/
 dash
 dash-bootstrap-components
 diskcache
@@ -9,8 +8,6 @@ python-dotenv
 gunicorn
 supabase
 fredapi
-econdatapy
-pyjwt
 yfinance
 requests
 openpyxl

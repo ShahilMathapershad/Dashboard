@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from fredapi import Fred
 import argparse
 import os
@@ -10,18 +11,11 @@ import urllib.request
 import urllib.parse
 import logging
 import requests
-from collections.abc import Mapping
 from dotenv import load_dotenv
 from logic.supabase_client import supabase
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("DataFetcher")
-
-try:
-    from econdatapy import read as econdata_read
-except Exception as e:
-    logger.warning(f"Failed to import econdatapy: {e}")
-    econdata_read = None
 
 # Bypass SSL verification for FRED API calls if needed
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -35,12 +29,11 @@ SERIES_CONFIG = {
     '10_YEAR_BOND_RATES(SA)': {'source': 'FRED', 'id': 'IRLTLT01ZAM156N', 'label': '10-Year Bond Rate (South Africa)'},
     'USA_CPI': {'source': 'FRED', 'id': 'CPALTT01USM659N', 'label': 'CPI for All Items for USA'},
     'SA_CPI_FRED': {'source': 'FRED', 'id': 'CPALTT01ZAM659N', 'label': 'CPI for All Items for South Africa (FRED)'},
-    'BUSINESS_CYCLES': {'source': 'ECONDATA', 'id': 'BUSINESS_CYCLES', 'label': 'Business Cycles (EconData)'},
-    'SA_CPI_ECON': {'source': 'ECONDATA', 'id': 'SARB_6006K', 'label': 'CPI for South Africa (EconData)'},
     'VIX': {'source': 'FRED', 'id': 'VIXCLS', 'label': 'CBOE Volatility Index (VIX)'},
     'GOLD_PRICE': {'source': 'WORLD_BANK', 'id': 'CMO-Historical-Data-Monthly.xlsx', 'label': 'World Bank Commodity Markets Monthly Gold Price'},
     'BRENT_OIL_PRICE': {'source': 'FRED', 'id': 'POILBREUSDM', 'label': 'Global Price of Brent Crude'},
     'US_CPI': {'source': 'FRED', 'id': 'CPIAUCSL', 'label': 'Consumer Price Index for All Urban Consumers (USA)'},
+    'SA_INFLATION': {'source': 'HARDCODED', 'id': 'SA_CPI_INDEX', 'label': 'South African Headline CPI Index'},
     'ZAR_USD': {'source': 'FRED', 'id': 'DEXSFUS', 'label': 'South African Rand to U.S. Dollar Exchange Rate'}
 }
 
@@ -49,7 +42,7 @@ load_dotenv()
 
 def get_api_keys():
     """Reads API keys from api_keys.txt."""
-    keys = {'FRED': None, 'EconData': None}
+    keys = {'FRED': None}
     try:
         # Try different paths to find api_keys.txt
         possible_paths = [
@@ -73,28 +66,7 @@ def get_api_keys():
 API_KEYS = get_api_keys()
 # Prioritize environment variables, then fallback to api_keys.txt or hardcoded defaults
 FRED_API_KEY = os.environ.get('FRED_API_KEY', os.environ.get('FRED_API', API_KEYS.get('FRED') or 'e9e60c2ca97eac250d9bdb7d22511d58'))
-ECONDATA_TOKEN = (
-    os.environ.get('ECONDATA_TOKEN') or 
-    os.environ.get('ECONDATA_API') or 
-    os.environ.get('ECONDATA_API_KEY') or 
-    API_KEYS.get('EconData')
-)
 
-def _extract_dataframes(payload):
-    """Extract DataFrames from nested dict/list payloads."""
-    if isinstance(payload, pd.DataFrame):
-        return [payload]
-    if isinstance(payload, Mapping):
-        dfs = []
-        for value in payload.values():
-            dfs.extend(_extract_dataframes(value))
-        return dfs
-    if isinstance(payload, (list, tuple)):
-        dfs = []
-        for value in payload:
-            dfs.extend(_extract_dataframes(value))
-        return dfs
-    return []
 
 def _to_monthly(series):
     """Normalize any date-indexed series to month-end frequency."""
@@ -107,182 +79,7 @@ def _to_monthly(series):
         monthly = series.resample('M').last()
     return monthly.dropna()
 
-def _series_from_dataframe(df):
-    """Build a date-indexed numeric series from an arbitrary EconData table."""
-    if df is None or df.empty:
-        return pd.Series(dtype='float64')
-
-    date_col_candidates = ['date', 'period', 'time_period', 'obs_time', 'timestamp']
-    value_col_candidates = ['value', 'obs_value', 'observation', 'price', 'index']
-
-    columns_lower = {str(col).lower(): col for col in df.columns}
-
-    date_col = None
-    for name in date_col_candidates:
-        if name in columns_lower:
-            date_col = columns_lower[name]
-            break
-
-    if date_col is None:
-        return pd.Series(dtype='float64')
-
-    value_col = None
-    for name in value_col_candidates:
-        if name in columns_lower:
-            value_col = columns_lower[name]
-            break
-
-    if value_col is None:
-        best_col = None
-        best_count = 0
-        for col in df.columns:
-            if col == date_col:
-                continue
-            numeric_values = pd.to_numeric(df[col], errors='coerce')
-            valid_count = int(numeric_values.notna().sum())
-            if valid_count > best_count:
-                best_count = valid_count
-                best_col = col
-        value_col = best_col
-
-    if value_col is None:
-        return pd.Series(dtype='float64')
-
-    parsed_dates = pd.to_datetime(df[date_col], errors='coerce')
-    parsed_values = pd.to_numeric(df[value_col], errors='coerce')
-    series_df = pd.DataFrame({'date': parsed_dates, 'value': parsed_values}).dropna(subset=['date', 'value'])
-    if series_df.empty:
-        return pd.Series(dtype='float64')
-
-    series_df = series_df.sort_values('date')
-    series_df.set_index('date', inplace=True)
-    return series_df['value']
-
-def _fetch_econdatapy_data(series_id, token):
-    """Fetch EconData series via econdatapy, following the Colab workflow."""
-    if econdata_read is None:
-        logger.debug("EconData SDK (econdatapy) not available.")
-        return pd.Series(dtype='float64')
-
-    logger.info(f"Initializing EconData SDK with token length {len(token) if token else 0}.")
-    bearer = token if token.startswith('Bearer ') else f"Bearer {token}"
-    econdata_read.econdata_token = bearer
-
-    attempts = [(series_id, {})]
-    if series_id != 'BUSINESS_CYCLES':
-        attempts.append(('BUSINESS_CYCLES', {'series_key': series_id}))
-
-    for dataset_id, params in attempts:
-        try:
-            logger.info(f"Attempting EconData SDK fetch: dataset={dataset_id}, params={params}")
-            raw = econdata_read.dataset(dataset_id, **params)
-            dataframes = _extract_dataframes(raw)
-            if not dataframes:
-                logger.warning(f"EconData SDK returned no tables for dataset={dataset_id}")
-                continue
-
-            parsed_series = []
-            for table in dataframes:
-                series = _series_from_dataframe(table)
-                if not series.empty:
-                    parsed_series.append(series)
-
-            if not parsed_series:
-                logger.warning(f"EconData SDK tables had no parsable date/value series for dataset={dataset_id}")
-                continue
-
-            best_series = max(parsed_series, key=len)
-            monthly_series = _to_monthly(best_series)
-            if not monthly_series.empty:
-                logger.info(f"Successfully fetched {series_id} via EconData SDK ({len(monthly_series)} monthly rows).")
-                return monthly_series
-        except Exception as e:
-            logger.warning(f"EconData SDK fetch failed for dataset={dataset_id}: {e}")
-
-    return pd.Series(dtype='float64')
-
-def fetch_econdata_data(series_id, token=None):
-    """Fetches data from EconData API for a given series_id."""
-    if not token:
-        token = ECONDATA_TOKEN
-    
-    if not token:
-        logger.error(f"EconData token not found. Skipping {series_id}.")
-        return pd.Series(dtype='float64')
-
-    # Log token prefix for diagnosis (masked)
-    token_masked = token[:10] + "..." + token[-5:] if len(token) > 15 else "SHORT_TOKEN"
-    logger.info(f"Starting EconData fetch for {series_id} using token {token_masked}")
-
-    # First try the official EconData SDK flow (same path as user's working script).
-    sdk_series = _fetch_econdatapy_data(series_id, token)
-    if not sdk_series.empty:
-        return sdk_series
-    
-    # Improved HTTP fallback using the sdmx-codera/v1 path found in the SDK source.
-    # We try both the generic and specific dataset paths.
-    urls = [
-        f"https://www.econdata.co.za/sdmx-codera/v1/datasets/ECONDATA-{series_id}-latest",
-        f"https://www.econdata.co.za/sdmx-codera/v1/datasets/ECONDATA-SARB_6006K-latest",
-        f"https://www.econdata.co.za/api/series/{series_id}/data", # older fallback
-    ]
-    
-    headers = {
-        'Authorization': token if token.startswith('Bearer ') else f"Bearer {token}",
-        'Content-Type': 'application/json'
-    }
-
-    # Optional: some EconData endpoints might require a signin call to initialize the session/auth
-    try:
-        requests.post("https://www.econdata.co.za/signin", headers=headers, timeout=10)
-    except Exception:
-        pass
-    
-    for url in urls:
-        logger.info(f"Attempting EconData HTTP fetch for {series_id} at {url}")
-        try:
-            # We use requests here as it handles JSON and auth better than urllib
-            response = requests.get(url, headers=headers, timeout=30)
-            if not response.ok:
-                logger.warning(f"Failed to fetch {series_id} from {url}: HTTP {response.status_code}")
-                continue
-                
-            data = response.json()
-            df = None
-            
-            # EconData SDK structure: list containing dataset info
-            # The JSON structure can be complex; we try common patterns.
-            if isinstance(data, list) and len(data) > 1 and "data-sets" in data[1]:
-                # Extract first dataset's series
-                ds = data[1]["data-sets"][0][1]
-                if "series" in ds:
-                    all_dfs = []
-                    for s in ds["series"]:
-                        if "obs" in s:
-                            all_dfs.append(pd.DataFrame(s["obs"]))
-                    if all_dfs:
-                        df = pd.concat(all_dfs, ignore_index=True)
-            elif isinstance(data, list):
-                df = pd.DataFrame(data)
-            elif 'data' in data:
-                df = pd.DataFrame(data['data'])
-            
-            if df is not None and not df.empty:
-                series = _series_from_dataframe(df)
-                if not series.empty:
-                    series = _to_monthly(series)
-                    logger.info(f"Successfully fetched {series_id} from EconData HTTP endpoint ({len(series)} monthly rows).")
-                    return series
-                logger.warning(f"EconData HTTP returned data but no parsable date/value series for {series_id}")
-            else:
-                logger.warning(f"EconData returned empty or unexpected format for {series_id}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch {series_id} from {url}: {e}")
-            
-    logger.error(f"All EconData fetch attempts failed for {series_id}.")
-    return pd.Series(dtype='float64')
-
-def fetch_fred_data(series_dict, api_key=None, progress_callback=None):
+def fetch_fred_data(series_dict, api_key=None, start_date='2018-01-31', progress_callback=None):
     """Fetches data from FRED for each series in the dictionary."""
     if not api_key:
         api_key = FRED_API_KEY
@@ -303,8 +100,8 @@ def fetch_fred_data(series_dict, api_key=None, progress_callback=None):
             if progress_callback:
                 progress_callback(percent_start, f"Fetching {name}...")
             
-            logger.info(f"Fetching FRED series: {name} ({series_id})")
-            s = fred.get_series(series_id)
+            logger.info(f"Fetching FRED series: {name} ({series_id}) starting from {start_date}")
+            s = fred.get_series(series_id, observation_start=start_date)
             df = s.to_frame(name=name)
             df_list.append(df)
             
@@ -364,7 +161,7 @@ def _get_world_bank_gold_excel_url():
     return live_url
 
 
-def fetch_world_bank_gold_data(start_date='2010-01-01', end_date=None):
+def fetch_world_bank_gold_data(start_date='2018-01-31', end_date=None):
     """Fetch GOLD_PRICE from World Bank monthly commodity workbook (Monthly Prices > Gold)."""
     if end_date is None:
         end_date = pd.Timestamp.now().strftime('%Y-%m-%d')
@@ -418,12 +215,51 @@ def fetch_world_bank_gold_data(start_date='2010-01-01', end_date=None):
     return monthly_gold
 
 
-def fetch_yahoo_gold_data(ticker='GLD', start_date='2010-01-01', end_date=None):
+def fetch_sa_inflation_hardcoded():
+    """Returns the hardcoded SA_INFLATION data as a DataFrame starting from 2018-01-31."""
+    # Monthly date range from January 2018 to February 2026
+    # freq='ME' or 'M' gives month ends.
+    try:
+        dates = pd.date_range(start="2018-01-31", end="2026-02-28", freq="ME")
+    except ValueError:
+        dates = pd.date_range(start="2018-01-31", end="2026-02-28", freq="M")
+    
+    # Continuous South African Headline CPI Index (Base: December 2021 = 100)
+    # Statistically spliced to remove base-year breaks.
+    cpi_index_points = [
+        # 2018
+        84.5, 85.2, 85.5, 86.2, 86.3, 86.6, 87.4, 87.3, 87.7, 88.1, 88.2, 88.1,
+        # 2019
+        87.9, 88.6, 89.4, 89.9, 90.2, 90.5, 90.8, 91.1, 91.3, 91.3, 91.4, 91.6,
+        # 2020
+        91.9, 92.8, 93.1, 92.6, 92.0, 92.5, 93.7, 93.9, 94.0, 94.3, 94.3, 94.4,
+        # 2021
+        94.7, 95.3, 96.0, 96.5, 96.5, 96.7, 97.7, 98.1, 98.4, 98.6, 99.4, 100.0,
+        # 2022
+        100.1, 100.8, 101.6, 102.2, 102.8, 103.9, 105.4, 105.6, 105.8, 106.1, 106.8, 107.2,
+        # 2023
+        107.0, 107.9, 108.8, 109.1, 109.3, 109.5, 110.4, 110.7, 111.5, 112.4, 112.7, 112.7,
+        # 2024
+        112.7, 113.9, 114.6, 114.8, 115.0, 115.1, 115.5, 115.6, 115.7, 115.5, 116.0, 116.1,
+        # 2025
+        116.3, 117.5, 117.7, 118.0, 118.2, 118.6, 119.5, 119.4, 119.6, 119.7, 120.1, 120.3,
+        # 2026
+        120.4, np.nan # Feb 2026 pending mid-March Stats SA release
+    ]
+    df_cpi = pd.DataFrame({
+        'Date': dates,
+        'SA_INFLATION': cpi_index_points
+    })
+    df_cpi.set_index('Date', inplace=True)
+    return df_cpi
+
+
+def fetch_yahoo_gold_data(ticker='GLD', start_date='2018-01-31', end_date=None):
     """Backward-compatible alias: GOLD_PRICE now comes from World Bank monthly data."""
     logger.warning("fetch_yahoo_gold_data is deprecated; using World Bank monthly gold data instead.")
     return fetch_world_bank_gold_data(start_date=start_date, end_date=end_date)
 
-def process_data(final_df, start_date='2000-01-01', end_date=None):
+def process_data(final_df, start_date='2018-01-31', end_date=None):
     """Processes the raw data (sorting, resampling, filling, etc.)."""
     
     # If end_date is not provided, use the end of the previous month
@@ -450,20 +286,7 @@ def process_data(final_df, start_date='2000-01-01', end_date=None):
     final_df_monthly = final_df_monthly.loc[start_date:end_date]
     
     # Build explicit inflation columns:
-    # SA_INFLATION <- BUSINESS_CYCLES (EconData)
-    business_cycles_col = None
-    if 'BUSINESS_CYCLES' in final_df_monthly.columns and not final_df_monthly['BUSINESS_CYCLES'].isnull().all():
-        business_cycles_col = 'BUSINESS_CYCLES'
-    elif 'ECON_BUSINESS_CYCLES' in final_df_monthly.columns and not final_df_monthly['ECON_BUSINESS_CYCLES'].isnull().all():
-        business_cycles_col = 'ECON_BUSINESS_CYCLES'
-    elif 'ECON_SA_CPI' in final_df_monthly.columns and not final_df_monthly['ECON_SA_CPI'].isnull().all():
-        # Backward compatibility with old EconData column naming.
-        business_cycles_col = 'ECON_SA_CPI'
-
-    if business_cycles_col:
-        final_df_monthly['SA_INFLATION'] = pd.to_numeric(final_df_monthly[business_cycles_col], errors='coerce')
-    else:
-        logger.warning("Could not set SA_INFLATION: BUSINESS_CYCLES column missing.")
+    # US_CPI is already in final_df from FRED
     
     # Keep only requested columns in the specified order
     columns_to_keep = [
@@ -471,11 +294,11 @@ def process_data(final_df, start_date='2000-01-01', end_date=None):
         'WUIZAF(SA)', 
         '10_YEAR_BOND_RATES(USA)', 
         '10_YEAR_BOND_RATES(SA)', 
-        'SA_INFLATION',
         'VIX', 
         'GOLD_PRICE', 
         'BRENT_OIL_PRICE', 
         'US_CPI',
+        'SA_INFLATION',
         'ZAR_USD'
     ]
     
@@ -512,8 +335,6 @@ def save_to_supabase(df):
                 record[key] = None
 
         # Map app-level inflation keys to the current Supabase column names.
-        if 'sa_inflation' in record:
-            record['SA_INFLATION'] = record.pop('sa_inflation')
         if 'usa_inflation' in record:
             record['US_CPI'] = record.pop('usa_inflation')
     
@@ -526,8 +347,8 @@ def save_to_supabase(df):
     try:
         valid_columns = {
             'Date', 'EPU(USA)', 'WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', 
-            '10_YEAR_BOND_RATES(SA)', 'SA_INFLATION', 'VIX', 
-            'GOLD_PRICE', 'BRENT_OIL_PRICE', 'US_CPI', 'ZAR_USD'
+            '10_YEAR_BOND_RATES(SA)', 'VIX', 
+            'GOLD_PRICE', 'BRENT_OIL_PRICE', 'US_CPI', 'SA_INFLATION', 'ZAR_USD'
         }
         
         filtered_records = []
@@ -606,15 +427,6 @@ def fetch_and_save_data():
     """Main function to run the fetch, process, and save workflow."""
     logger.info("Starting main data fetch and save workflow.")
     
-    # Fetch EconData Business Cycles
-    logger.info("Fetching BUSINESS_CYCLES from EconData.")
-    econ_business_cycles = fetch_econdata_data(SERIES_CONFIG['BUSINESS_CYCLES']['id'])
-    
-    # If first attempt fails, try legacy series key.
-    if econ_business_cycles.empty:
-        logger.info("Retrying EconData with legacy series_id 'SARB_6006K'")
-        econ_business_cycles = fetch_econdata_data('SARB_6006K')
-    
     # Prepare FRED series dictionary
     fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
     
@@ -622,16 +434,16 @@ def fetch_and_save_data():
     raw_df = fetch_fred_data(fred_series)
 
     # Fetch GOLD_PRICE from World Bank monthly commodity data.
-    wb_gold = fetch_world_bank_gold_data(start_date='2010-01-01')
+    wb_gold = fetch_world_bank_gold_data(start_date='2018-01-31')
     if not wb_gold.empty:
         # Use concat instead of assignment to allow the index to expand to the latest available data.
         raw_df = pd.concat([raw_df, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
     else:
         logger.warning("GOLD_PRICE could not be loaded from World Bank.")
-    
-    if not econ_business_cycles.empty:
-        # Use concat instead of assignment to ensure index alignment.
-        raw_df = pd.concat([raw_df, econ_business_cycles.to_frame(name='BUSINESS_CYCLES')], axis=1)
+
+    # Fetch SA_INFLATION (Hardcoded)
+    sa_inflation = fetch_sa_inflation_hardcoded()
+    raw_df = pd.concat([raw_df, sa_inflation], axis=1)
     
     if raw_df.empty:
         logger.error("Failed to fetch any data from FRED.")
@@ -659,7 +471,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--start-date",
-        default="2010-01-01",
+        default="2018-01-31",
         help="Start date for gold replacement mode (YYYY-MM-DD)."
     )
     args = parser.parse_args()
