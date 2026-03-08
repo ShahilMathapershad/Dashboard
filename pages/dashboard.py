@@ -528,7 +528,14 @@ def update_graph(predictor, data, theme):
             linewidth=1,
             linecolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
             tickfont=dict(size=11),
-            title=None
+            title=None,
+            # Premium spikes for better readability
+            showspikes=True,
+            spikemode='across',
+            spikesnap='cursor',
+            spikedash='dash',
+            spikethickness=1,
+            spikecolor='rgba(255, 255, 255, 0.3)' if theme == 'dark' else 'rgba(0, 0, 0, 0.3)'
         ),
         yaxis=dict(
             showgrid=True,
@@ -540,7 +547,14 @@ def update_graph(predictor, data, theme):
             showline=True,
             linewidth=1,
             linecolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
-            tickfont=dict(size=11)
+            tickfont=dict(size=11),
+            # Premium spikes for better readability
+            showspikes=True,
+            spikemode='across',
+            spikesnap='cursor',
+            spikedash='dash',
+            spikethickness=1,
+            spikecolor='rgba(255, 255, 255, 0.3)' if theme == 'dark' else 'rgba(0, 0, 0, 0.3)'
         ),
         yaxis2=dict(
             showgrid=False,
@@ -548,7 +562,14 @@ def update_graph(predictor, data, theme):
             showline=True,
             linewidth=1,
             linecolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
-            tickfont=dict(size=11)
+            tickfont=dict(size=11),
+            # Premium spikes for secondary axis
+            showspikes=True,
+            spikemode='across',
+            spikesnap='cursor',
+            spikedash='dash',
+            spikethickness=1,
+            spikecolor='rgba(255, 255, 255, 0.3)' if theme == 'dark' else 'rgba(0, 0, 0, 0.3)'
         ),
         dragmode='pan',
         selectdirection='h'

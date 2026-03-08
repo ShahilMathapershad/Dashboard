@@ -38,7 +38,8 @@ app = Dash(
         {'src': '/assets/interactions.js', 'type': 'module'}
     ],
     suppress_callback_exceptions=True,
-    background_callback_manager=background_callback_manager
+    background_callback_manager=background_callback_manager,
+    meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}]
 )
 
 app.layout = html.Div(id='theme-main-container', children=[
