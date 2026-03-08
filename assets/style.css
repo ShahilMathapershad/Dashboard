@@ -1410,6 +1410,39 @@ p {
     overflow: hidden;
 }
 
+/* Range Slider Handle Styling - Make draggable bars wider and more visible */
+.js-plotly-plot .rangeslider .rangehandle {
+    width: 12px !important;  /* Increased from default ~8px to 12px */
+    background: var(--accent) !important;
+    border: 2px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: 4px !important;
+    cursor: ew-resize !important;
+    transition: all 0.2s ease !important;
+}
+
+.js-plotly-plot .rangeslider .rangehandle:hover {
+    background: var(--accent-secondary) !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    transform: scale(1.1) !important;
+}
+
+.js-plotly-plot .rangeslider .rangehandle:active {
+    background: var(--accent) !important;
+    transform: scale(0.95) !important;
+}
+
+/* Range slider track styling */
+.js-plotly-plot .rangeslider .slider-track {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 2px !important;
+}
+
+.js-plotly-plot .rangeslider .slider-track .selection {
+    background: rgba(91, 141, 239, 0.2) !important;
+    border: none !important;
+}
+
 /* Mobile Nav Adjustment */
 @media (max-width: 1024px) {
     .sidebar {

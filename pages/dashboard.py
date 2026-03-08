@@ -589,14 +589,16 @@ def update_graph(predictor, data, theme):
         tickformat=".4f"
     )
     
-    # Add subtle range slider for premium feel
+    # Add subtle range slider for premium feel - limited to data range
     fig.update_xaxes(
         rangeslider=dict(
             visible=True,
-            thickness=0.05,
+            thickness=0.12,  # Increased from 0.05 to 0.12 for better height
             bgcolor='rgba(255, 255, 255, 0.02)' if theme == 'dark' else 'rgba(0, 0, 0, 0.02)',
-            borderwidth=1,
-            bordercolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)'
+            borderwidth=2,  # Increased from 1 to 2 for better visibility
+            bordercolor='rgba(255, 255, 255, 0.15)' if theme == 'dark' else 'rgba(0, 0, 0, 0.15)',
+            # Limit range slider to actual data range
+            range=[df['Date'].min(), df['Date'].max()]
         )
     )
     
