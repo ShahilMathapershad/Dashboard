@@ -4,18 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="h">
+    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="latest">
       <change beforePath="$PROJECT_DIR$/.cache/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/cache.db" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.output.txt" beforeDir="false" afterPath="$PROJECT_DIR$/.output.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api_keys.txt" beforeDir="false" afterPath="$PROJECT_DIR$/api_keys.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.output.txt" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/assets/logo_light.svg" beforeDir="false" afterPath="$PROJECT_DIR$/assets/logo_light.svg" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/assets/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/assets/style.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/logic/data_fetcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/logic/data_fetcher.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pages/dashboard.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/dashboard.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pages/login.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/login.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pages/registration.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/registration.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -23,7 +19,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="31" />
+    <option name="cachedIndexableFilesCount" value="32" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="FlaskConsoleOptions" custom-start-script="import sys; print('Python %s on %s' % (sys.version, sys.platform)); sys.path.extend([WORKING_DIR_AND_PYTHON_PATHS])&#10;from flask.cli import ScriptInfo, NoAppException&#10;for module in [&quot;main.py&quot;, &quot;wsgi.py&quot;, &quot;app.py&quot;]:&#10;    try: locals().update(ScriptInfo(app_import_path=module, create_app=None).load_app().make_shell_context()); print(&quot;\nFlask App: %s&quot; % app.import_name); break&#10;    except NoAppException: pass">
@@ -84,7 +80,7 @@
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.lookFeel&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
     &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
@@ -124,7 +120,11 @@
       <workItem from="1772705162786" duration="617000" />
       <workItem from="1772706948217" duration="4481000" />
       <workItem from="1772734278445" duration="246000" />
-      <workItem from="1772792039631" duration="4388000" />
+      <workItem from="1772792039631" duration="5172000" />
+      <workItem from="1772812511734" duration="182000" />
+      <workItem from="1772814069166" duration="19000" />
+      <workItem from="1772987886557" duration="1319000" />
+      <workItem from="1772989230718" duration="1985000" />
     </task>
     <task id="LOCAL-00001" summary="h">
       <option name="closed" value="true" />
@@ -286,7 +286,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772711324120</updated>
     </task>
-    <option name="localTasksCounter" value="21" />
+    <task id="LOCAL-00021" summary="latest">
+      <option name="closed" value="true" />
+      <created>1772796470959</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1772796470960</updated>
+    </task>
+    <option name="localTasksCounter" value="22" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -318,7 +326,8 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Autopush from local run" />
     <MESSAGE value="h" />
-    <option name="LAST_COMMIT_MESSAGE" value="h" />
+    <MESSAGE value="latest" />
+    <option name="LAST_COMMIT_MESSAGE" value="latest" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -334,6 +343,6 @@
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Dash$app.coverage" NAME="app Coverage Results" MODIFIED="1772054274074" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Dash$data_fetcher.coverage" NAME="data_fetcher Coverage Results" MODIFIED="1772707608345" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
-    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1772796414754" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
+    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1772991383353" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
   </component>
 </project>

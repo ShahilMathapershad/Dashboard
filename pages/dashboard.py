@@ -19,7 +19,8 @@ def sidebar(active_tab):
             html.Span(label)
         ], n_clicks=0)
 
-    return html.Div(className='sidebar', children=[
+    return html.Div(className='sidebar', id='sidebar', children=[
+        html.Button(id='sidebar-toggle', className='sidebar-toggle', children='❮', n_clicks=0),
         html.Div(className='sidebar-logo', children=[
             html.Img(src=dash.get_asset_url('logo_light.svg'), className='logo-light', style={'height': '32px'}),
             html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-dark', style={'height': '32px'})
@@ -102,14 +103,47 @@ def layout():
     return html.Div(id='dashboard-container', className='page-transition', n_clicks=0, children=[
         html.Div(id='fetch-loading-bar', className='fetch-loading-bar', hidden=True),
         dcc.Store(id='dashboard-tab', data=active_tab, storage_type='session'),
+        dcc.Store(id='sidebar-state', data='expanded', storage_type='local'),
         dcc.Store(id='fetched-data', storage_type='memory'),
         dcc.Store(id='fetch-trigger', data=0, storage_type='memory'),
         sidebar(active_tab),
-        html.Div(className='content-area', children=[
+        html.Div(className='content-area', id='content-area', children=[
             html.Div(id='content-body', children=[data_tab_content()])
         ])
     ])
 
+
+
+@callback(
+    Output('sidebar-state', 'data'),
+    Input('sidebar-toggle', 'n_clicks'),
+    State('sidebar-state', 'data'),
+    prevent_initial_call=True
+)
+def toggle_sidebar(n_clicks, current_state):
+    if n_clicks > 0:
+        return 'collapsed' if current_state == 'expanded' else 'expanded'
+    return current_state
+
+
+dash.clientside_callback(
+    """
+    function(state) {
+        const container = document.getElementById('dashboard-container');
+        const toggleBtn = document.getElementById('sidebar-toggle');
+        if (state === 'collapsed') {
+            container.classList.add('sidebar-collapsed');
+            if (toggleBtn) toggleBtn.innerText = '❯';
+        } else {
+            container.classList.remove('sidebar-collapsed');
+            if (toggleBtn) toggleBtn.innerText = '❮';
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('sidebar-toggle', 'id'),
+    Input('sidebar-state', 'data')
+)
 
 
 # Navigation: set active tab when clicking sidebar links
@@ -406,40 +440,152 @@ def update_graph(predictor, data, theme):
     
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     
-    # Primary axis: ZAR/USD
+    # Premium color scheme for 2026 fintech
+    primary_color = '#5b8def' if theme == 'dark' else '#4f7df3'
+    secondary_color = '#7c3aed' if theme == 'dark' else '#8b5cf6'
+    
+    # Primary axis: ZAR/USD with gradient fill
     fig.add_trace(
-        go.Scatter(x=df['Date'], y=df['ZAR_USD'], name='ZAR/USD', line=dict(color='#38bdf8', width=2)),
+        go.Scatter(
+            x=df['Date'], 
+            y=df['ZAR_USD'], 
+            name='ZAR/USD',
+            line=dict(color=primary_color, width=3, shape='spline'),
+            mode='lines',
+            fill='tonexty',
+            fillcolor=f'rgba(91, 141, 239, 0.05)' if theme == 'dark' else 'rgba(79, 125, 243, 0.05)',
+            hovertemplate='<b>ZAR/USD</b>: %{y:.4f}<extra></extra>'
+        ),
         secondary_y=False
     )
     
-    # Secondary axis: Selected Predictor
+    # Add subtle gradient area
     fig.add_trace(
-        go.Scatter(x=df['Date'], y=df[predictor], name=predictor, line=dict(color='#8b5cf6', width=2)),
+        go.Scatter(
+            x=df['Date'], 
+            y=[df['ZAR_USD'].min() * 0.95] * len(df),
+            mode='lines',
+            line=dict(width=0),
+            showlegend=False,
+            hoverinfo='skip'
+        ),
+        secondary_y=False
+    )
+    
+    # Secondary axis: Selected Predictor with smoother line
+    fig.add_trace(
+        go.Scatter(
+            x=df['Date'], 
+            y=df[predictor], 
+            name=predictor,
+            line=dict(color=secondary_color, width=2.5, shape='spline', dash='dot'),
+            mode='lines+markers',
+            marker=dict(size=4, color=secondary_color, line=dict(width=0)),
+            hovertemplate=f'<b>{predictor}</b>: %{{y:.4f}}<extra></extra>'
+        ),
         secondary_y=True
     )
     
-    template = 'plotly_dark' if theme == 'dark' else 'plotly_white'
-    hover_bgcolor = "rgba(15, 23, 42, 0.9)" if theme == 'dark' else "rgba(255, 255, 255, 0.9)"
-    hover_font_color = "#f8fafc" if theme == 'dark' else "#0f172a"
-    
+    # Premium layout configuration
     fig.update_layout(
-        template=template,
+        template=None,  # Custom styling instead of template
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=40, r=40, t=40, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor='rgba(255, 255, 255, 0.02)' if theme == 'dark' else 'rgba(0, 0, 0, 0.01)',
+        margin=dict(l=60, r=60, t=60, b=60),
+        font=dict(
+            family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            size=12,
+            color='#ffffff' if theme == 'dark' else '#0a0a0a'
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.08,
+            xanchor="right",
+            x=1,
+            font=dict(size=13, weight=500),
+            bgcolor='rgba(0,0,0,0)',
+            borderwidth=0,
+            itemsizing='constant',
+            itemwidth=30
+        ),
         hovermode="x unified",
         hoverlabel=dict(
-            bgcolor=hover_bgcolor,
-            font_size=13,
+            bgcolor='rgba(22, 22, 22, 0.95)' if theme == 'dark' else 'rgba(255, 255, 255, 0.95)',
+            font_size=14,
             font_family="Inter",
-            font_color=hover_font_color,
-            bordercolor="rgba(51, 65, 85, 0.6)" if theme == 'dark' else "rgba(203, 213, 225, 0.8)"
+            font_color='#ffffff' if theme == 'dark' else '#0a0a0a',
+            bordercolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
+            namelength=-1
         ),
-        transition_duration=500
+        transition_duration=300,
+        xaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(255, 255, 255, 0.05)' if theme == 'dark' else 'rgba(0, 0, 0, 0.05)',
+            zeroline=False,
+            showline=True,
+            linewidth=1,
+            linecolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
+            tickfont=dict(size=11),
+            title=None
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(255, 255, 255, 0.03)' if theme == 'dark' else 'rgba(0, 0, 0, 0.03)',
+            zeroline=True,
+            zerolinewidth=1,
+            zerolinecolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
+            showline=True,
+            linewidth=1,
+            linecolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
+            tickfont=dict(size=11)
+        ),
+        yaxis2=dict(
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            linewidth=1,
+            linecolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)',
+            tickfont=dict(size=11)
+        ),
+        dragmode='pan',
+        selectdirection='h'
     )
     
-    fig.update_yaxes(title_text="ZAR/USD", secondary_y=False)
-    fig.update_yaxes(title_text=predictor, secondary_y=True)
+    # Axis titles with premium styling
+    fig.update_yaxes(
+        title_text="ZAR/USD", 
+        secondary_y=False,
+        title_font=dict(size=13, weight=600),
+        tickformat=".4f"
+    )
+    fig.update_yaxes(
+        title_text=predictor, 
+        secondary_y=True,
+        title_font=dict(size=13, weight=600),
+        tickformat=".4f"
+    )
+    
+    # Add subtle range slider for premium feel
+    fig.update_xaxes(
+        rangeslider=dict(
+            visible=True,
+            thickness=0.05,
+            bgcolor='rgba(255, 255, 255, 0.02)' if theme == 'dark' else 'rgba(0, 0, 0, 0.02)',
+            borderwidth=1,
+            bordercolor='rgba(255, 255, 255, 0.1)' if theme == 'dark' else 'rgba(0, 0, 0, 0.1)'
+        )
+    )
+    
+    # Add modebar customization
+    fig.update_layout(
+        modebar=dict(
+            bgcolor='rgba(0,0,0,0)',
+            color='#a1a1a1' if theme == 'dark' else '#525252',
+            activecolor='#5b8def' if theme == 'dark' else '#4f7df3'
+        )
+    )
     
     return fig
