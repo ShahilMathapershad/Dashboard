@@ -21,25 +21,22 @@ def layout():
 
         # Stage 1: Landing Page
         html.Div(id='landing-stage', className='landing-stage', children=[
-            html.H1("Understand the Forces Driving the Rand", className='landing-headline'),
+            html.H1("Understand the Forces Driving the ZAR/USD Exchange Rate", className='landing-headline'),
             html.P(
-                "A transparent, data-driven forecasting tool built for South African agribusiness to navigate currency volatility with clarity",
+                "A transparent, data-driven forecasting tool built for South African agribusiness to navigate ZAR/USD exchange rate volatility with clarity",
                 className='landing-subheadline'
             ),
             
             html.Div(className='feature-cards', children=[
                 html.Div(className='feature-card', children=[
-                    html.Div("📊", className='feature-icon'),
                     html.Div("Macroeconomic Drivers", className='feature-title'),
                     html.Div("Highlighting how variables like commodity prices and interest rate differentials impact the ZAR.", className='feature-desc'),
                 ]),
                 html.Div(className='feature-card', children=[
-                    html.Div("🔄", className='feature-icon'),
                     html.Div("Scenario Modeling", className='feature-title'),
                     html.Div("Explaining the ability to test hypothetical changes in underlying factors.", className='feature-desc'),
                 ]),
                 html.Div(className='feature-card', children=[
-                    html.Div("⏱️", className='feature-icon'),
                     html.Div("Automated Precision", className='feature-title'),
                     html.Div("Showcasing monthly updates synced with FRED and Statistics South Africa.", className='feature-desc'),
                 ]),

@@ -1065,8 +1065,8 @@ def run_model_prediction(trigger, existing_model_data, theme):
         ]),
         html.H5('In-Sample Performance Metrics', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px', 'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('MAE', f"R {metrics.get('mae', 0):.4f}", 'Mean Absolute Error: Average forecast error in Rands. Lower values indicate better precision.'),
-            _info_pill('RMSE', f"R {metrics.get('rmse', 0):.4f}", 'Root Mean Squared Error: Similar to MAE but penalizes larger misses more heavily.'),
+            _info_pill('MAE', f"ZAR {metrics.get('mae', 0):.4f}", 'Mean Absolute Error: Average forecast error in ZAR. Lower values indicate better precision.'),
+            _info_pill('RMSE', f"ZAR {metrics.get('rmse', 0):.4f}", 'Root Mean Squared Error: Similar to MAE but penalizes larger misses more heavily.'),
             _info_pill('R²', f"{metrics.get('r2', 0):.4f}", 'Explains how much of the ZAR/USD volatility is captured by the model (0 to 1 scale).'),
             _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%", 'Mean Absolute Percentage Error: Average error relative to the exchange rate level.'),
             _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%", 'Percentage of months where the model correctly predicted if the ZAR would strengthen or weaken.'),
@@ -1095,7 +1095,7 @@ def run_model_prediction(trigger, existing_model_data, theme):
         html.P(f"Based on the latest data for {result['last_date']}, {direction_text} {feature_impact_text}"),
         html.P(perf_text),
         html.P("This forecast is based on an ElasticNet (Lasso) regression model that automatically selects the most relevant macroeconomic indicators. "
-               "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates (Rands per Dollar) for interpretability.")
+               "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates (ZAR/USD) for interpretability.")
     ])
 
     prediction_data = {

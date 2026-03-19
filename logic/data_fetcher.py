@@ -35,7 +35,7 @@ SERIES_CONFIG = {
     'BRENT_OIL_PRICE': {'source': 'FRED', 'id': 'POILBREUSDM', 'label': 'Global Price of Brent Crude'},
     'US_CPI': {'source': 'FRED', 'id': 'CPIAUCSL', 'label': 'Consumer Price Index for All Urban Consumers (USA)'},
     'SA_INFLATION': {'source': 'HARDCODED', 'id': 'SA_CPI_INDEX', 'label': 'South African Headline CPI Index'},
-    'ZAR_USD': {'source': 'FRED', 'id': 'DEXSFUS', 'label': 'South African Rand to U.S. Dollar Exchange Rate'}
+    'ZAR_USD': {'source': 'FRED', 'id': 'DEXSFUS', 'label': 'ZAR/USD Exchange Rate'}
 }
 
 # Load environment variables explicitly for Render
