@@ -1,13 +1,18 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
-from logic.data_fetcher import fetch_fred_data, fetch_world_bank_gold_data, fetch_sa_inflation_hardcoded, process_data, save_to_supabase, replace_gold_price_column_in_supabase, FRED_API_KEY, SERIES_CONFIG
-from logic.model import predict_next_month
+from logic.data_fetcher import (
+    fetch_fred_data, fetch_world_bank_gold_data, fetch_sa_inflation_hardcoded, 
+    process_data, save_to_supabase, replace_gold_price_column_in_supabase, 
+    FRED_API_KEY, SERIES_CONFIG, should_update_from_api, fetch_and_save_data
+)
+from logic.model import predict_next_month, fetch_data_from_supabase
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import traceback
+import datetime
 
 
 dash.register_page(__name__, path='/dashboard')
@@ -39,17 +44,18 @@ def sidebar(active_tab):
     ])
 
 
-def data_tab_content():
+def data_tab_content(existing_data=None):
+    viz_style = {'display': 'block', 'marginTop': '2rem'} if existing_data else {'display': 'none'}
     return html.Div(className='tab-content fade-in', children=[
         # Page Header
         html.Div(className='page-header', children=[
             html.Div(children=[
                 html.H2('Data Explorer', className='page-title'),
-                html.P("Fetch, analyse and visualise economic indicators against ZAR/USD.",
+                html.P("Automated data analysis and visualisation against ZAR/USD.",
                        className='page-subtitle'),
             ]),
             html.Div(className='page-actions', children=[
-                html.Button('Fetch Data', id='fetch-data-btn', n_clicks=0, className='btn-primary'),
+                html.Div(id='fetch-status-display', className='status-badge'),
             ])
         ]),
 
@@ -66,7 +72,7 @@ def data_tab_content():
         html.Div(id='data-error', className='error-message'),
 
         # Visualisation Section
-        html.Div(id='visualization-container', className='viz-container', style={'display': 'none'}, children=[
+        html.Div(id='visualization-container', className='viz-container', style=viz_style, children=[
             # Predictor Selector Bar
             html.Div(className='predictor-bar', children=[
                 html.Div(className='predictor-bar-header', children=[
@@ -79,8 +85,6 @@ def data_tab_content():
                     )
                 ]),
                 html.Div(id='predictor-checkboxes-container', className='predictor-chips'),
-                dcc.Store(id='predictor-dropdown-options-store'),
-                dcc.Store(id='selected-predictors', data=[]),
             ]),
 
             # Hero Chart
@@ -111,7 +115,8 @@ def data_tab_content():
     ])
 
 
-def model_tab_content():
+def model_tab_content(existing_model_data=None):
+    model_style = {'display': 'block'} if existing_model_data else {'display': 'none'}
     return html.Div(className='tab-content fade-in', children=[
         html.Div(className='page-header', children=[
             html.Div(children=[
@@ -120,14 +125,13 @@ def model_tab_content():
                        className='page-subtitle'),
             ]),
             html.Div(className='page-actions', children=[
-                html.Button('Run Prediction', id='run-prediction-btn', n_clicks=0, className='btn-primary'),
+                html.Div(id='model-status-display', className='status-badge'),
             ])
         ]),
 
         html.Div(id='model-error', className='error-message'),
 
-        # Prediction results container
-        html.Div(id='model-results-container', style={'display': 'none'}, children=[
+        html.Div(id='model-results-container', style=model_style, children=[
 
             # Top row: prediction card + feature contributions
             html.Div(className='model-top-row', children=[
@@ -176,6 +180,15 @@ def model_tab_content():
             html.Div(className='model-card model-info-card', children=[
                 html.H4('Model Specification', className='card-title'),
                 html.Div(id='model-info-content'),
+                # Dynamic model description
+                html.Hr(style={'margin': '24px 0', 'borderTop': '1px solid var(--border)'}),
+                html.H4('Model Analysis & Forecast Summary', className='card-title'),
+                html.Div(id='model-description-content', className='model-analysis-text', style={
+                    'lineHeight': '1.6',
+                    'color': 'var(--text-2)',
+                    'fontSize': '0.9375rem',
+                    'marginTop': '12px'
+                }),
             ]),
         ]),
     ])
@@ -186,8 +199,13 @@ def layout():
     return html.Div(id='dashboard-container', className='page-transition sidebar-collapsed', n_clicks=0, children=[
         dcc.Store(id='dashboard-tab', data=active_tab, storage_type='session'),
         dcc.Store(id='sidebar-state', data='collapsed', storage_type='local'),
-        dcc.Store(id='fetched-data', storage_type='memory'),
-        dcc.Store(id='fetch-trigger', data=0, storage_type='memory'),
+        dcc.Store(id='fetched-data', storage_type='session'), # Changed to session for persistence
+        dcc.Store(id='model-prediction-data', storage_type='session'), # Added for persistence
+        dcc.Store(id='fetch-trigger', data=0, storage_type='session'),
+        dcc.Store(id='model-prediction-trigger', data=0, storage_type='session'),
+        dcc.Store(id='predictor-dropdown-options-store', storage_type='session'),
+        dcc.Store(id='selected-predictors', data=[], storage_type='session'),
+        dcc.Store(id='fetched-data-status', storage_type='session'),
         sidebar(active_tab),
         html.Div(className='content-area', id='content-area', children=[
             html.Div(id='content-body', children=[data_tab_content()])
@@ -257,18 +275,24 @@ def set_active_tab(data_clicks, model_clicks, signout_clicks, current_tab):
     Output('nav-model', 'className'),
     Output('nav-signout', 'className'),
     Output('content-body', 'children'),
-    Input('dashboard-tab', 'data')
+    Input('dashboard-tab', 'data'),
+    State('fetched-data', 'data'),
+    State('model-prediction-data', 'data'),
+    prevent_initial_call=False
 )
-def update_view(active_tab):
+def update_view(active_tab, existing_data, existing_model_data):
     data_cls = 'nav-link-custom active' if active_tab == 'data' else 'nav-link-custom'
     model_cls = 'nav-link-custom active' if active_tab == 'model' else 'nav-link-custom'
     signout_cls = 'nav-link-custom active' if active_tab == 'signout' else 'nav-link-custom'
-
+    
     if active_tab == 'data':
-        content = data_tab_content()
+        print("DEBUG: Rendering Data Tab")
+        content = data_tab_content(existing_data)
     elif active_tab == 'model':
-        content = model_tab_content()
+        print("DEBUG: Rendering Model Tab")
+        content = model_tab_content(existing_model_data)
     else:
+        print(f"DEBUG: Rendering Sign Out or Other Tab: {active_tab}")
         content = html.Div(className='tab-content fade-in', children=[
             html.Div(className='page-header', children=[
                 html.Div(children=[
@@ -294,33 +318,142 @@ def perform_signout(signout_clicks):
     return dash.no_update, dash.no_update
 
 
-# Validation callback to prevent background fetch if clicks is 0
+# Trigger data fetch and model prediction automatically
 @callback(
     Output('fetch-trigger', 'data'),
-    Output('data-error', 'children', allow_duplicate=True),
-    Input('fetch-data-btn', 'n_clicks'),
+    Output('model-prediction-trigger', 'data'),
+    Input('dashboard-tab', 'data'),
     State('fetch-trigger', 'data'),
-    prevent_initial_call=True
+    State('model-prediction-trigger', 'data'),
+    State('fetched-data', 'data'),
+    State('model-prediction-data', 'data'),
+    prevent_initial_call='initial_duplicate'
 )
-def validate_keys(n_clicks, current_trigger):
-    if not n_clicks:
-        return dash.no_update, dash.no_update
+def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trigger, existing_data, existing_model_data):
+    fetch_trigger = dash.no_update
+    model_trigger = dash.no_update
     
-    return (current_trigger or 0) + 1, ""
+    # Always try to fetch data if on data tab
+    # We increment the trigger even if existing_data is present, because
+    # switching tabs creates new elements that need to be populated by the callback.
+    if active_tab == 'data':
+        print(f"DEBUG: Triggering data fetch (active_tab={active_tab})")
+        fetch_trigger = (current_fetch_trigger or 0) + 1
+        
+    # Always try to run model when on model tab
+    # We increment the trigger even if existing_model_data is present, because
+    # switching tabs creates new elements that need to be populated by the callback.
+    if active_tab == 'model':
+        print(f"DEBUG: Triggering model prediction (active_tab={active_tab})")
+        model_trigger = (current_model_trigger or 0) + 1
+        
+    return fetch_trigger, model_trigger
+
+
+def _generate_data_table(df_all):
+    if df_all is None or (isinstance(df_all, pd.DataFrame) and df_all.empty) or (isinstance(df_all, list) and not df_all):
+        return html.Div("No data available for table.")
+    
+    if isinstance(df_all, list):
+        df_all = pd.DataFrame(df_all)
+        
+    df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
+    df_sorted = df_all.sort_values('Date', ascending=True)
+    
+    # Calculate percentage changes for all columns except Date
+    pct_change_data = []
+    for i in range(1, len(df_sorted)):
+        row_data = {'Date': df_sorted.iloc[i]['Date']}
+        for col in df_sorted.columns:
+            if col != 'Date':
+                prev_val = df_sorted.iloc[i-1][col]
+                curr_val = df_sorted.iloc[i][col]
+                if pd.notna(prev_val) and pd.notna(curr_val) and prev_val != 0:
+                    pct_change = ((curr_val - prev_val) / prev_val) * 100
+                    row_data[col] = pct_change
+                else:
+                    row_data[col] = None
+        pct_change_data.append(row_data)
+    
+    df_pct = pd.DataFrame(pct_change_data)
+    df_pct = df_pct.sort_values('Date', ascending=False).head(10)
+    
+    # Build table
+    predictors = [c for c in df_pct.columns if c not in ['Date', 'ZAR_USD']]
+    user_friendly_columns = ['Date']
+    for pred in predictors:
+        friendly_name = SERIES_CONFIG.get(pred, {}).get('label', pred)
+        if len(friendly_name) > 25:
+            friendly_name = friendly_name.replace('(', '\n(').replace(' for ', '\n')
+            friendly_name = '\n'.join([line.strip() for line in friendly_name.split('\n') if line.strip()])
+        user_friendly_columns.append(friendly_name)
+    user_friendly_columns.append('ZAR/USD Effect')
+    
+    header = html.Thead(html.Tr([html.Th(col, style={'textAlign': 'center', 'whiteSpace': 'pre-line', 'fontSize': '0.75rem'}) for col in user_friendly_columns]))
+    body_rows = []
+    for _, row in df_pct.iterrows():
+        tds = [html.Td(row['Date'], style={'fontWeight': '500'})]
+        for col in predictors:
+            val = row[col]
+            if pd.isna(val):
+                tds.append(html.Td('-', style={'textAlign': 'center'}))
+            else:
+                color = '#10B981' if val > 0 else '#EF4444' if val < 0 else '#6b6b6b'
+                tds.append(html.Td(f"{val:+.2f}%", style={'color': color, 'fontWeight': '600', 'textAlign': 'center'}))
+        
+        zar_val = row.get('ZAR_USD')
+        if pd.isna(zar_val):
+            tds.append(html.Td('-', style={'textAlign': 'center'}))
+        else:
+            color = '#EF4444' if zar_val > 0 else '#10B981' if zar_val < 0 else '#6b6b6b'
+            tds.append(html.Td(f"{zar_val:+.2f}%", style={'color': color, 'fontWeight': '700', 'textAlign': 'center', 'fontSize': '1.05em'}))
+        body_rows.append(html.Tr(tds))
+    
+    return html.Table(className='custom-table', children=[header, html.Tbody(body_rows)])
+
+
+@callback(
+    Output('fetch-status-display', 'children'),
+    Output('visualization-container', 'style', allow_duplicate=True),
+    Output('data-table-container', 'children'),
+    Input('dashboard-tab', 'data'),
+    Input('fetched-data', 'data'),
+    Input('fetched-data-status', 'data'),
+    prevent_initial_call='initial_duplicate'
+)
+def sync_data_tab_ui(active_tab, data, status_info):
+    if active_tab != 'data':
+        return dash.no_update, dash.no_update, dash.no_update
+    
+    print(f"DEBUG: sync_data_tab_ui triggered. active_tab={active_tab}")
+    
+    status_msg = ""
+    if status_info:
+        # Reconstruct the status badge
+        status_msg = html.Span(status_info.get('text', ''), style={'color': status_info.get('color', '#6b6b6b')})
+    
+    viz_style = {'display': 'block', 'marginTop': '2rem'} if data else {'display': 'none'}
+    
+    # Use the helper to rebuild the table from persisted data
+    table = _generate_data_table(data) if data else ""
+    
+    return status_msg, viz_style, table
 
 
 # Fetch data using hardcoded API keys
 @callback(
     Output('fetched-data', 'data'),
     Output('data-error', 'children', allow_duplicate=True),
-    Output('data-table-container', 'children'),
     Output('predictor-dropdown-options-store', 'data'),
     Output('selected-predictors', 'data'),
-    Output('visualization-container', 'style'),
+    Output('fetched-data-status', 'data'),
     Input('fetch-trigger', 'data'),
+    State('fetched-data', 'data'),
+    State('predictor-dropdown-options-store', 'data'),
+    State('selected-predictors', 'data'),
+    State('fetched-data-status', 'data'),
     background=True,
     running=[
-        (Output('fetch-data-btn', 'disabled'), True, False),
         (Output('progress-container', 'hidden'), False, True),
         (Output('data-error', 'children'), "", "")
     ],
@@ -331,7 +464,7 @@ def validate_keys(n_clicks, current_trigger):
     ],
     prevent_initial_call=True
 )
-def fetch_data(set_progress, trigger_value):
+def fetch_data(set_progress, trigger_value, existing_data, existing_options, existing_selected, existing_status):
     # Defensive check: set_progress can be None in some edge cases during callback initialization
     if set_progress is None:
         print("DEBUG WARNING: set_progress is None, progress updates will be skipped")
@@ -339,133 +472,82 @@ def fetch_data(set_progress, trigger_value):
     
     if trigger_value:
         print(f"DEBUG: fetch_data background callback started. trigger_value={trigger_value}")
-        set_progress((0, '0%', 'Connecting to data sources...'))
+        
+        # If we already have data in session, just return it to re-populate UI
+        if existing_data:
+            print("DEBUG: Using existing data from session to re-populate UI")
+            return existing_data, "", existing_options, existing_selected, existing_status
         
         try:
-            # Use unified configuration from data_fetcher
-            fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
+            # Check if we should update from API or Supabase
+            use_api = should_update_from_api()
             
-            def update_progress(percent, status_msg):
-                print(f"DEBUG: Progress update: {percent}% - {status_msg}")
-                if set_progress:
-                    try:
-                        set_progress((percent, f'{percent}%', status_msg))
-                    except Exception as e:
-                        print(f"DEBUG WARNING: set_progress failed: {e}")
-            
-            print("DEBUG: Calling fetch_fred_data...")
-            raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=update_progress)
+            if not use_api:
+                set_progress((20, '20%', 'Fetching data from Supabase...'))
+                print("DEBUG: Pulling data from Supabase (not last day or already updated)")
+                processed = fetch_data_from_supabase()
+                status_data = {'text': '● Live (Supabase)', 'color': '#10B981'}
+                # Need wb_gold for replace_gold_price_column_in_supabase if we follow same structure
+                # But if we pull from Supabase, we don't need to replace gold.
+                wb_gold = pd.Series() 
+            else:
+                set_progress((0, '0%', 'Connecting to API sources...'))
+                print("DEBUG: Fetching data from APIs (last day of month)")
+                # Use unified configuration from data_fetcher
+                fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
+                
+                def update_progress(percent, status_msg):
+                    print(f"DEBUG: Progress update: {percent}% - {status_msg}")
+                    if set_progress:
+                        try:
+                            set_progress((percent, f'{percent}%', status_msg))
+                        except Exception as e:
+                            print(f"DEBUG WARNING: set_progress failed: {e}")
+                
+                print("DEBUG: Calling fetch_fred_data...")
+                raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=update_progress)
 
-            # Fetch GOLD_PRICE from World Bank monthly commodity data.
-            wb_gold = fetch_world_bank_gold_data(start_date='2018-01-31')
-            if not wb_gold.empty:
-                # Use concat instead of assignment to allow the index to expand to the latest available data.
-                raw = pd.concat([raw, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
-            
-            # Fetch SA_INFLATION (Hardcoded)
-            sa_inflation = fetch_sa_inflation_hardcoded()
-            raw = pd.concat([raw, sa_inflation], axis=1)
-            
-            if raw.empty:
-                print("DEBUG: raw_df is empty")
-                return dash.no_update, 'Failed to fetch data. Please check your API keys and try again.', '', dash.no_update, dash.no_update, dash.no_update
-            
-            print(f"DEBUG: Successfully fetched raw data with {len(raw)} rows. Processing...")
-            if set_progress:
-                set_progress((95, '95%', 'Finalising...'))
-            processed = process_data(raw, start_date='2018-01-31')
-            
+                # Fetch GOLD_PRICE from World Bank monthly commodity data.
+                wb_gold = fetch_world_bank_gold_data(start_date='2018-01-31')
+                if not wb_gold.empty:
+                    # Use concat instead of assignment to allow the index to expand to the latest available data.
+                    raw = pd.concat([raw, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
+                
+                # Fetch SA_INFLATION (Hardcoded)
+                sa_inflation = fetch_sa_inflation_hardcoded()
+                raw = pd.concat([raw, sa_inflation], axis=1)
+                
+                if raw.empty:
+                    print("DEBUG: raw_df is empty")
+                    return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
+                
+                print(f"DEBUG: Successfully fetched raw data with {len(raw)} rows. Processing...")
+                if set_progress:
+                    set_progress((95, '95%', 'Finalising...'))
+                processed = process_data(raw, start_date='2018-01-31')
+                status_data = {'text': '● Updated from API', 'color': '#3B82F6'}
+
             if processed.empty:
                 print("DEBUG: processed_df is empty")
-                return dash.no_update, 'No data available in the requested date range.', '', dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, 'No data available.', dash.no_update, dash.no_update, dash.no_update
 
-            # Save to Supabase (All data since 2018-01-31)
-            supabase_msg = ""
-            try:
-                print("DEBUG: Attempting to save to Supabase...")
-                save_to_supabase(processed)
-                replace_gold_price_column_in_supabase(wb_gold)
-                print("DEBUG: Save to Supabase successful")
-            except Exception as e:
-                # Non-fatal: show message but still display data
-                print(f"DEBUG Warning: Could not save to Supabase: {e}")
-                supabase_msg = f" (Warning: Could not save to Supabase: {e})"
+            # Save to Supabase only if we fetched from API
+            if use_api:
+                try:
+                    print("DEBUG: Attempting to save to Supabase...")
+                    save_to_supabase(processed)
+                    if not wb_gold.empty:
+                        replace_gold_price_column_in_supabase(wb_gold)
+                    print("DEBUG: Save to Supabase successful")
+                except Exception as e:
+                    print(f"DEBUG Warning: Could not save to Supabase: {e}")
+                    status_data = {'text': '● Updated (Supabase error)', 'color': '#F59E0B'}
 
             # Prepare for display
             print("DEBUG: Preparing data for display...")
             df_all = processed.reset_index()
             df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
-            # Sort descending by date for display
-            df_all = df_all.sort_values('Date', ascending=False)
             
-            # Create percentage change table
-            df_sorted = df_all.sort_values('Date', ascending=True)
-            
-            # Calculate percentage changes for all columns except Date
-            pct_change_data = []
-            for i in range(1, len(df_sorted)):
-                row_data = {'Date': df_sorted.iloc[i]['Date']}
-                
-                # Calculate percentage changes for each predictor
-                for col in df_sorted.columns:
-                    if col != 'Date':
-                        prev_val = df_sorted.iloc[i-1][col]
-                        curr_val = df_sorted.iloc[i][col]
-                        if pd.notna(prev_val) and pd.notna(curr_val) and prev_val != 0:
-                            pct_change = ((curr_val - prev_val) / prev_val) * 100
-                            row_data[col] = pct_change
-                        else:
-                            row_data[col] = None
-                
-                pct_change_data.append(row_data)
-            
-            df_pct = pd.DataFrame(pct_change_data)
-            df_pct = df_pct.sort_values('Date', ascending=False).head(10)
-            
-            # Build table with color-coded percentage changes
-            predictors = [c for c in df_pct.columns if c not in ['Date', 'ZAR_USD']]
-            columns = ['Date'] + predictors + ['ZAR/USD Effect']
-            
-            # Create user-friendly column headers using SERIES_CONFIG labels
-            user_friendly_columns = ['Date']
-            for pred in predictors:
-                friendly_name = SERIES_CONFIG.get(pred, {}).get('label', pred)
-                # Shorten very long names for table display
-                if len(friendly_name) > 25:
-                    friendly_name = friendly_name.replace('(', '\n(').replace(' for ', '\n')
-                    friendly_name = '\n'.join([line.strip() for line in friendly_name.split('\n') if line.strip()])
-                user_friendly_columns.append(friendly_name)
-            user_friendly_columns.append('ZAR/USD Effect')
-            
-            header = html.Thead(html.Tr([html.Th(col, style={'textAlign': 'center', 'whiteSpace': 'pre-line', 'fontSize': '0.75rem'}) for col in user_friendly_columns]))
-            body_rows = []
-            
-            for _, row in df_pct.iterrows():
-                tds = [html.Td(row['Date'], style={'fontWeight': '500'})]
-                
-                # Add predictor percentage changes with color coding
-                for col in predictors:
-                    val = row[col]
-                    if pd.isna(val):
-                        tds.append(html.Td('-', style={'textAlign': 'center'}))
-                    else:
-                        color = '#10B981' if val > 0 else '#EF4444' if val < 0 else '#6b6b6b'
-                        formatted_val = f"{val:+.2f}%"
-                        tds.append(html.Td(formatted_val, style={'color': color, 'fontWeight': '600', 'textAlign': 'center'}))
-                
-                # Add ZAR/USD effect
-                zar_val = row.get('ZAR_USD')
-                if pd.isna(zar_val):
-                    tds.append(html.Td('-', style={'textAlign': 'center'}))
-                else:
-                    color = '#EF4444' if zar_val > 0 else '#10B981' if zar_val < 0 else '#6b6b6b'
-                    formatted_val = f"{zar_val:+.2f}%"
-                    tds.append(html.Td(formatted_val, style={'color': color, 'fontWeight': '700', 'textAlign': 'center', 'fontSize': '1.05em'}))
-                
-                body_rows.append(html.Tr(tds))
-            
-            table = html.Table(className='custom-table', children=[header, html.Tbody(body_rows)])
-
             # Get predictors (all columns except Date and ZAR_USD)
             predictors = [c for c in df_all.columns if c not in ['Date', 'ZAR_USD']]
             
@@ -477,25 +559,27 @@ def fetch_data(set_progress, trigger_value):
             # Default to first 1 predictor selected
             default_predictors = predictors[:1] if len(predictors) >= 1 else predictors
 
-            msg = f"Data successfully loaded!{supabase_msg} showing 10 most recent observations."
-            
             print("DEBUG: Background fetch_data complete. Returning results.")
             if set_progress:
                 set_progress((100, '100%', 'Complete'))
-            return df_all.to_dict('records'), msg, table, dropdown_options, default_predictors, {'marginTop': '2rem'}
+            return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data
         except Exception as e:
             print(f"DEBUG Error in fetch_data: {str(e)}")
             traceback.print_exc()
-            return dash.no_update, f'Error: {str(e)}', '', dash.no_update, dash.no_update, dash.no_update
-    return dash.no_update, '', '', dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, f'Error: {str(e)}', dash.no_update, dash.no_update, dash.no_update
+    return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update
 
 
 @callback(
     Output('predictor-checkboxes-container', 'children'),
     Input('predictor-dropdown-options-store', 'data'),
-    Input('selected-predictors', 'data')
+    Input('selected-predictors', 'data'),
+    Input('dashboard-tab', 'data')
 )
-def render_predictor_checkboxes(options, selected_predictors):
+def render_predictor_checkboxes(options, selected_predictors, active_tab):
+    if active_tab != 'data':
+        return dash.no_update
+    
     if not options:
         return html.Div('No predictors available', style={'color': 'var(--text-secondary)'})
     
@@ -525,31 +609,29 @@ def render_predictor_checkboxes(options, selected_predictors):
 @callback(
     Output('selected-predictors', 'data', allow_duplicate=True),
     Input({'type': 'predictor-checkbox', 'index': dash.ALL}, 'value'),
-    prevent_initial_call=True
+    prevent_initial_call='initial_duplicate'
 )
 def update_selected_predictors(checkbox_values):
+    # Prevent resetting when components are unmounted (tab switch)
+    if not checkbox_values:
+        return dash.no_update
+    
     selected = []
     ctx = dash.callback_context
     
-    # Get all checkbox states
-    for triggered in ctx.states_list:
-        for state in triggered:
-            if state['id']['type'] == 'predictor-checkbox':
-                if state['value']:
-                    selected.append(state['id']['index'])
-    
-    # Also check triggered values
+    # Rebuild selected list from current checkbox states
     for i, values in enumerate(checkbox_values):
         if values:
+            # Each 'values' is a list (from dcc.Checklist)
+            # We want the index from the component ID
             trigger_id = ctx.inputs_list[0][i]['id']
-            if trigger_id['index'] not in selected:
-                selected.append(trigger_id['index'])
+            selected.append(trigger_id['index'])
     
     return selected
 
 
 @callback(
-    Output('data-table-container', 'style'),
+    Output('data-table-container', 'style', allow_duplicate=True),
     Output('toggle-table-btn', 'children'),
     Input('toggle-table-btn', 'n_clicks'),
     State('data-table-container', 'style'),
@@ -566,11 +648,12 @@ def toggle_data_table(n_clicks, current_style):
     Output('zar-graph', 'figure'),
     Input('selected-predictors', 'data'),
     Input('fetched-data', 'data'),
+    Input('dashboard-tab', 'data'),
     State('theme-store', 'data'),
     State('predictor-dropdown-options-store', 'data')
 )
-def update_graph(selected_predictors, data, theme, options):
-    if not data or not selected_predictors:
+def update_graph(selected_predictors, data, active_tab, theme, options):
+    if active_tab != 'data' or not data or not selected_predictors:
         return go.Figure()
     
     df = pd.DataFrame(data)
@@ -779,26 +862,41 @@ FRIENDLY_FEATURE_NAMES = {
     Output('feature-contributions', 'children'),
     Output('model-history-chart', 'figure'),
     Output('model-info-content', 'children'),
-    Input('run-prediction-btn', 'n_clicks'),
+    Output('model-description-content', 'children'),
+    Output('model-prediction-data', 'data'),
+    Input('model-prediction-trigger', 'data'),
+    State('model-prediction-data', 'data'),
     State('theme-store', 'data'),
     prevent_initial_call=True
 )
-def run_model_prediction(n_clicks, theme):
-    if not n_clicks:
+def run_model_prediction(trigger, existing_model_data, theme):
+    result = None
+    error_msg = ""
+    
+    # Check if we can use cached raw result
+    if existing_model_data and isinstance(existing_model_data, dict) and 'raw_result' in existing_model_data:
+        print("DEBUG: Using existing model raw result from session")
+        result = existing_model_data['raw_result']
+    
+    # If no cached result and we have a trigger, run new prediction
+    if not result and trigger:
+        print(f"DEBUG: Running new model prediction. trigger={trigger}")
+        try:
+            result = predict_next_month()
+        except Exception as e:
+            traceback.print_exc()
+            error_msg = str(e)
+            if 'Model dependencies are unavailable' in error_msg:
+                error_msg = 'Model dependencies missing. Install joblib and scikit-learn in your Python environment.'
+            empty_fig = go.Figure().to_dict()
+            return ({'display': 'none'}, f'Prediction failed: {error_msg}',
+                    '', '', '', 'prediction-change', '', '', empty_fig, '', '', dash.no_update)
+
+    # If still no result (not triggered and no cache), return empty
+    if not result:
         empty_fig = go.Figure().to_dict()
         return ({'display': 'none'}, '', '', '', '', 'prediction-change',
-                '', '', empty_fig, '')
-
-    try:
-        result = predict_next_month()
-    except Exception as e:
-        traceback.print_exc()
-        error_msg = str(e)
-        if 'Model dependencies are unavailable' in error_msg:
-            error_msg = 'Model dependencies missing. Install joblib and scikit-learn in your Python environment.'
-        empty_fig = go.Figure().to_dict()
-        return ({'display': 'none'}, f'Prediction failed: {error_msg}',
-                '', '', '', 'prediction-change', '', '', empty_fig, '')
+                '', '', empty_fig, '', '', dash.no_update)
 
     # ── Prediction card ──
     pred_level = result['predicted_level']
@@ -952,34 +1050,68 @@ def run_model_prediction(n_clicks, theme):
     info = result['model_info']
     metrics = result.get('metrics', {})
     
+    # Build model info layout
     info_items = html.Div(children=[
         html.H5('Model Specification', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('Type', 'ElasticNet (L1 = Lasso)'),
-            _info_pill('Alpha', f"{info['alpha']:.4f}"),
-            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}"),
-            _info_pill('Intercept', f"{info['intercept']:+.4f}"),
-            _info_pill('Training Obs', str(info['training_observations'])),
-            _info_pill('Features', f"{info['n_selected']} / {info['n_features']} selected"),
-            _info_pill('Date Range', info['training_date_range']),
-            _info_pill('Target', 'Log-return ZAR/USD (% MoM)'),
+            _info_pill('Type', 'ElasticNet (L1 = Lasso)', 'Statistical model using both L1 and L2 regularization to find the best predictors.'),
+            _info_pill('Alpha', f"{info['alpha']:.4f}", 'Regularization strength: higher values mean more indicators are excluded to prevent overfitting.'),
+            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}", 'Balance between Lasso (1.0) and Ridge (0.0) regularization. Current is pure Lasso.'),
+            _info_pill('Intercept', f"{info['intercept']:+.4f}", 'The base log-return forecast before considering macroeconomic indicator impacts.'),
+            _info_pill('Training Obs', str(info['training_observations']), 'Number of historical monthly data points used to calibrate the model.'),
+            _info_pill('Features', f"{info['n_selected']} / {info['n_features']} selected", 'The number of macroeconomic indicators the model found statistically significant.'),
+            _info_pill('Date Range', info['training_date_range'], 'The historical window of data used for training the current model version.'),
+            _info_pill('Target', 'Log-return ZAR/USD (% MoM)', 'The model predicts the percentage change in the exchange rate from one month to the next.'),
         ]),
-        html.H5('In-Sample Performance', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px', 'marginBottom': '12px'}),
+        html.H5('In-Sample Performance Metrics', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px', 'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('MAE', f"R {metrics.get('mae', 0):.4f}"),
-            _info_pill('RMSE', f"R {metrics.get('rmse', 0):.4f}"),
-            _info_pill('R²', f"{metrics.get('r2', 0):.4f}"),
-            _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%"),
-            _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%"),
+            _info_pill('MAE', f"R {metrics.get('mae', 0):.4f}", 'Mean Absolute Error: Average forecast error in Rands. Lower values indicate better precision.'),
+            _info_pill('RMSE', f"R {metrics.get('rmse', 0):.4f}", 'Root Mean Squared Error: Similar to MAE but penalizes larger misses more heavily.'),
+            _info_pill('R²', f"{metrics.get('r2', 0):.4f}", 'Explains how much of the ZAR/USD volatility is captured by the model (0 to 1 scale).'),
+            _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%", 'Mean Absolute Percentage Error: Average error relative to the exchange rate level.'),
+            _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%", 'Percentage of months where the model correctly predicted if the ZAR would strengthen or weaken.'),
         ]),
     ])
 
+    # Dynamic Description Generation
+    top_feature = result['contributions'][0] if result['contributions'] else None
+    feature_impact_text = ""
+    if top_feature:
+        feat_name = FRIENDLY_FEATURE_NAMES.get(top_feature['feature'], top_feature['feature'])
+        impact_dir = "weakening" if top_feature['coefficient'] > 0 else "strengthening"
+        feature_impact_text = f"The most significant driver for this period is {feat_name}, which is currently exerting a {impact_dir} pressure on the ZAR."
+
+    direction_text = ""
+    if direction == 'weaken':
+        direction_text = f"The model forecasts a ZAR weakening of {abs(change_pct):.2f}% against the USD."
+    elif direction == 'strengthen':
+        direction_text = f"The model forecasts a ZAR strengthening of {abs(change_pct):.2f}% against the USD."
+    else:
+        direction_text = "The model expects the ZAR/USD exchange rate to remain relatively stable."
+
+    perf_text = f"Historically, this model has achieved a directional accuracy of {metrics.get('directional_accuracy', 0):.1f}% during its training period, with a mean absolute error (MAE) of approximately {metrics.get('mae', 0):.2f} cents per Dollar."
+
+    analysis_content = html.Div([
+        html.P(f"Based on the latest data for {result['last_date']}, {direction_text} {feature_impact_text}"),
+        html.P(perf_text),
+        html.P("This forecast is based on an ElasticNet (Lasso) regression model that automatically selects the most relevant macroeconomic indicators. "
+               "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates (Rands per Dollar) for interpretability.")
+    ])
+
+    prediction_data = {
+        'raw_result': result,
+        'last_updated': str(datetime.datetime.now())
+    }
+
     return ({'display': 'block'}, '', date_text, pred_value, change_text,
-            change_class, baseline_text, contrib_rows, fig_dict, info_items)
+            change_class, baseline_text, contrib_rows, fig_dict, info_items, analysis_content, prediction_data)
 
 
-def _info_pill(label, value):
+def _info_pill(label, value, description=None):
     return html.Div(className='info-pill', children=[
-        html.Span(label, className='info-pill-label'),
-        html.Span(str(value), className='info-pill-value'),
+        html.Div(className='info-pill-header', children=[
+            html.Span(label, className='info-pill-label'),
+            html.Span(str(value), className='info-pill-value'),
+        ]),
+        html.P(description, className='info-pill-description') if description else None
     ])

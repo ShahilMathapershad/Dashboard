@@ -11,6 +11,7 @@ import urllib.request
 import urllib.parse
 import logging
 import requests
+import datetime
 from dotenv import load_dotenv
 from logic.supabase_client import supabase
 # Configure logging
@@ -461,6 +462,45 @@ def fetch_and_save_data():
     # Explicitly replace only GOLD_PRICE in Supabase with the latest World Bank series.
     replace_gold_price_column_in_supabase(wb_gold)
     return save_resp
+
+def is_last_day_of_month():
+    """Check if today is the last day of the month."""
+    today = datetime.date.today()
+    next_day = today + datetime.timedelta(days=1)
+    return next_day.month != today.month
+
+def should_update_from_api():
+    """
+    Decide whether to fetch from APIs or pull from Supabase.
+    Returns True if today is the last day of the month AND Supabase doesn't have today's month data yet.
+    """
+    if not is_last_day_of_month():
+        return False
+    
+    if not supabase:
+        return True # Fallback if supabase not available
+    
+    try:
+        # Check the latest date in Supabase
+        resp = supabase.table('data').select('Date').order('Date', desc=True).limit(1).execute()
+        if not resp.data:
+            return True
+        
+        latest_date_str = resp.data[0]['Date']
+        # Handle both 'YYYY-MM-DD' and 'YYYY-MM-DDTHH:MM:SS+00:00'
+        latest_date = pd.to_datetime(latest_date_str).date()
+        
+        today = datetime.date.today()
+        # If the latest date in Supabase is already today or from this month's end, we don't need to update again.
+        if latest_date.year == today.year and latest_date.month == today.month:
+            # If it's the last day and we already have a record for this month, assume it's updated.
+            # Usually data is monthly-end.
+            return False
+            
+        return True
+    except Exception as e:
+        logger.error(f"Error checking Supabase for latest date: {e}")
+        return True
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Data fetch and Supabase sync")
