@@ -163,9 +163,80 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
+    // Scroll-based trendline drawing for landing page
+    const handleTrendlineScroll = () => {
+        const path = document.querySelector('.trendline-path');
+        if (path) {
+            const scrollY = window.scrollY;
+            const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+            const scrollPercent = Math.min(1, scrollY / maxScroll);
+            
+            // Only use scroll-based drawing if the user has actually scrolled
+            // Otherwise, let the CSS animation handle it or keep it at start
+            if (scrollY > 10) {
+                path.style.animation = 'none';
+                const drawLength = 2000 * scrollPercent;
+                path.style.strokeDashoffset = 2000 - drawLength;
+                path.style.opacity = 0.15 + (scrollPercent * 0.1);
+            }
+        }
+    };
+
+    window.addEventListener('scroll', handleTrendlineScroll);
+    
+    // Mouse-aware parallax for particles
+    const handleParticleParallax = (e) => {
+        const particles = document.querySelectorAll('.particle-node');
+        const mouseX = e.clientX / window.innerWidth;
+        const mouseY = e.clientY / window.innerHeight;
+        
+        particles.forEach((p, i) => {
+            const speed = (i + 1) * 20;
+            const x = (mouseX - 0.5) * speed;
+            const y = (mouseY - 0.5) * speed;
+            // Combine with existing floating animation via CSS variable or direct transform
+            // For simplicity, we'll just use a subtle translate
+            p.style.margin = `${y}px 0 0 ${x}px`;
+        });
+    };
+
+    window.addEventListener('mousemove', handleParticleParallax);
+
+    // Inject background trendline SVG dynamically to avoid Dash 4.0.0 limitations with html.Svg
+    const observeTrendline = () => {
+        const injectSVG = () => {
+            const container = document.getElementById('bg-trendline-container');
+            if (container && !container.dataset.injected) {
+                container.dataset.injected = 'true';
+                container.innerHTML = `
+                    <svg viewBox="0 0 1000 400" style="width: 100%; height: 100%; pointer-events: none;">
+                        <path 
+                            class="trendline-path" 
+                            d="M0,350 Q100,340 200,300 T400,250 T600,280 T800,150 T1000,100" 
+                            fill="none" 
+                            stroke="#5b8def" 
+                            stroke-width="2">
+                        </path>
+                    </svg>
+                `;
+            }
+        };
+
+        // Initial check
+        injectSVG();
+
+        // Watch for DOM changes (Dash is a SPA)
+        const observer = new MutationObserver(() => {
+            injectSVG();
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+    };
+
     handleLoginEnterKey();
     observeChips();
     observeChartVisibility();
+    observeTrendline();
     
     // Listen for custom plotly resize events from Dash callbacks
     window.addEventListener('plotlyResize', () => {
