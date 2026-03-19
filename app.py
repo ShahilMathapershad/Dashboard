@@ -93,6 +93,57 @@ app.clientside_callback(
     Input('theme-store', 'data'),
 )
 
+# Simplified clientside callback - let JavaScript handle most resize logic
+app.clientside_callback(
+    """
+    function(modelResultsStyle) {
+        // Minimal trigger - let the main JavaScript handler do the work
+        if (modelResultsStyle && modelResultsStyle.display !== 'none') {
+            setTimeout(() => {
+                window.dispatchEvent(new Event('plotlyResize'));
+            }, 100);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('model-results-container', 'id'), # Dummy output
+    Input('model-results-container', 'style'),
+)
+
+# Simplified clientside callback for data visualization
+app.clientside_callback(
+    """
+    function(dataVizStyle) {
+        // Minimal trigger - let the main JavaScript handler do the work
+        if (dataVizStyle && dataVizStyle.display !== 'none') {
+            setTimeout(() => {
+                window.dispatchEvent(new Event('plotlyResize'));
+            }, 100);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('zar-graph', 'id'), # Dummy output
+    Input('visualization-container', 'style'),
+)
+
+# Simplized clientside callback for figure changes
+app.clientside_callback(
+    """
+    function(figure) {
+        // Minimal trigger for figure changes
+        if (figure && figure.data && figure.data.length > 0) {
+            setTimeout(() => {
+                window.dispatchEvent(new Event('plotlyResize'));
+            }, 50);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('prediction-value', 'id'), # Dummy output
+    Input('model-history-chart', 'figure'),
+)
+
 
 # Auth guard: separate callbacks for clearer logic and to avoid circular loops
 @callback(

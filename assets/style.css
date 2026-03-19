@@ -380,6 +380,43 @@ p  { margin: 0; color: var(--text-2); }
     text-align: center;
     flex-shrink: 0;
 }
+
+.nav-icon-image {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.nav-icon-img {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    filter: brightness(0) saturate(100%) invert(53%) sepia(0%) saturate(0%) hue-rotate(173deg) brightness(95%) contrast(88%);
+    transition: filter var(--dur) var(--ease);
+}
+
+/* Active state - white for gradient background */
+.nav-link-custom.active .nav-icon-img {
+    filter: brightness(0) saturate(100%) invert(100%) sepia(0%) saturate(7500%) hue-rotate(324deg) brightness(103%) contrast(103%);
+}
+
+/* Hover state */
+.nav-link-custom:hover .nav-icon-img {
+    filter: brightness(0) saturate(100%) invert(96%) sepia(0%) saturate(7500%) hue-rotate(324deg) brightness(103%) contrast(103%);
+}
+
+/* Light theme adjustments */
+.light-theme .nav-icon-img {
+    filter: brightness(0) saturate(100%) invert(35%) sepia(0%) saturate(0%) hue-rotate(173deg) brightness(95%) contrast(88%);
+}
+
+.light-theme .nav-link-custom.active .nav-icon-img {
+    filter: brightness(0) saturate(100%) invert(100%) sepia(0%) saturate(7500%) hue-rotate(324deg) brightness(103%) contrast(103%);
+}
+
+.light-theme .nav-link-custom:hover .nav-icon-img {
+    filter: brightness(0) saturate(100%) invert(10%) sepia(0%) saturate(0%) hue-rotate(173deg) brightness(95%) contrast(88%);
+}
 .nav-link-custom:hover {
     background: var(--bg-overlay-hover);
     color: var(--text-1);
@@ -415,6 +452,10 @@ p  { margin: 0; color: var(--text-2); }
     gap: 0;
 }
 .sidebar-collapsed .nav-icon { margin: 0; }
+.sidebar-collapsed .nav-icon-img {
+    width: 18px;
+    height: 18px;
+}
 .sidebar-collapsed .content-area { margin-left: var(--sidebar-w-collapsed); }
 
 /* ═══════════════════════════════════════════
@@ -762,6 +803,219 @@ p  { margin: 0; color: var(--text-2); }
 }
 .custom-table tr:last-child td {
     border-bottom: none;
+}
+
+/* ═══════════════════════════════════════════
+   Model Page
+   ═══════════════════════════════════════════ */
+.model-top-row {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 1.5vh;
+    margin-bottom: 1.5vh;
+}
+
+.model-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+}
+
+.card-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-1);
+    margin-bottom: 4px;
+}
+.card-subtitle {
+    font-size: 0.75rem;
+    color: var(--text-3);
+    margin-bottom: 20px;
+}
+
+/* Prediction Hero Card */
+.prediction-hero {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+.prediction-hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent-gradient);
+}
+
+.prediction-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.prediction-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+}
+.prediction-date {
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.prediction-value {
+    font-size: 2.25rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    margin-bottom: 8px;
+}
+
+.prediction-change {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+.change-negative { color: #EF4444; }
+.change-positive { color: #10B981; }
+.change-neutral  { color: var(--text-3); }
+
+.prediction-baseline {
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 0.8125rem;
+}
+.baseline-label { color: var(--text-3); }
+.baseline-value { color: var(--text-2); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* Feature Contributions */
+.contrib-row {
+    display: grid;
+    grid-template-columns: 180px 1fr 64px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+.contrib-row:last-child { border-bottom: none; }
+
+.contrib-info { display: flex; flex-direction: column; gap: 2px; }
+.contrib-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-1);
+}
+.contrib-direction {
+    font-size: 0.6875rem;
+    color: var(--text-3);
+}
+
+.contrib-bar-container {
+    height: 6px;
+    background: var(--bg-overlay);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+}
+.contrib-bar {
+    height: 100%;
+    border-radius: var(--radius-full);
+    transition: width 0.6s var(--ease-out);
+}
+
+.contrib-value {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Model Chart */
+.model-card {
+    position: relative;
+    min-height: 480px;
+}
+
+.model-chart {
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin-top: 4px;
+    width: 100%;
+    height: calc(100% - 130px); /* Subtract padding, header, and selector space */
+}
+
+/* Data Chart */
+.viz-container {
+    width: 100%;
+    padding: 0;
+    min-height: 480px;
+}
+
+#zar-graph {
+    width: 100%;
+    height: calc(100% - 130px); /* Subtract padding, header, and selector space */
+}
+
+/* Ensure all plotly charts fill their containers */
+.js-plotly-plot {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* Plot container styling */
+.plot-container {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+/* Model Info Grid */
+.model-info-card { margin-top: 1.5vh; }
+
+.model-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+}
+
+.info-pill {
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.info-pill-label {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+}
+.info-pill-value {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+    .model-top-row {
+        grid-template-columns: 1fr;
+    }
+    .contrib-row {
+        grid-template-columns: 1fr 1fr 56px;
+    }
 }
 
 /* ═══════════════════════════════════════════

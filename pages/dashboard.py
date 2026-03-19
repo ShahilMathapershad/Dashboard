@@ -2,20 +2,21 @@ import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
 from logic.data_fetcher import fetch_fred_data, fetch_world_bank_gold_data, fetch_sa_inflation_hardcoded, process_data, save_to_supabase, replace_gold_price_column_in_supabase, FRED_API_KEY, SERIES_CONFIG
+from logic.model import predict_next_month
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import traceback
 
 
 dash.register_page(__name__, path='/dashboard')
 
 
 def sidebar(active_tab):
-    def link(id_, label, icon, tab_name):
+    def link(id_, label, tab_name):
         classes = 'nav-link-custom active' if active_tab == tab_name else 'nav-link-custom'
         return html.Div(id=id_, className=classes, children=[
-            html.Span(icon, className='nav-icon'),
             html.Span(label, className='nav-label')
         ], n_clicks=0)
 
@@ -26,11 +27,14 @@ def sidebar(active_tab):
             html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-dark')
         ]),
         html.Div(className='sidebar-nav', children=[
-            link('nav-data', 'Data', '📊', 'data'),
-            link('nav-model', 'Model', '🧠', 'model'),
+            link('nav-data', 'Data', 'data'),
+            link('nav-model', 'Model', 'model'),
         ]),
         html.Div(className='sidebar-footer', children=[
-            link('nav-signout', 'Sign out', '→', 'signout')
+            html.Div(id='nav-signout', className='nav-link-custom', children=[
+                html.Span('→', className='nav-icon'),
+                html.Span('Sign out', className='nav-label')
+            ], n_clicks=0)
         ])
     ])
 
@@ -112,15 +116,68 @@ def model_tab_content():
         html.Div(className='page-header', children=[
             html.Div(children=[
                 html.H2('Model', className='page-title'),
-                html.P("Predict ZAR/USD trends using machine learning and statistical models.",
+                html.P("Next-month ZAR/USD forecast via frozen ElasticNet (Lasso) model.",
                        className='page-subtitle'),
             ]),
+            html.Div(className='page-actions', children=[
+                html.Button('Run Prediction', id='run-prediction-btn', n_clicks=0, className='btn-primary'),
+            ])
         ]),
-        html.Div(className='empty-state', children=[
-            html.Div('🧠', className='empty-state-icon'),
-            html.H4('Coming Soon'),
-            html.P('Model functionality is under development.', className='page-subtitle'),
-        ])
+
+        html.Div(id='model-error', className='error-message'),
+
+        # Prediction results container
+        html.Div(id='model-results-container', style={'display': 'none'}, children=[
+
+            # Top row: prediction card + feature contributions
+            html.Div(className='model-top-row', children=[
+
+                # Prediction Card
+                html.Div(className='model-card prediction-hero', children=[
+                    html.Div(className='prediction-header', children=[
+                        html.Span('Next Month Forecast', className='prediction-label'),
+                        html.Span(id='prediction-date', className='prediction-date'),
+                    ]),
+                    html.Div(id='prediction-value', className='prediction-value'),
+                    html.Div(id='prediction-change', className='prediction-change'),
+                    html.Div(className='prediction-baseline', children=[
+                        html.Span('Current: ', className='baseline-label'),
+                        html.Span(id='prediction-baseline-value', className='baseline-value'),
+                    ]),
+                ]),
+
+                # Feature Contributions
+                html.Div(className='model-card', children=[
+                    html.H4('Key Drivers', className='card-title'),
+                    html.P('Non-zero model coefficients and their current contribution',
+                           className='card-subtitle'),
+                    html.Div(id='feature-contributions'),
+                ]),
+            ]),
+
+            # Historical Fit Chart
+            html.Div(id='visualization-container', className='model-card', children=[
+                html.H4('Historical Fit', className='card-title'),
+                html.P('Model predictions vs actual ZAR/USD (level space)',
+                       className='card-subtitle'),
+                dcc.Graph(
+                    id='model-history-chart',
+                    className='model-chart',
+                    config={
+                        'displayModeBar': 'hover',
+                        'displaylogo': False,
+                        'responsive': True,
+                        'scrollZoom': True,
+                    },
+                ),
+            ]),
+
+            # Model Info
+            html.Div(className='model-card model-info-card', children=[
+                html.H4('Model Specification', className='card-title'),
+                html.Div(id='model-info-content'),
+            ]),
+        ]),
     ])
 
 
@@ -265,7 +322,7 @@ def validate_keys(n_clicks, current_trigger):
     running=[
         (Output('fetch-data-btn', 'disabled'), True, False),
         (Output('progress-container', 'hidden'), False, True),
-        (Output('data-error', 'children'), "", dash.no_update)
+        (Output('data-error', 'children'), "", "")
     ],
     progress=[
         Output('fetch-progress-bar', 'value'),
@@ -311,7 +368,7 @@ def fetch_data(set_progress, trigger_value):
             
             if raw.empty:
                 print("DEBUG: raw_df is empty")
-                return dash.no_update, 'Failed to fetch data. Please check your API keys and try again.', dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, 'Failed to fetch data. Please check your API keys and try again.', '', dash.no_update, dash.no_update, dash.no_update
             
             print(f"DEBUG: Successfully fetched raw data with {len(raw)} rows. Processing...")
             if set_progress:
@@ -320,7 +377,7 @@ def fetch_data(set_progress, trigger_value):
             
             if processed.empty:
                 print("DEBUG: processed_df is empty")
-                return dash.no_update, 'No data available in the requested date range.', dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, 'No data available in the requested date range.', '', dash.no_update, dash.no_update, dash.no_update
 
             # Save to Supabase (All data since 2018-01-31)
             supabase_msg = ""
@@ -428,10 +485,9 @@ def fetch_data(set_progress, trigger_value):
             return df_all.to_dict('records'), msg, table, dropdown_options, default_predictors, {'marginTop': '2rem'}
         except Exception as e:
             print(f"DEBUG Error in fetch_data: {str(e)}")
-            import traceback
             traceback.print_exc()
-            return dash.no_update, f'Error: {str(e)}', dash.no_update, dash.no_update, dash.no_update, dash.no_update
-    return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, f'Error: {str(e)}', '', dash.no_update, dash.no_update, dash.no_update
+    return dash.no_update, '', '', dash.no_update, dash.no_update, dash.no_update
 
 
 @callback(
@@ -608,8 +664,8 @@ def update_graph(selected_predictors, data, theme, options):
         template=None,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=56, r=24, t=48, b=48),
-        height=640,
+        margin=dict(l=40, r=20, t=30, b=80),
+        autosize=True,
         font=dict(
             family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
             size=12,
@@ -699,3 +755,231 @@ def update_graph(selected_predictors, data, theme, options):
     )
     
     return fig
+
+
+# ═══════════════════════════════════════════
+#   Model Page Callbacks
+# ═══════════════════════════════════════════
+
+FRIENDLY_FEATURE_NAMES = {
+    '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate',
+    'VIX': 'VIX (Volatility Index)',
+    'BRENT_OIL_PRICE': 'Brent Crude Oil Price',
+}
+
+
+@callback(
+    Output('model-results-container', 'style'),
+    Output('model-error', 'children'),
+    Output('prediction-date', 'children'),
+    Output('prediction-value', 'children'),
+    Output('prediction-change', 'children'),
+    Output('prediction-change', 'className'),
+    Output('prediction-baseline-value', 'children'),
+    Output('feature-contributions', 'children'),
+    Output('model-history-chart', 'figure'),
+    Output('model-info-content', 'children'),
+    Input('run-prediction-btn', 'n_clicks'),
+    State('theme-store', 'data'),
+    prevent_initial_call=True
+)
+def run_model_prediction(n_clicks, theme):
+    if not n_clicks:
+        empty_fig = go.Figure().to_dict()
+        return ({'display': 'none'}, '', '', '', '', 'prediction-change',
+                '', '', empty_fig, '')
+
+    try:
+        result = predict_next_month()
+    except Exception as e:
+        traceback.print_exc()
+        error_msg = str(e)
+        if 'Model dependencies are unavailable' in error_msg:
+            error_msg = 'Model dependencies missing. Install joblib and scikit-learn in your Python environment.'
+        empty_fig = go.Figure().to_dict()
+        return ({'display': 'none'}, f'Prediction failed: {error_msg}',
+                '', '', '', 'prediction-change', '', '', empty_fig, '')
+
+    # ── Prediction card ──
+    pred_level = result['predicted_level']
+    change_pct = result['predicted_change_pct']
+    direction = result['direction']
+
+    pred_value = f"R {pred_level:.4f}"
+    if direction == 'weaken':
+        change_text = f"▲ {abs(change_pct):.2f}% (ZAR weakens)"
+        change_class = 'prediction-change change-negative'
+    elif direction == 'strengthen':
+        change_text = f"▼ {abs(change_pct):.2f}% (ZAR strengthens)"
+        change_class = 'prediction-change change-positive'
+    else:
+        change_text = f"~ {abs(change_pct):.2f}% (stable)"
+        change_class = 'prediction-change change-neutral'
+
+    baseline_text = f"R {result['last_zar_usd']:.4f}  ({result['last_date']})"
+    date_text = f"for {result['next_month_date']}"
+
+    # ── Feature contributions ──
+    contrib_rows = []
+    for c in result['contributions']:
+        feat_name = FRIENDLY_FEATURE_NAMES.get(c['feature'], c['feature'])
+        coef = c['coefficient']
+        contrib = c['contribution']
+        direction_label = 'Weakens ZAR' if coef > 0 else 'Strengthens ZAR'
+        bar_color = '#EF4444' if contrib > 0 else '#10B981'
+        bar_width = min(abs(contrib) / max(abs(x['contribution']) for x in result['contributions']) * 100, 100)
+
+        contrib_rows.append(
+            html.Div(className='contrib-row', children=[
+                html.Div(className='contrib-info', children=[
+                    html.Span(feat_name, className='contrib-name'),
+                    html.Span(direction_label, className='contrib-direction'),
+                ]),
+                html.Div(className='contrib-bar-container', children=[
+                    html.Div(className='contrib-bar', style={
+                        'width': f'{bar_width}%',
+                        'backgroundColor': bar_color,
+                    }),
+                ]),
+                html.Span(f'{contrib:+.3f}', className='contrib-value',
+                           style={'color': bar_color}),
+            ])
+        )
+
+    # ── Historical fit chart ──
+    history = result.get('history', {})
+    # Fallback to dark theme if theme is None
+    is_dark = (theme == 'dark') if theme else True
+    text_color = '#ffffff' if is_dark else '#0a0a0a'
+    text_muted = '#6b6b6b' if is_dark else '#737373'
+    grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
+    line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
+
+    fig = go.Figure()
+    
+    # Ensure data is valid and not empty
+    dates = history.get('dates', [])
+    actual = history.get('actual', [])
+    predicted = history.get('predicted', [])
+    
+    if dates and actual and predicted and len(dates) > 0:
+        # Convert all values to native Python types to avoid serialization issues
+        dates_clean = [str(d) for d in dates]
+        actual_clean = [float(a) for a in actual]
+        predicted_clean = [float(p) for p in predicted]
+        
+        # Ensure no NaN or infinite values
+        valid_data = True
+        for i, (d, a, p) in enumerate(zip(dates_clean, actual_clean, predicted_clean)):
+            if not (d and a == a and p == p):  # Check for NaN
+                valid_data = False
+                break
+        
+        if valid_data:
+            fig.add_trace(go.Scatter(
+                x=dates_clean, y=actual_clean,
+                name='Actual', mode='lines',
+                line=dict(color='#E8E8E8' if is_dark else '#1A1A1A', width=2.5),
+                hovertemplate='Actual: %{y:.4f}<extra></extra>'
+            ))
+            fig.add_trace(go.Scatter(
+                x=dates_clean, y=predicted_clean,
+                name='Predicted', mode='lines',
+                line=dict(color='#5b8def', width=2, dash='dot'),
+                hovertemplate='Predicted: %{y:.4f}<extra></extra>'
+            ))
+            # Next-month forecast point
+            fig.add_trace(go.Scatter(
+                x=[result['next_month_date']], y=[pred_level],
+                name='Forecast', mode='markers',
+                marker=dict(color='#F59E0B', size=10, symbol='diamond',
+                            line=dict(width=2, color='#fff' if is_dark else '#000')),
+                hovertemplate=f'<b>Forecast</b>: R {pred_level:.4f}<extra></extra>',
+            ))
+        else:
+            fig.add_annotation(
+                text="Invalid data detected",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(color=text_muted, size=14)
+            )
+    else:
+        # Empty figure with message
+        fig.add_annotation(
+            text="No data available for chart",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(color=text_muted, size=14)
+        )
+
+    layout = {
+        'template': None,
+        'paper_bgcolor': 'rgba(0,0,0,0)',
+        'plot_bgcolor': 'rgba(0,0,0,0)',
+        'margin': dict(l=56, r=24, t=32, b=48),
+        'autosize': True,
+        'font': dict(family="Inter, sans-serif", size=12, color=text_color),
+        'legend': dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+            font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
+            borderwidth=0,
+        ),
+        'hovermode': "x unified",
+        'hoverlabel': dict(
+            bgcolor='rgba(16,16,16,0.96)' if is_dark else 'rgba(255,255,255,0.96)',
+            font_size=12, font_family="Inter", font_color=text_color,
+            bordercolor=line_color,
+        ),
+        'xaxis': dict(
+            showgrid=False, zeroline=False, showline=True, linewidth=1,
+            linecolor=line_color, tickfont=dict(size=10, color=text_muted),
+        ),
+        'yaxis': dict(
+            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+            zeroline=False, showline=False,
+            tickfont=dict(size=10, color=text_muted),
+            title=dict(text="ZAR / USD", font=dict(size=11, color=text_muted)),
+            tickformat=".2f",
+        ),
+    }
+    
+    fig.update_layout(layout)
+    
+    # Convert to dict to ensure proper serialization
+    fig_dict = fig.to_dict()
+
+    # ── Model info ──
+    info = result['model_info']
+    metrics = result.get('metrics', {})
+    
+    info_items = html.Div(children=[
+        html.H5('Model Specification', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginBottom': '12px'}),
+        html.Div(className='model-info-grid', children=[
+            _info_pill('Type', 'ElasticNet (L1 = Lasso)'),
+            _info_pill('Alpha', f"{info['alpha']:.4f}"),
+            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}"),
+            _info_pill('Intercept', f"{info['intercept']:+.4f}"),
+            _info_pill('Training Obs', str(info['training_observations'])),
+            _info_pill('Features', f"{info['n_selected']} / {info['n_features']} selected"),
+            _info_pill('Date Range', info['training_date_range']),
+            _info_pill('Target', 'Log-return ZAR/USD (% MoM)'),
+        ]),
+        html.H5('In-Sample Performance', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px', 'marginBottom': '12px'}),
+        html.Div(className='model-info-grid', children=[
+            _info_pill('MAE', f"R {metrics.get('mae', 0):.4f}"),
+            _info_pill('RMSE', f"R {metrics.get('rmse', 0):.4f}"),
+            _info_pill('R²', f"{metrics.get('r2', 0):.4f}"),
+            _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%"),
+            _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%"),
+        ]),
+    ])
+
+    return ({'display': 'block'}, '', date_text, pred_value, change_text,
+            change_class, baseline_text, contrib_rows, fig_dict, info_items)
+
+
+def _info_pill(label, value):
+    return html.Div(className='info-pill', children=[
+        html.Span(label, className='info-pill-label'),
+        html.Span(str(value), className='info-pill-value'),
+    ])

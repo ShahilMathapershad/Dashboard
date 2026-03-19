@@ -3,6 +3,8 @@ import sys
 import webbrowser
 import threading
 import time
+import urllib.request
+import urllib.error
 
 # Get the absolute path of the project root (parent of the 'run' folder)
 # This allows us to find the root folder correctly from any starting directory.
@@ -26,11 +28,19 @@ except ImportError as e:
 
 def open_browser():
     """Opens the web browser after a short delay to allow the server to start."""
-    # A short delay ensures the Dash server is up and listening
-    time.sleep(1.5)
     url = "http://127.0.0.1:8050"
-    print(f"Automatically opening {url} in your browser...")
-    webbrowser.open(url)
+    deadline = time.time() + 15
+
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1):
+                print(f"Automatically opening {url} in your browser...")
+                webbrowser.open_new(url)
+                return
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            time.sleep(0.5)
+
+    print(f"Server did not become reachable in time. Open {url} manually if needed.")
 
 if __name__ == "__main__":
     # Start the browser-opening thread in the background
