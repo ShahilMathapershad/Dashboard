@@ -77,45 +77,35 @@ document.addEventListener('DOMContentLoaded', function () {
             try {
                 const plots = document.querySelectorAll('.js-plotly-plot');
                 plots.forEach((plot) => {
-                    // Skip diagnostic plots - they manage their own height
-                    if (plot.closest('.diagnostic-plot-container')) return;
-
-                    // Calculate size based on container
-                    const container = plot.closest('.model-card, .viz-container');
-                    if (container) {
-                        const containerRect = container.getBoundingClientRect();
-                        
-                        // Dynamic padding calculation based on visible elements
-                        let padding = 130; // Base padding for headers/padding/selector
-                        
-                        // Add extra space if table is visible in the same container
-                        const tableCard = container.querySelector('.table-card');
-                        if (tableCard && getComputedStyle(tableCard).display !== 'none') {
-                            const tableRect = tableCard.getBoundingClientRect();
-                            // Add table height plus gap between elements
-                            padding += tableRect.height + 20; // 20px for gap
-                        }
-                        
-                        const plotHeight = Math.max(300, containerRect.height - padding);
-                        const plotWidth = Math.max(400, containerRect.width - 40);
-                        
+                    // Get the graph div (dcc.Graph component)
+                    const graphDiv = plot.closest('.dash-graph');
+                    if (!graphDiv) return;
+                    
+                    // Use the graph div's computed style height if available
+                    const graphStyle = getComputedStyle(graphDiv);
+                    const graphHeight = graphDiv.offsetHeight;
+                    const graphWidth = graphDiv.offsetWidth;
+                    
+                    if (graphHeight > 0 && graphWidth > 0) {
+                        // Use the container's actual dimensions
                         plot.style.width = '100%';
-                        plot.style.height = plotHeight + 'px';
+                        plot.style.height = '100%';
                         
-                        // Also update the plotly layout if possible
+                        // Update plotly layout to match container
                         if (window.Plotly && typeof window.Plotly.relayout === 'function') {
                             window.Plotly.relayout(plot, {
-                                height: plotHeight,
-                                width: plotWidth,
+                                height: graphHeight,
+                                width: graphWidth,
                                 autosize: true
                             });
                         }
                     }
+                    
+                    // Always call resize to ensure proper rendering
                     if (window.Plotly && typeof window.Plotly.Plots.resize === 'function') {
                         window.Plotly.Plots.resize(plot);
                     }
                 });
-                // Don't trigger window resize event to avoid loops
             } finally {
                 resizeInProgress = false;
             }
@@ -236,10 +226,35 @@ document.addEventListener('DOMContentLoaded', function () {
         observer.observe(document.body, { childList: true, subtree: true });
     };
 
+    // Force hide slider marks (white boxes)
+    const hideSliderMarks = () => {
+        const marks = document.querySelectorAll('.rc-slider-mark, .rc-slider-dot, .rc-slider-tooltip, .rc-slider-step');
+        marks.forEach(mark => {
+            mark.style.setProperty('display', 'none', 'important');
+            mark.style.setProperty('visibility', 'hidden', 'important');
+            mark.style.setProperty('height', '0', 'important');
+            mark.style.setProperty('width', '0', 'important');
+            mark.style.setProperty('opacity', '0', 'important');
+            mark.style.setProperty('pointer-events', 'none', 'important');
+        });
+    };
+
+    // Observer to continuously hide slider marks
+    const observeSliders = () => {
+        hideSliderMarks();
+        
+        const observer = new MutationObserver(() => {
+            hideSliderMarks();
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+    };
+
     handleLoginEnterKey();
     observeChips();
     observeChartVisibility();
     observeTrendline();
+    observeSliders();
     
     // Listen for custom plotly resize events from Dash callbacks
     window.addEventListener('plotlyResize', () => {
@@ -253,7 +268,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
     // Optimized navigation resize handler
     document.addEventListener('click', (e) => {
-        if (e.target.closest('#nav-data') || e.target.closest('#nav-model')) {
+        if (e.target.closest('#nav-data') || e.target.closest('#nav-model') || e.target.closest('#nav-scenario')) {
             // Use a single delayed resize instead of multiple calls
             setTimeout(() => {
                 window.dispatchEvent(new Event('plotlyResize'));

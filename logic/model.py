@@ -487,19 +487,19 @@ def predict_next_month():
                 }
 
     return {
-        'predicted_level': round(predicted_level, 4),
-        'predicted_change_pct': round(predicted_change_pct, 2),
-        'predicted_log_return': round(predicted_log_return, 4),
+        'predicted_level': round(float(predicted_level), 4),
+        'predicted_change_pct': round(float(predicted_change_pct), 2),
+        'predicted_log_return': round(float(predicted_log_return), 4),
         'direction': direction,
-        'last_zar_usd': round(last_zar_usd, 4),
+        'last_zar_usd': round(float(last_zar_usd), 4),
         'last_date': last_date.strftime('%Y-%m-%d'),
         'next_month_date': next_month_date.strftime('%Y-%m-%d'),
         'contributions': contributions,
         'selected_features': selected_features,
         'model_info': {
-            'alpha': model_data.get('alpha'),
-            'l1_ratio': model_data.get('l1_ratio'),
-            'intercept': model_data.get('intercept'),
+            'alpha': float(model_data.get('alpha')) if model_data.get('alpha') is not None else None,
+            'l1_ratio': float(model_data.get('l1_ratio')) if model_data.get('l1_ratio') is not None else None,
+            'intercept': float(model_data.get('intercept')) if model_data.get('intercept') is not None else None,
             'training_observations': model_data.get('training_observations'),
             'training_date_range': model_data.get('training_date_range'),
             'n_features': len(feature_names),
@@ -521,4 +521,195 @@ def predict_next_month():
             'qq_plot': qq_data,
             'partial_plots': partial_plots,
         }
+    }
+
+
+def get_scenario_baseline():
+    """
+    Return the baseline data needed for scenario analysis:
+    - Current raw predictor values
+    - Selected features and their coefficients
+    - Base prediction (no changes)
+    - Historical ranges for each raw predictor (for slider bounds)
+    """
+    model_data = load_model(trainset_model=False)
+    model = model_data['model']
+    scaler = model_data['scaler']
+    feature_names = model_data['feature_names']
+    selected_features = model_data.get('selected_features', [])
+
+    raw_df = fetch_data_from_supabase()
+    df_features, df_raw = engineer_features(raw_df)
+
+    if df_features.empty:
+        raise ValueError("Not enough data to compute features.")
+
+    # Base prediction (current values)
+    latest_row = df_features.iloc[[-1]]
+    X_latest = latest_row.drop(columns=['ZAR_USD'], errors='ignore')
+    missing = [f for f in feature_names if f not in X_latest.columns]
+    for col in missing:
+        X_latest[col] = 0.0
+    X_latest = X_latest[feature_names]
+
+    X_scaled = scaler.transform(X_latest)
+    base_log_return = model.predict(X_scaled)[0]
+    last_zar_usd = raw_df['ZAR_USD'].dropna().iloc[-1]
+    base_level = last_zar_usd * np.exp(base_log_return / 100)
+
+    last_date = raw_df.index[-1]
+    next_month_date = last_date + pd.offsets.MonthEnd(1)
+
+    # Identify which RAW predictors feed into selected features
+    # Map selected engineered features back to their raw base columns
+    raw_predictor_map = {}
+    for feat in selected_features:
+        base = feat.replace('_Lag1', '').replace('_3M_Trend', '')
+        # Skip ZAR_USD variants — user can't control the target
+        if base == 'ZAR_USD':
+            continue
+        if base not in raw_predictor_map:
+            raw_predictor_map[base] = []
+        raw_predictor_map[base].append(feat)
+
+    # Build slider config for each raw predictor
+    predictors_config = []
+    for raw_col, eng_features in raw_predictor_map.items():
+        # Get current raw value (latest)
+        if raw_col in raw_df.columns:
+            current_val = float(raw_df[raw_col].dropna().iloc[-1])
+            hist_series = raw_df[raw_col].dropna()
+            hist_min = float(hist_series.min())
+            hist_max = float(hist_series.max())
+            hist_mean = float(hist_series.mean())
+            hist_std = float(hist_series.std())
+        elif raw_col in df_raw.columns:
+            current_val = float(df_raw[raw_col].dropna().iloc[-1])
+            hist_series = df_raw[raw_col].dropna()
+            hist_min = float(hist_series.min())
+            hist_max = float(hist_series.max())
+            hist_mean = float(hist_series.mean())
+            hist_std = float(hist_series.std())
+        else:
+            continue
+
+        # Determine slider range: ±4 std from current, bounded by expanded historical range
+        range_low = max(hist_min * 0.3, current_val - 4 * hist_std)
+        range_high = min(hist_max * 2.0, current_val + 4 * hist_std)
+        # Ensure range is sensible
+        if range_low >= range_high:
+            range_low = hist_min * 0.5
+            range_high = hist_max * 1.8
+
+        transform_type = get_transform_type(raw_col)
+
+        predictors_config.append({
+            'raw_col': raw_col,
+            'engineered_features': eng_features,
+            'current_value': round(current_val, 4),
+            'hist_min': round(hist_min, 4),
+            'hist_max': round(hist_max, 4),
+            'hist_mean': round(hist_mean, 4),
+            'range_low': round(range_low, 4),
+            'range_high': round(range_high, 4),
+            'transform_type': transform_type,
+        })
+
+    return {
+        'predictors': predictors_config,
+        'base_prediction': round(float(base_level), 4),
+        'base_log_return': round(float(base_log_return), 4),
+        'last_zar_usd': round(float(last_zar_usd), 4),
+        'last_date': last_date.strftime('%Y-%m-%d'),
+        'next_month_date': next_month_date.strftime('%Y-%m-%d'),
+        'selected_features': selected_features,
+        'feature_names': feature_names,
+    }
+
+
+def scenario_predict(scenario_values):
+    """
+    Run a scenario prediction given modified raw predictor values.
+
+    Args:
+        scenario_values: dict mapping raw column names to new values,
+                         e.g. {'VIX': 25.0, 'GOLD_PRICE': 2800.0}
+
+    Returns:
+        dict with scenario prediction, base prediction, waterfall contributions
+    """
+    model_data = load_model(trainset_model=False)
+    model = model_data['model']
+    scaler = model_data['scaler']
+    feature_names = model_data['feature_names']
+    selected_features = model_data.get('selected_features', [])
+
+    raw_df = fetch_data_from_supabase()
+
+    # --- BASE prediction (unmodified) ---
+    df_features_base, df_raw_base = engineer_features(raw_df)
+    latest_base = df_features_base.iloc[[-1]].drop(columns=['ZAR_USD'], errors='ignore')
+    for col in [f for f in feature_names if f not in latest_base.columns]:
+        latest_base[col] = 0.0
+    latest_base = latest_base[feature_names]
+    X_base_scaled = scaler.transform(latest_base)
+    base_log_return = float(model.predict(X_base_scaled)[0])
+    last_zar_usd = float(raw_df['ZAR_USD'].dropna().iloc[-1])
+    base_level = last_zar_usd * np.exp(base_log_return / 100)
+
+    # --- SCENARIO prediction (with modified last row) ---
+    raw_df_scenario = raw_df.copy()
+    last_idx = raw_df_scenario.index[-1]
+    for raw_col, new_val in scenario_values.items():
+        if raw_col in raw_df_scenario.columns:
+            raw_df_scenario.loc[last_idx, raw_col] = new_val
+
+    df_features_scen, df_raw_scen = engineer_features(raw_df_scenario)
+    latest_scen = df_features_scen.iloc[[-1]].drop(columns=['ZAR_USD'], errors='ignore')
+    for col in [f for f in feature_names if f not in latest_scen.columns]:
+        latest_scen[col] = 0.0
+    latest_scen = latest_scen[feature_names]
+    X_scen_scaled = scaler.transform(latest_scen)
+    scen_log_return = float(model.predict(X_scen_scaled)[0])
+    scen_level = last_zar_usd * np.exp(scen_log_return / 100)
+
+    # --- Waterfall: per-feature contribution difference ---
+    waterfall = []
+    for feat in selected_features:
+        if feat in feature_names:
+            idx = feature_names.index(feat)
+            coef = float(model.coef_[idx])
+            base_val = float(X_base_scaled[0][idx])
+            scen_val = float(X_scen_scaled[0][idx])
+            base_contrib = coef * base_val
+            scen_contrib = coef * scen_val
+            delta_contrib = scen_contrib - base_contrib
+
+            waterfall.append({
+                'feature': feat,
+                'base_contribution': round(base_contrib, 6),
+                'scenario_contribution': round(scen_contrib, 6),
+                'delta': round(delta_contrib, 6),
+                'transform_type': get_transform_type(feat),
+            })
+
+    waterfall.sort(key=lambda x: abs(x['delta']), reverse=True)
+
+    last_date = raw_df.index[-1]
+    next_month_date = last_date + pd.offsets.MonthEnd(1)
+
+    scen_change_pct = ((scen_level - last_zar_usd) / last_zar_usd) * 100
+    base_change_pct = ((base_level - last_zar_usd) / last_zar_usd) * 100
+
+    return {
+        'base_level': round(float(base_level), 4),
+        'base_change_pct': round(float(base_change_pct), 2),
+        'scenario_level': round(float(scen_level), 4),
+        'scenario_change_pct': round(float(scen_change_pct), 2),
+        'delta_level': round(float(scen_level - base_level), 4),
+        'last_zar_usd': round(float(last_zar_usd), 4),
+        'last_date': last_date.strftime('%Y-%m-%d'),
+        'next_month_date': next_month_date.strftime('%Y-%m-%d'),
+        'waterfall': waterfall,
+        'scenario_values': {k: round(float(v), 4) for k, v in scenario_values.items()},
     }

@@ -2,11 +2,11 @@ import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
 from logic.data_fetcher import (
-    fetch_fred_data, fetch_world_bank_gold_data, fetch_sa_inflation_hardcoded, 
-    process_data, save_to_supabase, replace_gold_price_column_in_supabase, 
+    fetch_fred_data, fetch_world_bank_gold_data, fetch_sa_inflation_hardcoded,
+    process_data, save_to_supabase, replace_gold_price_column_in_supabase,
     FRED_API_KEY, SERIES_CONFIG, should_update_from_api, fetch_and_save_data
 )
-from logic.model import predict_next_month, fetch_data_from_supabase
+from logic.model import predict_next_month, fetch_data_from_supabase, get_scenario_baseline, scenario_predict
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -14,8 +14,66 @@ from plotly.subplots import make_subplots
 import traceback
 import datetime
 
-
 dash.register_page(__name__, path='/dashboard')
+
+
+# ═══════════════════════════════════════════
+#   Helper: Scenario Slider UI Component
+# ═══════════════════════════════════════════
+def create_scenario_slider(slider_id, label, unit, min_val, max_val, current_val, active_val, step):
+    """
+    Generates an independent, cleanly laid out slider component.
+    """
+    # 1. Calculate evenly spaced marks for the numberline
+    num_intervals = 4
+    step_val = (max_val - min_val) / num_intervals if num_intervals > 0 else 1
+
+    # Format decimals based on the step size
+    decimals = 2 if step < 0.1 else (1 if step < 1 else 0)
+
+    marks = {}
+    for i in range(num_intervals + 1):
+        mark_val = float(min_val + (i * step_val))
+        marks[mark_val] = {
+            'label': f'{mark_val:.{decimals}f}',
+            'style': {'color': '#94a3b8', 'fontSize': '0.75rem', 'marginTop': '8px'}  # Muted gray for numberline
+        }
+
+    # 2. Inject the baseline "dot" marker
+    marks[float(current_val)] = {
+        'label': '●',
+        'style': {'color': '#3b82f6', 'fontSize': '1.1rem', 'marginTop': '-16px', 'fontWeight': 'bold'}
+    }
+
+    # 3. Build the isolated layout
+    return html.Div(className='scenario-slider-group', style={'marginBottom': '2.5rem'}, children=[
+
+        # --- TOP ROW: Label and Active Value Display ---
+        html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
+                        'marginBottom': '12px'}, children=[
+            html.Span(label, style={'fontWeight': '600', 'color': '#f8fafc', 'fontSize': '0.9rem'}),
+            html.Span(
+                f"{active_val:.{decimals}f} {unit}".strip(),
+                id={'type': 'scenario-value-display', 'index': slider_id},
+                style={'color': '#93c5fd', 'fontWeight': '600', 'fontSize': '0.9rem'}
+            )
+        ]),
+
+        # --- BOTTOM ROW: The Slider Track ---
+        html.Div(style={'position': 'relative', 'padding': '0 10px'}, children=[
+            dcc.Slider(
+                id={'type': 'scenario-slider', 'index': slider_id},
+                min=float(min_val),
+                max=float(max_val),
+                step=float(step),
+                value=float(active_val),
+                marks=marks,
+                tooltip=None,  # Ensure default tooltips stay off
+                updatemode='drag',
+                className='custom-dash-slider'
+            )
+        ])
+    ])
 
 
 def sidebar(active_tab):
@@ -34,6 +92,7 @@ def sidebar(active_tab):
         html.Div(className='sidebar-nav', children=[
             link('nav-data', 'Data', 'data'),
             link('nav-model', 'Model', 'model'),
+            link('nav-scenario', 'Scenario', 'scenario'),
         ]),
         html.Div(className='sidebar-footer', children=[
             html.Div(id='nav-signout', className='nav-link-custom', children=[
@@ -200,6 +259,130 @@ def model_tab_content(existing_model_data=None):
     ])
 
 
+def scenario_tab_content():
+    return html.Div(id='scenario-tab', className='tab-content', style={'display': 'none'}, children=[
+        html.Div(className='page-header', children=[
+            html.Div(children=[
+                html.H2('Scenario Analysis', className='page-title'),
+                html.P("Adjust macroeconomic predictors to model hypothetical ZAR/USD outcomes.",
+                       className='page-subtitle'),
+            ]),
+            html.Div(className='page-actions', children=[
+                html.Button('💾 Save Scenario', id='scenario-save-btn', className='btn-primary', n_clicks=0,
+                            style={'marginRight': '8px'}),
+                html.Button('Reset All', id='scenario-reset-btn', className='btn-ghost', n_clicks=0),
+                html.Div(id='scenario-status-display', className='status-badge', style={'marginLeft': '12px'}),
+            ])
+        ]),
+
+        html.Div(id='scenario-error', className='error-message'),
+
+        # Loading state while baseline is fetched
+        html.Div(id='scenario-loading', className='scenario-loading-state', children=[
+            html.Div(className='empty-state', children=[
+                html.Div('⏳', className='empty-state-icon'),
+                html.H4('Loading scenario engine...'),
+                html.P('Fetching current predictor values and model configuration.'),
+            ])
+        ]),
+
+        html.Div(id='scenario-content', style={'display': 'none'}, children=[
+            # Top row: Scenario vs Base comparison cards
+            html.Div(className='scenario-comparison-row', children=[
+                # Base prediction card
+                html.Div(className='model-card scenario-card scenario-card-base', children=[
+                    html.Div(className='scenario-card-header', children=[
+                        html.Span('Base Forecast', className='scenario-card-label'),
+                        html.Span('Current Values', className='scenario-card-tag tag-neutral'),
+                    ]),
+                    html.Div(id='scenario-base-value', className='scenario-card-value'),
+                    html.Div(id='scenario-base-change', className='scenario-card-change'),
+                ]),
+
+                # Arrow
+                html.Div(className='scenario-arrow', children='→'),
+
+                # Scenario prediction card
+                html.Div(className='model-card scenario-card scenario-card-scenario', children=[
+                    html.Div(className='scenario-card-header', children=[
+                        html.Span('Scenario Forecast', className='scenario-card-label'),
+                        html.Span('Modified Values', className='scenario-card-tag tag-accent'),
+                    ]),
+                    html.Div(id='scenario-result-value', className='scenario-card-value'),
+                    html.Div(id='scenario-result-change', className='scenario-card-change'),
+                ]),
+
+                # Delta card
+                html.Div(className='model-card scenario-card scenario-card-delta', children=[
+                    html.Div(className='scenario-card-header', children=[
+                        html.Span('Net Impact', className='scenario-card-label'),
+                        html.Span(id='scenario-delta-tag', className='scenario-card-tag'),
+                    ]),
+                    html.Div(id='scenario-delta-value', className='scenario-card-value'),
+                    html.Div(id='scenario-delta-pct', className='scenario-card-change'),
+                ]),
+            ]),
+
+            # Main content: sliders on left, waterfall on right
+            html.Div(className='scenario-main-row', children=[
+                # Predictor sliders panel
+                html.Div(className='model-card scenario-sliders-panel', children=[
+                    html.Div(className='scenario-panel-header', children=[
+                        html.H4('Predictor Adjustments', className='card-title'),
+                        html.P('Drag sliders to model hypothetical changes. The dot marks the current value.',
+                               className='card-subtitle'),
+                    ]),
+                    html.Div(id='scenario-sliders-container'),
+                ]),
+
+                # Waterfall chart
+                html.Div(className='model-card scenario-waterfall-panel', children=[
+                    html.H4('Impact Waterfall', className='card-title'),
+                    html.P('Contribution change per feature from base to scenario (scaled space)',
+                           className='card-subtitle'),
+                    dcc.Graph(
+                        id='scenario-waterfall-chart',
+                        className='scenario-chart',
+                        config={
+                            'displayModeBar': 'hover',
+                            'displaylogo': False,
+                            'responsive': True,
+                        },
+                    ),
+                ]),
+            ]),
+
+            # Sensitivity table
+            html.Div(className='model-card', style={'marginTop': '1.5vh'}, children=[
+                html.H4('Scenario Summary', className='card-title'),
+                html.P('Side-by-side comparison of current vs scenario predictor values',
+                       className='card-subtitle'),
+                html.Div(id='scenario-summary-table'),
+            ]),
+
+            # Saved Scenarios Comparison (Premium Feature)
+            html.Div(id='scenario-comparison-section', style={'marginTop': '1.5vh', 'display': 'none'}, children=[
+                html.Div(className='model-card', children=[
+                    html.Div(className='scenario-comparison-header', children=[
+                        html.Div(children=[
+                            html.H4('📊 Scenario Comparison', className='card-title'),
+                            html.P('Compare saved scenarios to identify best and worst case outcomes',
+                                   className='card-subtitle'),
+                        ]),
+                        html.Button('Clear All', id='scenario-clear-all-btn', className='btn-ghost btn-sm', n_clicks=0),
+                    ]),
+                    html.Div(id='saved-scenarios-list', className='saved-scenarios-grid'),
+                    dcc.Graph(
+                        id='scenario-comparison-chart',
+                        className='scenario-comparison-chart',
+                        config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True},
+                    ),
+                ]),
+            ]),
+        ]),
+    ])
+
+
 def layout():
     active_tab = 'data'
     return html.Div(id='dashboard-container', className='page-transition sidebar-collapsed', n_clicks=0, children=[
@@ -212,15 +395,19 @@ def layout():
         dcc.Store(id='predictor-dropdown-options-store', storage_type='session'),
         dcc.Store(id='selected-predictors', data=[], storage_type='session'),
         dcc.Store(id='fetched-data-status', storage_type='session'),
+        dcc.Store(id='scenario-baseline-data', storage_type='session'),
+        dcc.Store(id='scenario-trigger', data=0, storage_type='session'),
+        dcc.Store(id='scenario-current-values', storage_type='session'),
+        dcc.Store(id='saved-scenarios', data=[], storage_type='session'),
         sidebar(active_tab),
         html.Div(className='content-area', id='content-area', children=[
             html.Div(id='content-body', children=[
                 data_tab_content(),
                 model_tab_content(),
+                scenario_tab_content(),
             ])
         ])
     ])
-
 
 
 @callback(
@@ -260,11 +447,12 @@ dash.clientside_callback(
     Output('dashboard-tab', 'data'),
     Input('nav-data', 'n_clicks'),
     Input('nav-model', 'n_clicks'),
+    Input('nav-scenario', 'n_clicks'),
     Input('nav-signout', 'n_clicks'),
     State('dashboard-tab', 'data'),
     prevent_initial_call=True
 )
-def set_active_tab(data_clicks, model_clicks, signout_clicks, current_tab):
+def set_active_tab(data_clicks, model_clicks, scenario_clicks, signout_clicks, current_tab):
     ctx = dash.callback_context
     if not ctx.triggered:
         return current_tab or 'data'
@@ -273,6 +461,8 @@ def set_active_tab(data_clicks, model_clicks, signout_clicks, current_tab):
         return 'data'
     if trigger == 'nav-model':
         return 'model'
+    if trigger == 'nav-scenario':
+        return 'scenario'
     if trigger == 'nav-signout':
         return 'signout'
     return current_tab or 'data'
@@ -285,19 +475,23 @@ dash.clientside_callback(
         // Toggle tab visibility via CSS display
         var dataTab = document.getElementById('data-tab');
         var modelTab = document.getElementById('model-tab');
+        var scenarioTab = document.getElementById('scenario-tab');
         if (dataTab) dataTab.style.display = (activeTab === 'data') ? 'block' : 'none';
         if (modelTab) modelTab.style.display = (activeTab === 'model') ? 'block' : 'none';
+        if (scenarioTab) scenarioTab.style.display = (activeTab === 'scenario') ? 'block' : 'none';
 
         // Update nav link classes
         var dataCls = (activeTab === 'data') ? 'nav-link-custom active' : 'nav-link-custom';
         var modelCls = (activeTab === 'model') ? 'nav-link-custom active' : 'nav-link-custom';
+        var scenarioCls = (activeTab === 'scenario') ? 'nav-link-custom active' : 'nav-link-custom';
         var signoutCls = (activeTab === 'signout') ? 'nav-link-custom active' : 'nav-link-custom';
 
-        return [dataCls, modelCls, signoutCls];
+        return [dataCls, modelCls, scenarioCls, signoutCls];
     }
     """,
     [Output('nav-data', 'className'),
      Output('nav-model', 'className'),
+     Output('nav-scenario', 'className'),
      Output('nav-signout', 'className')],
     Input('dashboard-tab', 'data')
 )
@@ -320,48 +514,59 @@ def perform_signout(signout_clicks):
 @callback(
     Output('fetch-trigger', 'data'),
     Output('model-prediction-trigger', 'data'),
+    Output('scenario-trigger', 'data'),
     Input('dashboard-tab', 'data'),
     State('fetch-trigger', 'data'),
     State('model-prediction-trigger', 'data'),
+    State('scenario-trigger', 'data'),
     State('fetched-data', 'data'),
     State('model-prediction-data', 'data'),
+    State('scenario-baseline-data', 'data'),
     prevent_initial_call='initial_duplicate'
 )
-def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trigger, existing_data, existing_model_data):
+def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trigger, current_scenario_trigger,
+                           existing_data, existing_model_data, existing_scenario_data):
     fetch_trigger = dash.no_update
     model_trigger = dash.no_update
-    
+    scenario_trigger = dash.no_update
+
     # Only fetch data if we don't have cached data yet
     # Tabs are now pre-rendered so elements persist across switches
     if active_tab == 'data' and not existing_data:
         print(f"DEBUG: Triggering initial data fetch")
         fetch_trigger = (current_fetch_trigger or 0) + 1
-        
+
     # Only run model prediction if we don't have cached results yet
     if active_tab == 'model' and not existing_model_data:
         print(f"DEBUG: Triggering initial model prediction")
         model_trigger = (current_model_trigger or 0) + 1
-        
-    return fetch_trigger, model_trigger
+
+    # Only load scenario baseline if we don't have cached data yet
+    if active_tab == 'scenario' and not existing_scenario_data:
+        print(f"DEBUG: Triggering initial scenario baseline load")
+        scenario_trigger = (current_scenario_trigger or 0) + 1
+
+    return fetch_trigger, model_trigger, scenario_trigger
 
 
 def _generate_data_table(df_all):
-    if df_all is None or (isinstance(df_all, pd.DataFrame) and df_all.empty) or (isinstance(df_all, list) and not df_all):
+    if df_all is None or (isinstance(df_all, pd.DataFrame) and df_all.empty) or (
+            isinstance(df_all, list) and not df_all):
         return html.Div("No data available for table.")
-    
+
     if isinstance(df_all, list):
         df_all = pd.DataFrame(df_all)
-        
+
     df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
     df_sorted = df_all.sort_values('Date', ascending=True)
-    
+
     # Calculate percentage changes for all columns except Date
     pct_change_data = []
     for i in range(1, len(df_sorted)):
         row_data = {'Date': df_sorted.iloc[i]['Date']}
         for col in df_sorted.columns:
             if col != 'Date':
-                prev_val = df_sorted.iloc[i-1][col]
+                prev_val = df_sorted.iloc[i - 1][col]
                 curr_val = df_sorted.iloc[i][col]
                 if pd.notna(prev_val) and pd.notna(curr_val) and prev_val != 0:
                     pct_change = ((curr_val - prev_val) / prev_val) * 100
@@ -369,10 +574,10 @@ def _generate_data_table(df_all):
                 else:
                     row_data[col] = None
         pct_change_data.append(row_data)
-    
+
     df_pct = pd.DataFrame(pct_change_data)
     df_pct = df_pct.sort_values('Date', ascending=False).head(10)
-    
+
     # Build table
     predictors = [c for c in df_pct.columns if c not in ['Date', 'ZAR_USD']]
     user_friendly_columns = ['Date']
@@ -383,8 +588,10 @@ def _generate_data_table(df_all):
             friendly_name = '\n'.join([line.strip() for line in friendly_name.split('\n') if line.strip()])
         user_friendly_columns.append(friendly_name)
     user_friendly_columns.append('ZAR/USD Effect')
-    
-    header = html.Thead(html.Tr([html.Th(col, style={'textAlign': 'center', 'whiteSpace': 'pre-line', 'fontSize': '0.75rem'}) for col in user_friendly_columns]))
+
+    header = html.Thead(html.Tr(
+        [html.Th(col, style={'textAlign': 'center', 'whiteSpace': 'pre-line', 'fontSize': '0.75rem'}) for col in
+         user_friendly_columns]))
     body_rows = []
     for _, row in df_pct.iterrows():
         tds = [html.Td(row['Date'], style={'fontWeight': '500'})]
@@ -395,15 +602,16 @@ def _generate_data_table(df_all):
             else:
                 color = '#10B981' if val > 0 else '#EF4444' if val < 0 else '#6b6b6b'
                 tds.append(html.Td(f"{val:+.2f}%", style={'color': color, 'fontWeight': '600', 'textAlign': 'center'}))
-        
+
         zar_val = row.get('ZAR_USD')
         if pd.isna(zar_val):
             tds.append(html.Td('-', style={'textAlign': 'center'}))
         else:
             color = '#EF4444' if zar_val > 0 else '#10B981' if zar_val < 0 else '#6b6b6b'
-            tds.append(html.Td(f"{zar_val:+.2f}%", style={'color': color, 'fontWeight': '700', 'textAlign': 'center', 'fontSize': '1.05em'}))
+            tds.append(html.Td(f"{zar_val:+.2f}%", style={'color': color, 'fontWeight': '700', 'textAlign': 'center',
+                                                          'fontSize': '1.05em'}))
         body_rows.append(html.Tr(tds))
-    
+
     return html.Table(className='custom-table', children=[header, html.Tbody(body_rows)])
 
 
@@ -419,19 +627,19 @@ def _generate_data_table(df_all):
 def sync_data_tab_ui(active_tab, data, status_info):
     if active_tab != 'data':
         return dash.no_update, dash.no_update, dash.no_update
-    
+
     print(f"DEBUG: sync_data_tab_ui triggered. active_tab={active_tab}")
-    
+
     status_msg = ""
     if status_info:
         # Reconstruct the status badge
         status_msg = html.Span(status_info.get('text', ''), style={'color': status_info.get('color', '#6b6b6b')})
-    
+
     viz_style = {'display': 'block', 'marginTop': '2rem'} if data else {'display': 'none'}
-    
+
     # Use the helper to rebuild the table from persisted data
     table = _generate_data_table(data) if data else ""
-    
+
     return status_msg, viz_style, table
 
 
@@ -464,19 +672,19 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
     if set_progress is None:
         print("DEBUG WARNING: set_progress is None, progress updates will be skipped")
         set_progress = lambda x: None  # No-op function
-    
+
     if trigger_value:
         print(f"DEBUG: fetch_data background callback started. trigger_value={trigger_value}")
-        
+
         # If we already have data in session, just return it to re-populate UI
         if existing_data:
             print("DEBUG: Using existing data from session to re-populate UI")
             return existing_data, "", existing_options, existing_selected, existing_status
-        
+
         try:
             # Check if we should update from API or Supabase
             use_api = should_update_from_api()
-            
+
             if not use_api:
                 set_progress((20, '20%', 'Fetching data from Supabase...'))
                 print("DEBUG: Pulling data from Supabase (not last day or already updated)")
@@ -484,13 +692,13 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
                 status_data = {'text': '● Live (Supabase)', 'color': '#10B981'}
                 # Need wb_gold for replace_gold_price_column_in_supabase if we follow same structure
                 # But if we pull from Supabase, we don't need to replace gold.
-                wb_gold = pd.Series() 
+                wb_gold = pd.Series()
             else:
                 set_progress((0, '0%', 'Connecting to API sources...'))
                 print("DEBUG: Fetching data from APIs (last day of month)")
                 # Use unified configuration from data_fetcher
                 fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
-                
+
                 def update_progress(percent, status_msg):
                     print(f"DEBUG: Progress update: {percent}% - {status_msg}")
                     if set_progress:
@@ -498,7 +706,7 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
                             set_progress((percent, f'{percent}%', status_msg))
                         except Exception as e:
                             print(f"DEBUG WARNING: set_progress failed: {e}")
-                
+
                 print("DEBUG: Calling fetch_fred_data...")
                 raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=update_progress)
 
@@ -507,15 +715,15 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
                 if not wb_gold.empty:
                     # Use concat instead of assignment to allow the index to expand to the latest available data.
                     raw = pd.concat([raw, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
-                
+
                 # Fetch SA_INFLATION (Hardcoded)
                 sa_inflation = fetch_sa_inflation_hardcoded()
                 raw = pd.concat([raw, sa_inflation], axis=1)
-                
+
                 if raw.empty:
                     print("DEBUG: raw_df is empty")
                     return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
-                
+
                 print(f"DEBUG: Successfully fetched raw data with {len(raw)} rows. Processing...")
                 if set_progress:
                     set_progress((95, '95%', 'Finalising...'))
@@ -542,13 +750,13 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
             print("DEBUG: Preparing data for display...")
             df_all = processed.reset_index()
             df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
-            
+
             # Get predictors (all columns except Date and ZAR_USD)
             predictors = [c for c in df_all.columns if c not in ['Date', 'ZAR_USD']]
-            
+
             # Use labels from SERIES_CONFIG for the options
             dropdown_options = [
-                {'label': SERIES_CONFIG.get(p, {}).get('label', p), 'value': p} 
+                {'label': SERIES_CONFIG.get(p, {}).get('label', p), 'value': p}
                 for p in predictors
             ]
             # Default to first 1 predictor selected
@@ -574,13 +782,13 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
 def render_predictor_checkboxes(options, selected_predictors, active_tab):
     if active_tab != 'data':
         return dash.no_update
-    
+
     if not options:
         return html.Div('No predictors available', style={'color': 'var(--text-secondary)'})
-    
+
     selected_set = set(selected_predictors or [])
     checkboxes = []
-    
+
     for option in options:
         is_checked = option['value'] in selected_set
         checkboxes.append(
@@ -597,7 +805,7 @@ def render_predictor_checkboxes(options, selected_predictors, active_tab):
                 ]
             )
         )
-    
+
     return checkboxes
 
 
@@ -610,10 +818,10 @@ def update_selected_predictors(checkbox_values):
     # Prevent resetting when components are unmounted (tab switch)
     if not checkbox_values:
         return dash.no_update
-    
+
     selected = []
     ctx = dash.callback_context
-    
+
     # Rebuild selected list from current checkbox states
     for i, values in enumerate(checkbox_values):
         if values:
@@ -621,7 +829,7 @@ def update_selected_predictors(checkbox_values):
             # We want the index from the component ID
             trigger_id = ctx.inputs_list[0][i]['id']
             selected.append(trigger_id['index'])
-    
+
     return selected
 
 
@@ -650,14 +858,14 @@ def toggle_data_table(n_clicks, current_style):
 def update_graph(selected_predictors, data, active_tab, theme, options):
     if active_tab != 'data' or not data or not selected_predictors:
         return go.Figure()
-    
+
     df = pd.DataFrame(data)
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values('Date')
-    
+
     # Create a single-axis figure (no secondary y-axis)
     fig = go.Figure()
-    
+
     # Premium color palette for predictors - all distinct from ZAR/USD neutral
     # Carefully selected warm and saturated tones, no blues/grays that clash with ZAR/USD
     color_palette = [
@@ -682,10 +890,10 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
         '#FACC15',  # Golden Yellow
         '#FB7185',  # Coral
     ]
-    
+
     # Create a mapping from predictor value to label
     label_map = {opt['value']: opt['label'] for opt in (options or [])}
-    
+
     # Normalize function: scale to 0-100 range
     def normalize(series):
         min_val = series.min()
@@ -693,13 +901,13 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
         if max_val == min_val:
             return series * 0 + 50  # If constant, return middle value
         return ((series - min_val) / (max_val - min_val)) * 100
-    
+
     # ZAR/USD gets a distinctive neutral color - clearly different from all predictors
     zar_color = '#E8E8E8' if theme == 'dark' else '#1A1A1A'
     zar_normalized = normalize(df['ZAR_USD'])
     fig.add_trace(
         go.Scatter(
-            x=df['Date'], 
+            x=df['Date'],
             y=zar_normalized,
             name='ZAR/USD',
             line=dict(color=zar_color, width=3, shape='spline'),
@@ -708,19 +916,19 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
             hovertemplate='<b>ZAR/USD</b>: %{customdata:.4f}<br>Normalized: %{y:.1f}<extra></extra>'
         )
     )
-    
+
     # Plot each selected predictor (normalized)
     for i, predictor in enumerate(selected_predictors):
         if predictor in df.columns:
             color = color_palette[i % len(color_palette)]
             predictor_label = label_map.get(predictor, predictor)
-            
+
             # Normalize the predictor data
             predictor_normalized = normalize(df[predictor])
-            
+
             fig.add_trace(
                 go.Scatter(
-                    x=df['Date'], 
+                    x=df['Date'],
                     y=predictor_normalized,
                     name=predictor_label,
                     line=dict(color=color, width=2, shape='spline'),
@@ -729,15 +937,15 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
                     hovertemplate=f'<b>{predictor_label}</b>: %{{customdata:.4f}}<br>Normalized: %{{y:.1f}}<extra></extra>'
                 )
             )
-    
+
     is_dark = theme == 'dark'
-    
+
     grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
     line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
     text_color = '#ffffff' if is_dark else '#0a0a0a'
     text_muted = '#6b6b6b' if is_dark else '#737373'
     spike_color = 'rgba(255,255,255,0.2)' if is_dark else 'rgba(0,0,0,0.15)'
-    
+
     fig.update_layout(
         template=None,
         paper_bgcolor='rgba(0,0,0,0)',
@@ -806,8 +1014,8 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
             orientation='v'
         )
     )
-    
-    # Range selector buttons
+
+    # Enhanced range selector buttons - no rangeslider to avoid zoom conflicts
     fig.update_xaxes(
         rangeselector=dict(
             buttons=[
@@ -823,15 +1031,9 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
             x=1, y=1.12,
             xanchor='right', yanchor='top'
         ),
-        rangeslider=dict(
-            visible=True,
-            thickness=0.06,
-            bgcolor='rgba(255,255,255,0.02)' if is_dark else 'rgba(0,0,0,0.01)',
-            borderwidth=0,
-            range=[df['Date'].min(), df['Date'].max()]
-        )
+        rangeslider=dict(visible=False)  # Disabled to prevent zoom conflicts during resize
     )
-    
+
     return fig
 
 
@@ -901,12 +1103,12 @@ def get_coefficient_unit(transform_type):
 def run_model_prediction(trigger, existing_model_data, theme):
     result = None
     error_msg = ""
-    
+
     # Check if we can use cached raw result
     if existing_model_data and isinstance(existing_model_data, dict) and 'raw_result' in existing_model_data:
         print("DEBUG: Using existing model raw result from session")
         result = existing_model_data['raw_result']
-    
+
     # If no cached result and we have a trigger, run new prediction
     if not result and trigger:
         print(f"DEBUG: Running new model prediction. trigger={trigger}")
@@ -952,7 +1154,7 @@ def run_model_prediction(trigger, existing_model_data, theme):
         feat_name = get_friendly_feature_name(c['feature'], c['transform_type'])
         coef = c['zar_level_coefficient']  # Use ZAR/USD level coefficient for user interpretation
         contrib = c['contribution']
-        
+
         # Direction label based on coefficient sign (MSc research standard)
         # Positive coef → ZAR per USD increases → ZAR depreciates (weakens)
         # Negative coef → ZAR per USD decreases → ZAR appreciates (strengthens)
@@ -962,10 +1164,10 @@ def run_model_prediction(trigger, existing_model_data, theme):
             direction_label = 'ZAR Depreciates'
         else:
             direction_label = 'ZAR Appreciates'
-        
+
         bar_color = '#EF4444' if contrib > 0 else '#10B981'
         bar_width = min(abs(contrib) / max(abs(x['contribution']) for x in result['contributions']) * 100, 100)
-        
+
         # Add unit suffix based on transform type
         unit_suffix = get_coefficient_unit(c['transform_type'])
 
@@ -982,7 +1184,7 @@ def run_model_prediction(trigger, existing_model_data, theme):
                     }),
                 ]),
                 html.Span(f'{coef:+.4f} {unit_suffix}', className='contrib-value',
-                           style={'color': bar_color}),
+                          style={'color': bar_color}),
             ])
         )
 
@@ -996,25 +1198,25 @@ def run_model_prediction(trigger, existing_model_data, theme):
     line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
 
     fig = go.Figure()
-    
+
     # Ensure data is valid and not empty
     dates = history.get('dates', [])
     actual = history.get('actual', [])
     predicted = history.get('predicted', [])
-    
+
     if dates and actual and predicted and len(dates) > 0:
         # Convert all values to native Python types to avoid serialization issues
         dates_clean = [str(d) for d in dates]
         actual_clean = [float(a) for a in actual]
         predicted_clean = [float(p) for p in predicted]
-        
+
         # Ensure no NaN or infinite values
         valid_data = True
         for i, (d, a, p) in enumerate(zip(dates_clean, actual_clean, predicted_clean)):
             if not (d and a == a and p == p):  # Check for NaN
                 valid_data = False
                 break
-        
+
         if valid_data:
             fig.add_trace(go.Scatter(
                 x=dates_clean, y=actual_clean,
@@ -1082,36 +1284,52 @@ def run_model_prediction(trigger, existing_model_data, theme):
             tickformat=".2f",
         ),
     }
-    
+
     fig.update_layout(layout)
-    
+
     # Convert to dict to ensure proper serialization
     fig_dict = fig.to_dict()
 
     # ── Model info ──
     info = result['model_info']
     metrics = result.get('metrics', {})
-    
+
     # Build model info layout
     info_items = html.Div(children=[
-        html.H5('Model Specification', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginBottom': '12px'}),
+        html.H5('Model Specification',
+                style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('Type', 'ElasticNet (L1 = Lasso)', 'Statistical model using both L1 and L2 regularization to find the best predictors.'),
-            _info_pill('Alpha', f"{info['alpha']:.4f}", 'Regularization strength: higher values mean more indicators are excluded to prevent overfitting.'),
-            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}", 'Balance between Lasso (1.0) and Ridge (0.0) regularization. Current is pure Lasso.'),
-            _info_pill('Intercept', f"{info['intercept']:+.4f}", 'The base log-return forecast before considering macroeconomic indicator impacts.'),
-            _info_pill('Training Obs', str(info['training_observations']), 'Number of historical monthly data points used to calibrate the model.'),
-            _info_pill('Features', f"{info['n_selected']} / {info['n_features']} selected", 'The number of macroeconomic indicators the model found statistically significant.'),
-            _info_pill('Date Range', info['training_date_range'], 'The historical window of data used for training the current model version.'),
-            _info_pill('Target', 'Log-return ZAR/USD (% MoM)', 'The model predicts the percentage change in the exchange rate from one month to the next.'),
+            _info_pill('Type', 'ElasticNet (L1 = Lasso)',
+                       'Statistical model using both L1 and L2 regularization to find the best predictors.'),
+            _info_pill('Alpha', f"{info['alpha']:.4f}",
+                       'Regularization strength: higher values mean more indicators are excluded to prevent overfitting.'),
+            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}",
+                       'Balance between Lasso (1.0) and Ridge (0.0) regularization. Current is pure Lasso.'),
+            _info_pill('Intercept', f"{info['intercept']:+.4f}",
+                       'The base log-return forecast before considering macroeconomic indicator impacts.'),
+            _info_pill('Training Obs', str(info['training_observations']),
+                       'Number of historical monthly data points used to calibrate the model.'),
+            _info_pill('Features', f"{info['n_selected']} / {info['n_features']} selected",
+                       'The number of macroeconomic indicators the model found statistically significant.'),
+            _info_pill('Date Range', info['training_date_range'],
+                       'The historical window of data used for training the current model version.'),
+            _info_pill('Target', 'Log-return ZAR/USD (% MoM)',
+                       'The model predicts the percentage change in the exchange rate from one month to the next.'),
         ]),
-        html.H5('In-Sample Performance Metrics', style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px', 'marginBottom': '12px'}),
+        html.H5('In-Sample Performance Metrics',
+                style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px',
+                       'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('MAE', f"ZAR {metrics.get('mae', 0):.4f}", 'Mean Absolute Error: Average forecast error in ZAR. Lower values indicate better precision.'),
-            _info_pill('RMSE', f"ZAR {metrics.get('rmse', 0):.4f}", 'Root Mean Squared Error: Similar to MAE but penalizes larger misses more heavily.'),
-            _info_pill('R²', f"{metrics.get('r2', 0):.4f}", 'Explains how much of the ZAR/USD volatility is captured by the model (0 to 1 scale).'),
-            _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%", 'Mean Absolute Percentage Error: Average error relative to the exchange rate level.'),
-            _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%", 'Percentage of months where the model correctly predicted if the ZAR would strengthen or weaken.'),
+            _info_pill('MAE', f"ZAR {metrics.get('mae', 0):.4f}",
+                       'Mean Absolute Error: Average forecast error in ZAR. Lower values indicate better precision.'),
+            _info_pill('RMSE', f"ZAR {metrics.get('rmse', 0):.4f}",
+                       'Root Mean Squared Error: Similar to MAE but penalizes larger misses more heavily.'),
+            _info_pill('R²', f"{metrics.get('r2', 0):.4f}",
+                       'Explains how much of the ZAR/USD volatility is captured by the model (0 to 1 scale).'),
+            _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%",
+                       'Mean Absolute Percentage Error: Average error relative to the exchange rate level.'),
+            _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%",
+                       'Percentage of months where the model correctly predicted if the ZAR would strengthen or weaken.'),
         ]),
     ])
 
@@ -1136,30 +1354,31 @@ def run_model_prediction(trigger, existing_model_data, theme):
     analysis_content = html.Div([
         html.P(f"Based on the latest data for {result['last_date']}, {direction_text} {feature_impact_text}"),
         html.P(perf_text),
-        html.P("This forecast is based on an ElasticNet (Lasso) regression model that automatically selects the most relevant macroeconomic indicators. "
-               "Coefficients represent expected changes in ZAR per USD holding all else constant. "
-               "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates for interpretability.")
+        html.P(
+            "This forecast is based on an ElasticNet (Lasso) regression model that automatically selects the most relevant macroeconomic indicators. "
+            "Coefficients represent expected changes in ZAR per USD holding all else constant. "
+            "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates for interpretability.")
     ])
 
     prediction_data = {
         'raw_result': result,
         'last_updated': str(datetime.datetime.now())
     }
-    
+
     # Render diagnostic plots directly
     diagnostics_data = result.get('diagnostics', {})
     diagnostics_children = _build_diagnostic_plots(diagnostics_data, theme)
 
     return ({'display': 'block'}, '', date_text, pred_value, change_text,
-            change_class, baseline_text, contrib_rows, fig_dict, info_items, analysis_content, prediction_data, diagnostics_children)
-
+            change_class, baseline_text, contrib_rows, fig_dict, info_items, analysis_content, prediction_data,
+            diagnostics_children)
 
 
 def _build_diagnostic_plots(diagnostics_data, theme):
     """Pre-render diagnostic plots so the toggle only needs to show/hide them."""
     if not diagnostics_data:
         return html.P('No diagnostic data available. Run a prediction first.',
-                       style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
+                      style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
 
     is_dark = (theme == 'dark') if theme else True
     text_color = '#ffffff' if is_dark else '#0a0a0a'
@@ -1221,7 +1440,8 @@ def _build_diagnostic_plots(diagnostics_data, theme):
         )
 
         plots.append(html.Div(className='diagnostic-plot-container', children=[
-            html.H5('Q-Q Plot (Normality of Residuals)', style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
+            html.H5('Q-Q Plot (Normality of Residuals)',
+                    style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
             html.P('Residuals should follow the diagonal line if normally distributed',
                    style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '12px'}),
             dcc.Graph(id='diag-qq-plot', figure=qq_fig.to_dict(), style={'height': '400px'},
@@ -1288,15 +1508,17 @@ def _build_diagnostic_plots(diagnostics_data, theme):
                 )
 
                 safe_id = feat_name.replace('(', '').replace(')', '').replace(' ', '-').lower()
-                partial_plot_children.append(html.Div(className='diagnostic-plot-container', style={'marginBottom': '24px'}, children=[
-                    html.H6(feat_name, style={'fontSize': '0.875rem', 'fontWeight': '600', 'marginBottom': '4px'}),
-                    dcc.Graph(id=f'diag-partial-{safe_id}', figure=partial_fig.to_dict(), style={'height': '350px'},
-                              config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
-                ]))
+                partial_plot_children.append(
+                    html.Div(className='diagnostic-plot-container', style={'marginBottom': '24px'}, children=[
+                        html.H6(feat_name, style={'fontSize': '0.875rem', 'fontWeight': '600', 'marginBottom': '4px'}),
+                        dcc.Graph(id=f'diag-partial-{safe_id}', figure=partial_fig.to_dict(), style={'height': '350px'},
+                                  config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
+                    ]))
 
         if partial_plot_children:
             plots.append(html.Div(className='diagnostic-plot-container', style={'marginTop': '32px'}, children=[
-                html.H5('Partial Residual Plots', style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
+                html.H5('Partial Residual Plots',
+                        style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
                 html.P('Shows relationship between each predictor and target, holding other predictors constant',
                        style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '16px'}),
                 html.Div(children=partial_plot_children)
@@ -1304,7 +1526,7 @@ def _build_diagnostic_plots(diagnostics_data, theme):
 
     if not plots:
         return html.P('No diagnostic plots available.',
-                       style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
+                      style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
 
     return plots
 
@@ -1317,3 +1539,580 @@ def _info_pill(label, value, description=None):
         ]),
         html.P(description, className='info-pill-description') if description else None
     ])
+
+
+# ═══════════════════════════════════════════
+#   Scenario Analysis Callbacks
+# ═══════════════════════════════════════════
+
+SCENARIO_FRIENDLY_NAMES = {
+    'VIX': 'VIX (Volatility Index)',
+    'GOLD_PRICE': 'Gold Price (USD/oz)',
+    'BRENT_OIL_PRICE': 'Brent Crude Oil (USD/bbl)',
+    'EPU(USA)': 'US Economic Policy Uncertainty',
+    'WUIZAF(SA)': 'SA World Uncertainty Index',
+    '10_YEAR_BOND_RATES(USA)': 'US 10-Year Bond Rate (%)',
+    '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate (%)',
+    'INFLATION_DIFF': 'SA-US Inflation Differential (pp)',
+    'SA_INFLATION_YOY': 'SA Inflation YoY (%)',
+    'US_CPI_YOY': 'US CPI YoY (%)',
+}
+
+SCENARIO_UNITS = {
+    'VIX': '',
+    'GOLD_PRICE': 'USD',
+    'BRENT_OIL_PRICE': 'USD',
+    'EPU(USA)': '',
+    'WUIZAF(SA)': '',
+    '10_YEAR_BOND_RATES(USA)': '%',
+    '10_YEAR_BOND_RATES(SA)': '%',
+    'INFLATION_DIFF': 'pp',
+    'SA_INFLATION_YOY': '%',
+    'US_CPI_YOY': '%',
+}
+
+
+@callback(
+    Output('scenario-baseline-data', 'data'),
+    Output('scenario-error', 'children'),
+    Output('scenario-loading', 'style'),
+    Output('scenario-content', 'style'),
+    Output('scenario-current-values', 'data'),
+    Input('scenario-trigger', 'data'),
+    State('scenario-baseline-data', 'data'),
+)
+def load_scenario_baseline(trigger, existing_baseline):
+    if existing_baseline and (trigger is None or trigger == 0):
+        # Already have baseline, no new trigger, just return current state
+        current_vals = {p['raw_col']: p['current_value'] for p in existing_baseline.get('predictors', [])}
+        return existing_baseline, '', {'display': 'none'}, {'display': 'block'}, current_vals
+
+    if not trigger and not existing_baseline:
+        # No trigger, no baseline - wait for auto_trigger_callbacks
+        return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update
+
+    try:
+        print("DEBUG: Loading scenario baseline data...")
+        baseline = get_scenario_baseline()
+        current_vals = {p['raw_col']: p['current_value'] for p in baseline.get('predictors', [])}
+        print(f"DEBUG: Scenario baseline loaded. {len(baseline['predictors'])} predictors available.")
+        return baseline, '', {'display': 'none'}, {'display': 'block'}, current_vals
+    except Exception as e:
+        traceback.print_exc()
+        return dash.no_update, f'Failed to load scenario engine: {str(e)}', dash.no_update, dash.no_update, dash.no_update
+
+
+@callback(
+    Output('scenario-sliders-container', 'children'),
+    Output('scenario-base-value', 'children'),
+    Output('scenario-base-change', 'children'),
+    Input('scenario-baseline-data', 'data'),
+    State('scenario-current-values', 'data'),
+)
+def render_scenario_sliders(baseline, current_values):
+    if not baseline:
+        return dash.no_update, dash.no_update, dash.no_update
+
+    predictors = baseline.get('predictors', [])
+    base_pred = baseline.get('base_prediction', 0)
+    last_zar = baseline.get('last_zar_usd', 0)
+    base_change = ((base_pred - last_zar) / last_zar * 100) if last_zar else 0
+
+    sliders = []
+    for pred in predictors:
+        raw_col = pred['raw_col']
+        friendly = SCENARIO_FRIENDLY_NAMES.get(raw_col, raw_col)
+        unit = SCENARIO_UNITS.get(raw_col, '')
+        current = pred['current_value']
+        rng_low = pred['range_low']
+        rng_high = pred['range_high']
+
+        # Use session value if available, otherwise current
+        slider_val = current_values.get(raw_col, current) if current_values else current
+
+        # Determine step size based on range magnitude
+        rng_span = rng_high - rng_low
+        if rng_span > 1000:
+            step = 1.0
+        elif rng_span > 100:
+            step = 0.5
+        elif rng_span > 10:
+            step = 0.1
+        else:
+            step = 0.01
+
+        sliders.append(
+            create_scenario_slider(
+                slider_id=raw_col,
+                label=friendly,
+                unit=unit,
+                min_val=rng_low,
+                max_val=rng_high,
+                current_val=current,
+                active_val=slider_val,
+                step=step
+            )
+        )
+
+    base_value_text = f"R {base_pred:.4f}"
+    base_change_text = f"{base_change:+.2f}% vs current" if abs(base_change) > 0.005 else "~ stable"
+
+    return sliders, base_value_text, base_change_text
+
+
+@callback(
+    Output('scenario-current-values', 'data', allow_duplicate=True),
+    Input({'type': 'scenario-slider', 'index': dash.ALL}, 'value'),
+    State('scenario-baseline-data', 'data'),
+    prevent_initial_call=True
+)
+def update_scenario_values(slider_values, baseline):
+    if not baseline or not slider_values:
+        return dash.no_update
+
+    predictors = baseline.get('predictors', [])
+    updated = {}
+
+    for i, pred in enumerate(predictors):
+        raw_col = pred['raw_col']
+
+        if i < len(slider_values) and slider_values[i] is not None:
+            val = slider_values[i]
+            updated[raw_col] = val
+        else:
+            updated[raw_col] = pred['current_value']
+
+    return updated
+
+
+@callback(
+    Output({'type': 'scenario-value-display', 'index': dash.ALL}, 'children'),
+    Input('scenario-current-values', 'data'),
+    State('scenario-baseline-data', 'data'),
+    prevent_initial_call=True
+)
+def update_value_displays(current_values, baseline):
+    if not baseline or not current_values:
+        return dash.no_update
+
+    predictors = baseline.get('predictors', [])
+    display_values = []
+
+    for pred in predictors:
+        raw_col = pred['raw_col']
+        unit = SCENARIO_UNITS.get(raw_col, '')
+        val = current_values.get(raw_col, pred['current_value'])
+
+        # Determine decimals based on value magnitude
+        rng_span = pred['range_high'] - pred['range_low']
+        if rng_span > 1000:
+            decimals = 0
+        elif rng_span > 100:
+            decimals = 1
+        else:
+            decimals = 2
+
+        display_values.append(f"{val:.{decimals}f} {unit}".strip())
+
+    return display_values
+
+
+@callback(
+    Output('scenario-result-value', 'children'),
+    Output('scenario-result-change', 'children'),
+    Output('scenario-delta-value', 'children'),
+    Output('scenario-delta-pct', 'children'),
+    Output('scenario-delta-tag', 'children'),
+    Output('scenario-delta-tag', 'className'),
+    Output('scenario-waterfall-chart', 'figure'),
+    Output('scenario-summary-table', 'children'),
+    Output('scenario-status-display', 'children'),
+    Input('scenario-current-values', 'data'),
+    State('scenario-baseline-data', 'data'),
+    State('theme-store', 'data'),
+    prevent_initial_call=True
+)
+def run_scenario_prediction(current_values, baseline, theme):
+    if not current_values or not baseline:
+        empty_fig = go.Figure()
+        return ('', '', '', '', '', 'scenario-card-tag', empty_fig.to_dict(), '', '')
+
+    predictors = baseline.get('predictors', [])
+    base_pred = baseline.get('base_prediction', 0)
+    last_zar = baseline.get('last_zar_usd', 0)
+
+    # Check if any value has changed from current
+    has_changes = False
+    scenario_vals = {}
+    for pred in predictors:
+        raw_col = pred['raw_col']
+        current = pred['current_value']
+        scenario_val = current_values.get(raw_col, current)
+        scenario_vals[raw_col] = scenario_val
+        if abs(scenario_val - current) > 0.0001:
+            has_changes = True
+
+    if not has_changes:
+        # No changes — show base values for all
+        base_change = ((base_pred - last_zar) / last_zar * 100) if last_zar else 0
+        empty_fig = go.Figure()
+        empty_fig.add_annotation(
+            text="Adjust a predictor to see impact",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False, font=dict(color='#6b6b6b', size=14)
+        )
+        _apply_scenario_chart_layout(empty_fig, theme)
+
+        return (
+            f"R {base_pred:.4f}",
+            f"{base_change:+.2f}% vs current",
+            "R 0.0000",
+            "No change",
+            'Unchanged',
+            'scenario-card-tag tag-neutral',
+            empty_fig.to_dict(),
+            _build_scenario_summary_table(predictors, current_values, baseline),
+            html.Span('● No changes', style={'color': 'var(--text-3)'}),
+        )
+
+    try:
+        result = scenario_predict(scenario_vals)
+    except Exception as e:
+        traceback.print_exc()
+        empty_fig = go.Figure()
+        return ('Error', str(e), '', '', 'Error', 'scenario-card-tag tag-neutral',
+                empty_fig.to_dict(), '', html.Span(f'● Error: {e}', style={'color': '#EF4444'}))
+
+    scen_level = result['scenario_level']
+    scen_change = result['scenario_change_pct']
+    delta_level = result['delta_level']
+    delta_pct = scen_change - result['base_change_pct']
+
+    # Scenario result
+    scen_value_text = f"R {scen_level:.4f}"
+    scen_change_text = f"{scen_change:+.2f}% vs current"
+
+    # Delta
+    delta_value_text = f"R {delta_level:+.4f}"
+    delta_pct_text = f"{delta_pct:+.2f}pp shift"
+
+    if delta_level > 0.001:
+        delta_tag_text = 'ZAR Weakens'
+        delta_tag_class = 'scenario-card-tag tag-negative'
+    elif delta_level < -0.001:
+        delta_tag_text = 'ZAR Strengthens'
+        delta_tag_class = 'scenario-card-tag tag-positive'
+    else:
+        delta_tag_text = 'Neutral'
+        delta_tag_class = 'scenario-card-tag tag-neutral'
+
+    # Waterfall chart
+    waterfall = result.get('waterfall', [])
+    # Filter to only features that actually changed
+    active_waterfall = [w for w in waterfall if abs(w['delta']) > 0.0001]
+
+    fig = go.Figure()
+    if active_waterfall:
+        labels = [get_friendly_feature_name(w['feature'], w['transform_type']) for w in active_waterfall]
+        deltas = [w['delta'] for w in active_waterfall]
+        colors = ['#EF4444' if d > 0 else '#10B981' for d in deltas]
+
+        fig.add_trace(go.Bar(
+            x=deltas,
+            y=labels,
+            orientation='h',
+            marker=dict(color=colors, cornerradius=4),
+            hovertemplate='%{y}<br>Δ Contribution: %{x:+.4f}<extra></extra>',
+        ))
+    else:
+        fig.add_annotation(
+            text="No significant contribution changes",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False, font=dict(color='#6b6b6b', size=14)
+        )
+
+    _apply_scenario_chart_layout(fig, theme)
+    fig.update_layout(
+        height=min(600, max(250, len(active_waterfall) * 48 + 80)),
+        autosize=False,
+        yaxis=dict(autorange='reversed'),
+        xaxis=dict(
+            title=dict(text='Contribution Change (scaled)', font=dict(size=11)),
+            zeroline=True,
+            zerolinewidth=2,
+        ),
+    )
+
+    # Status
+    n_changed = sum(1 for pred in predictors if
+                    abs(current_values.get(pred['raw_col'], pred['current_value']) - pred['current_value']) > 0.0001)
+    status = html.Span(f'● {n_changed} predictor{"s" if n_changed != 1 else ""} modified', style={'color': '#3B82F6'})
+
+    summary_table = _build_scenario_summary_table(predictors, current_values, baseline)
+
+    return (scen_value_text, scen_change_text, delta_value_text, delta_pct_text,
+            delta_tag_text, delta_tag_class, fig.to_dict(), summary_table, status)
+
+
+def _apply_scenario_chart_layout(fig, theme):
+    is_dark = (theme == 'dark') if theme else True
+    text_color = '#ffffff' if is_dark else '#0a0a0a'
+    text_muted = '#6b6b6b' if is_dark else '#737373'
+    grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
+    line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
+
+    fig.update_layout(
+        template=None,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        margin=dict(l=180, r=24, t=16, b=48),
+        autosize=True,
+        font=dict(family="Inter, sans-serif", size=12, color=text_color),
+        showlegend=False,
+        hovermode="closest",
+        xaxis=dict(
+            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+            zeroline=True, zerolinewidth=1, zerolinecolor=line_color,
+            tickfont=dict(size=10, color=text_muted),
+        ),
+        yaxis=dict(
+            showgrid=False,
+            tickfont=dict(size=11, color=text_color),
+        ),
+    )
+
+
+def _build_scenario_summary_table(predictors, current_values, baseline):
+    if not predictors:
+        return html.Div("No predictors available.")
+
+    header = html.Thead(html.Tr([
+        html.Th('Predictor', style={'textAlign': 'left'}),
+        html.Th('Current Value', style={'textAlign': 'center'}),
+        html.Th('Scenario Value', style={'textAlign': 'center'}),
+        html.Th('Change', style={'textAlign': 'center'}),
+        html.Th('Change %', style={'textAlign': 'center'}),
+    ]))
+
+    rows = []
+    for pred in predictors:
+        raw_col = pred['raw_col']
+        friendly = SCENARIO_FRIENDLY_NAMES.get(raw_col, raw_col)
+        unit = SCENARIO_UNITS.get(raw_col, '')
+        current = pred['current_value']
+        scenario = current_values.get(raw_col, current) if current_values else current
+        change = scenario - current
+        change_pct = (change / current * 100) if current != 0 else 0
+        is_changed = abs(change) > 0.0001
+
+        change_color = '#EF4444' if change > 0.0001 else '#10B981' if change < -0.0001 else 'var(--text-3)'
+        row_style = {'backgroundColor': 'rgba(91, 141, 239, 0.04)'} if is_changed else {}
+
+        decimals = 2 if abs(current) < 20 else (1 if abs(current) < 200 else 0)
+
+        rows.append(html.Tr(style=row_style, children=[
+            html.Td(friendly, style={'fontWeight': '500'}),
+            html.Td(f"{current:.{decimals}f} {unit}".strip(), style={'textAlign': 'center'}),
+            html.Td(
+                f"{scenario:.{decimals}f} {unit}".strip(),
+                style={'textAlign': 'center', 'fontWeight': '600' if is_changed else '400',
+                       'color': change_color if is_changed else 'var(--text-1)'}
+            ),
+            html.Td(
+                f"{change:+.{decimals}f}" if is_changed else '—',
+                style={'textAlign': 'center', 'color': change_color, 'fontWeight': '600'}
+            ),
+            html.Td(
+                f"{change_pct:+.1f}%" if is_changed else '—',
+                style={'textAlign': 'center', 'color': change_color, 'fontWeight': '600'}
+            ),
+        ]))
+
+    return html.Table(className='custom-table', children=[header, html.Tbody(rows)])
+
+
+@callback(
+    Output('scenario-current-values', 'data', allow_duplicate=True),
+    Output('scenario-trigger', 'data', allow_duplicate=True),
+    Input('scenario-reset-btn', 'n_clicks'),
+    State('scenario-baseline-data', 'data'),
+    State('scenario-trigger', 'data'),
+    prevent_initial_call=True
+)
+def reset_scenario(n_clicks, baseline, current_trigger):
+    if not n_clicks or not baseline:
+        return dash.no_update, dash.no_update
+    # Reset current values to baseline current values and bump trigger to re-render sliders
+    current_vals = {p['raw_col']: p['current_value'] for p in baseline.get('predictors', [])}
+    return current_vals, (current_trigger or 0) + 1
+
+
+@callback(
+    Output('saved-scenarios', 'data'),
+    Output('scenario-comparison-section', 'style'),
+    Input('scenario-save-btn', 'n_clicks'),
+    Input('scenario-clear-all-btn', 'n_clicks'),
+    State('scenario-current-values', 'data'),
+    State('scenario-baseline-data', 'data'),
+    State('saved-scenarios', 'data'),
+    prevent_initial_call=True
+)
+def manage_saved_scenarios(save_clicks, clear_clicks, current_values, baseline, saved_scenarios):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update
+
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if trigger == 'scenario-clear-all-btn':
+        return [], {'marginTop': '1.5vh', 'display': 'none'}
+
+    if trigger == 'scenario-save-btn':
+        if not current_values or not baseline:
+            return dash.no_update, dash.no_update
+
+        # Check if any values changed
+        predictors = baseline.get('predictors', [])
+        has_changes = any(
+            abs(current_values.get(p['raw_col'], p['current_value']) - p['current_value']) > 0.0001
+            for p in predictors
+        )
+
+        if not has_changes:
+            return dash.no_update, dash.no_update
+
+        # Run prediction for this scenario
+        try:
+            scenario_vals = {p['raw_col']: current_values.get(p['raw_col'], p['current_value']) for p in predictors}
+            result = scenario_predict(scenario_vals)
+
+            # Create scenario snapshot
+            import datetime
+            scenario_name = f"Scenario {len(saved_scenarios) + 1}"
+            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+
+            scenario_snapshot = {
+                'name': scenario_name,
+                'timestamp': timestamp,
+                'values': scenario_vals,
+                'prediction': result['scenario_level'],
+                'change_pct': result['scenario_change_pct'],
+                'delta_from_base': result['delta_level'],
+            }
+
+            # Add to saved scenarios (max 5)
+            updated_scenarios = (saved_scenarios or []).copy()
+            updated_scenarios.append(scenario_snapshot)
+            if len(updated_scenarios) > 5:
+                updated_scenarios = updated_scenarios[-5:]
+
+            return updated_scenarios, {'marginTop': '1.5vh', 'display': 'block'}
+        except Exception as e:
+            print(f"Error saving scenario: {e}")
+            traceback.print_exc()
+            return dash.no_update, dash.no_update
+
+    return dash.no_update, dash.no_update
+
+
+@callback(
+    Output('saved-scenarios-list', 'children'),
+    Output('scenario-comparison-chart', 'figure'),
+    Input('saved-scenarios', 'data'),
+    State('scenario-baseline-data', 'data'),
+    State('theme-store', 'data'),
+    prevent_initial_call=True
+)
+def render_scenario_comparison(saved_scenarios, baseline, theme):
+    if not saved_scenarios or not baseline:
+        empty_fig = go.Figure()
+        empty_fig.add_annotation(
+            text="Save scenarios to compare them here",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False, font=dict(color='#6b6b6b', size=14)
+        )
+        _apply_scenario_chart_layout(empty_fig, theme)
+        empty_fig.update_layout(height=300)
+        return html.Div("No saved scenarios yet.",
+                        style={'color': 'var(--text-3)', 'padding': '20px', 'textAlign': 'center'}), empty_fig.to_dict()
+
+    base_pred = baseline.get('base_prediction', 0)
+
+    # Render scenario cards
+    scenario_cards = []
+    for i, scenario in enumerate(saved_scenarios):
+        pred = scenario['prediction']
+        change = scenario['change_pct']
+        delta = scenario['delta_from_base']
+
+        if delta > 0.001:
+            card_class = 'saved-scenario-card scenario-negative'
+            icon = '📉'
+        elif delta < -0.001:
+            card_class = 'saved-scenario-card scenario-positive'
+            icon = '📈'
+        else:
+            card_class = 'saved-scenario-card scenario-neutral'
+            icon = '➡️'
+
+        scenario_cards.append(
+            html.Div(className=card_class, children=[
+                html.Div(className='saved-scenario-header', children=[
+                    html.Span(f"{icon} {scenario['name']}", className='saved-scenario-name'),
+                    html.Span(scenario['timestamp'], className='saved-scenario-time'),
+                ]),
+                html.Div(f"R {pred:.4f}", className='saved-scenario-value'),
+                html.Div(f"{change:+.2f}% vs current", className='saved-scenario-change'),
+                html.Div(f"Δ {delta:+.4f} from base", className='saved-scenario-delta'),
+            ])
+        )
+
+    # Comparison chart
+    is_dark = (theme == 'dark') if theme else True
+    text_color = '#ffffff' if is_dark else '#0a0a0a'
+    text_muted = '#6b6b6b' if is_dark else '#737373'
+
+    fig = go.Figure()
+
+    # Add base prediction as reference line
+    fig.add_hline(
+        y=base_pred,
+        line=dict(color='#6b6b6b', width=2, dash='dash'),
+        annotation=dict(text='Base', font=dict(size=10, color=text_muted), xanchor='left')
+    )
+
+    # Add saved scenarios
+    scenario_names = [s['name'] for s in saved_scenarios]
+    scenario_preds = [s['prediction'] for s in saved_scenarios]
+    scenario_colors = [
+        '#EF4444' if s['delta_from_base'] > 0.001 else '#10B981' if s['delta_from_base'] < -0.001 else '#6b6b6b'
+        for s in saved_scenarios
+    ]
+
+    fig.add_trace(go.Bar(
+        x=scenario_names,
+        y=scenario_preds,
+        marker=dict(color=scenario_colors, cornerradius=6),
+        text=[f"R {p:.4f}" for p in scenario_preds],
+        textposition='outside',
+        textfont=dict(size=11, color=text_color),
+        hovertemplate='%{x}<br>Forecast: R %{y:.4f}<extra></extra>',
+    ))
+
+    _apply_scenario_chart_layout(fig, theme)
+    fig.update_layout(
+        height=350,
+        autosize=False,
+        showlegend=False,
+        yaxis=dict(
+            title=dict(text='ZAR/USD Forecast', font=dict(size=11, color=text_muted)),
+            tickformat='.4f',
+        ),
+        xaxis=dict(
+            title='',
+            tickfont=dict(size=11, color=text_color),
+        ),
+        margin=dict(l=56, r=24, t=40, b=48),
+    )
+
+    return scenario_cards, fig.to_dict()

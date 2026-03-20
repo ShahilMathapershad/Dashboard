@@ -968,17 +968,28 @@ p  { margin: 0; color: var(--text-2); }
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    transition: border-color var(--dur) var(--ease);
+    transition: border-color var(--dur) var(--ease), height 0.3s var(--ease);
     width: 100%;
+    display: flex;
+    flex-direction: column;
+    position: relative;
 }
 .hero-chart:hover {
     border-color: var(--border-hover);
 }
 
-/* Keep Plotly responsive without forcing nested heights */
+/* Keep Plotly responsive and maintain aspect ratio */
 .hero-chart .js-plotly-plot,
 .hero-chart .plotly {
     width: 100% !important;
+    height: 100% !important;
+}
+
+.hero-chart .dash-graph {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 /* ═══════════════════════════════════════════
@@ -1333,15 +1344,24 @@ p  { margin: 0; color: var(--text-2); }
 }
 
 /* ═══════════════════════════════════════════
-   Plotly Range Slider
+   Plotly Chart Styling
    ═══════════════════════════════════════════ */
-.js-plotly-plot .plotly { border-radius: var(--radius-lg); overflow: hidden; }
-.js-plotly-plot .rangeslider .rangehandle {
-    width: 10px !important;
-    background: var(--accent) !important;
-    border: none !important;
-    border-radius: 3px !important;
-    cursor: ew-resize !important;
+.js-plotly-plot .plotly { 
+    border-radius: var(--radius-lg); 
+    overflow: hidden; 
+}
+
+/* Ensure plots fill their containers properly */
+.dash-graph {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.dash-graph .js-plotly-plot {
+    flex: 1;
+    min-height: 0;
 }
 
 /* ═══════════════════════════════════════════
@@ -1441,4 +1461,444 @@ p  { margin: 0; color: var(--text-2); }
     border-radius: var(--radius-md);
     overflow: hidden;
     height: auto !important;
+}
+
+/* ═══════════════════════════════════════════
+   Scenario Analysis
+   ═══════════════════════════════════════════ */
+
+/* Comparison Row */
+.scenario-comparison-row {
+    display: flex;
+    align-items: stretch;
+    gap: 16px;
+    margin-bottom: 1.5vh;
+}
+
+.scenario-card {
+    flex: 1;
+    min-height: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.scenario-card-base::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--text-3);
+    opacity: 0.3;
+}
+
+.scenario-card-scenario::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent-gradient);
+}
+
+.scenario-card-delta::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+}
+
+.scenario-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: var(--text-3);
+    flex-shrink: 0;
+    width: 32px;
+}
+
+.scenario-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.scenario-card-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+}
+
+.scenario-card-tag {
+    font-size: 0.625rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: var(--radius-full);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.tag-neutral {
+    background: var(--bg-overlay);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+}
+
+.tag-accent {
+    background: var(--accent-glow);
+    color: var(--accent);
+    border: 1px solid rgba(91, 141, 239, 0.2);
+}
+
+.tag-positive {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10B981;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.tag-negative {
+    background: rgba(239, 68, 68, 0.1);
+    color: #EF4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.scenario-card-value {
+    font-size: 1.75rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    margin-bottom: 4px;
+}
+
+.scenario-card-change {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-2);
+}
+
+/* Main Row: Sliders + Waterfall */
+.scenario-main-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5vh;
+    margin-bottom: 1.5vh;
+}
+
+.scenario-sliders-panel {
+    min-height: auto;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.scenario-waterfall-panel {
+    min-height: auto;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.scenario-chart {
+    flex: 1;
+    min-height: 250px;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.scenario-panel-header {
+    margin-bottom: 16px;
+}
+
+/* Slider Groups */
+.scenario-slider-group {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.scenario-slider-group:last-child {
+    border-bottom: none;
+}
+
+.scenario-slider-header {
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.scenario-slider-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.scenario-slider-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+}
+
+.scenario-slider-value-display {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    min-width: 80px;
+    text-align: right;
+}
+
+.scenario-slider-values {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.scenario-slider-current {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+}
+
+.scenario-slider-delta {
+    font-size: 0.75rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════
+   Dash Slider Overrides - Clean White Numberline
+   ═══════════════════════════════════════════ */
+.scenario-slider-wrapper {
+    padding: 12px 0;
+}
+
+.scenario-slider .rc-slider-rail {
+    background: rgba(255, 255, 255, 0.2) !important;
+    height: 4px !important;
+    border-radius: 2px !important;
+}
+
+.scenario-slider .rc-slider-track {
+    background: #ffffff !important;
+    height: 4px !important;
+    border-radius: 2px !important;
+}
+
+.light-theme .scenario-slider .rc-slider-rail {
+    background: rgba(0, 0, 0, 0.1) !important;
+}
+
+.light-theme .scenario-slider .rc-slider-track {
+    background: #333333 !important;
+}
+
+.scenario-slider .rc-slider-handle {
+    background: #ffffff !important;
+    border: 3px solid var(--accent) !important;
+    width: 16px !important;
+    height: 16px !important;
+    margin-top: -6px !important; /* (16/2 - 4/2 = 6) */
+    border-radius: 50% !important;
+    box-shadow: 0 0 10px rgba(0,0,0,0.3) !important;
+    opacity: 1 !important;
+    cursor: grab !important;
+    transition: transform 0.1s ease, box-shadow 0.1s ease !important;
+}
+
+.scenario-slider .rc-slider-handle:hover {
+    transform: scale(1.2) !important;
+    box-shadow: 0 0 15px var(--accent-glow) !important;
+}
+
+.scenario-slider .rc-slider-handle:active {
+    cursor: grabbing !important;
+    transform: scale(1.1) !important;
+}
+
+/* Hide ALL slider artifacts (marks, dots, steps, tooltips) */
+.scenario-slider .rc-slider-mark,
+.scenario-slider .rc-slider-dot,
+.scenario-slider .rc-slider-step,
+.scenario-slider .rc-slider-tooltip,
+.rc-slider-mark,
+.rc-slider-dot,
+.rc-slider-step,
+.rc-slider-tooltip,
+.rc-slider-mark-text {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    pointer-events: none !important;
+}
+
+.scenario-slider-range {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 2px;
+}
+
+.scenario-slider-hist {
+    font-size: 0.6875rem;
+    color: var(--text-3);
+}
+
+.scenario-slider-baseline {
+    font-size: 0.6875rem;
+    color: var(--accent);
+    font-weight: 500;
+}
+
+/* Loading State */
+.scenario-loading-state {
+    min-height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (max-width: 1024px) {
+    .scenario-main-row {
+        grid-template-columns: 1fr;
+    }
+    .scenario-comparison-row {
+        flex-direction: column;
+    }
+    .scenario-arrow {
+        transform: rotate(90deg);
+        width: auto;
+        height: 32px;
+    }
+}
+
+@media (max-width: 768px) {
+    .scenario-slider-label-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+}
+
+/* Scenario Comparison (Premium Feature) */
+.scenario-comparison-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+}
+
+.saved-scenarios-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.saved-scenario-card {
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    position: relative;
+    overflow: hidden;
+    transition: all var(--dur) var(--ease);
+}
+
+.saved-scenario-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+}
+
+.saved-scenario-card.scenario-positive::before {
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+}
+
+.saved-scenario-card.scenario-negative::before {
+    background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+}
+
+.saved-scenario-card.scenario-neutral::before {
+    background: var(--text-3);
+    opacity: 0.3;
+}
+
+.saved-scenario-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+.saved-scenario-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.saved-scenario-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+.saved-scenario-time {
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+}
+
+.saved-scenario-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 4px;
+}
+
+.saved-scenario-change {
+    font-size: 0.75rem;
+    color: var(--text-2);
+    margin-bottom: 2px;
+}
+
+.saved-scenario-delta {
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+}
+
+.scenario-comparison-chart {
+    min-height: 350px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+}
+
+@media (max-width: 768px) {
+    .saved-scenarios-grid {
+        grid-template-columns: 1fr;
+    }
+    .scenario-comparison-header {
+        flex-direction: column;
+        gap: 12px;
+    }
 }
