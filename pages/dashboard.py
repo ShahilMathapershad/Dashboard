@@ -121,7 +121,7 @@ def model_tab_content(existing_model_data=None):
         html.Div(className='page-header', children=[
             html.Div(children=[
                 html.H2('Model', className='page-title'),
-                html.P("Next-month ZAR/USD forecast via frozen ElasticNet (Lasso) model.",
+                html.P("Next-month ZAR/USD fair value via frozen ElasticNet (Lasso) model.",
                        className='page-subtitle'),
             ]),
             html.Div(className='page-actions', children=[
@@ -139,7 +139,7 @@ def model_tab_content(existing_model_data=None):
                 # Prediction Card
                 html.Div(className='model-card prediction-hero', children=[
                     html.Div(className='prediction-header', children=[
-                        html.Span('Next Month Forecast', className='prediction-label'),
+                        html.Span('Next Month Fair Value', className='prediction-label'),
                         html.Span(id='prediction-date', className='prediction-date'),
                     ]),
                     html.Div(id='prediction-value', className='prediction-value'),
@@ -178,7 +178,7 @@ def model_tab_content(existing_model_data=None):
 
             # Model Info
             html.Div(className='model-card model-info-card', children=[
-                html.H4('Model Specification', className='card-title'),
+                html.H4('Model Specification & Fair Value Equilibrium', className='card-title'),
                 html.Div(id='model-info-content'),
                 # Dynamic model description
                 html.Hr(style={'margin': '24px 0', 'borderTop': '1px solid var(--border)'}),
@@ -845,9 +845,26 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
 # ═══════════════════════════════════════════
 
 FRIENDLY_FEATURE_NAMES = {
-    '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate',
-    'VIX': 'VIX (Volatility Index)',
-    'BRENT_OIL_PRICE': 'Brent Crude Oil Price',
+    '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate (Monthly Change)',
+    '10_YEAR_BOND_RATES(SA)_Lag1': 'SA 10-Year Bond Rate (Prev. Month Change)',
+    '10_YEAR_BOND_RATES(SA)_3M_Trend': 'SA 10-Year Bond Rate (3M Trend)',
+    'VIX': 'VIX (Monthly % Change)',
+    'VIX_Lag1': 'VIX (Prev. Month % Change)',
+    'VIX_3M_Trend': 'VIX (3M % Change Trend)',
+    'BRENT_OIL_PRICE': 'Brent Crude Oil Price (Monthly % Change)',
+    'BRENT_OIL_PRICE_Lag1': 'Brent Crude Oil Price (Prev. Month % Change)',
+    'BRENT_OIL_PRICE_3M_Trend': 'Brent Crude Oil Price (3M % Change Trend)',
+    'GOLD_PRICE': 'Gold Price (Monthly % Change)',
+    'GOLD_PRICE_Lag1': 'Gold Price (Prev. Month % Change)',
+    'GOLD_PRICE_3M_Trend': 'Gold Price (3M % Change Trend)',
+    'EPU(USA)': 'US Economic Policy Uncertainty (Monthly % Change)',
+    'EPU(USA)_Lag1': 'US Economic Policy Uncertainty (Prev. Month % Change)',
+    'INFLATION_DIFF': 'SA-US Inflation Differential (Monthly Change)',
+    'INFLATION_DIFF_Lag1': 'SA-US Inflation Differential (Prev. Month Change)',
+    'INFLATION_DIFF_3M_Trend': 'SA-US Inflation Differential (3M Trend)',
+    'WUIZAF(SA)': 'SA World Uncertainty Index (Monthly Change)',
+    'ZAR_USD_Lag1': 'ZAR/USD (Prev. Month % Change)',
+    'ZAR_USD_3M_Trend': 'ZAR/USD (3M % Change Trend)',
 }
 
 
@@ -905,10 +922,10 @@ def run_model_prediction(trigger, existing_model_data, theme):
 
     pred_value = f"R {pred_level:.4f}"
     if direction == 'weaken':
-        change_text = f"▲ {abs(change_pct):.2f}% (ZAR weakens)"
+        change_text = f"▲ {abs(change_pct):.2f}% (Undervalued)"
         change_class = 'prediction-change change-negative'
     elif direction == 'strengthen':
-        change_text = f"▼ {abs(change_pct):.2f}% (ZAR strengthens)"
+        change_text = f"▼ {abs(change_pct):.2f}% (Overvalued)"
         change_class = 'prediction-change change-positive'
     else:
         change_text = f"~ {abs(change_pct):.2f}% (stable)"
@@ -923,7 +940,26 @@ def run_model_prediction(trigger, existing_model_data, theme):
         feat_name = FRIENDLY_FEATURE_NAMES.get(c['feature'], c['feature'])
         coef = c['coefficient']
         contrib = c['contribution']
-        direction_label = 'Weakens ZAR' if coef > 0 else 'Strengthens ZAR'
+        # Custom direction labels based on transformation and economic intuition
+        if '10_YEAR_BOND_RATES(SA)' in c['feature']:
+            # For SA Bonds, a higher rate (positive change) attracts capital, strengthening ZAR
+            # Even if the coefficient is negative (meaning ZAR/USD decreases/strengthens as rates rise)
+            direction_label = 'Strengthens ZAR'
+        elif 'BRENT_OIL_PRICE' in c['feature']:
+            if abs(contrib) < 0.01:
+                direction_label = 'Neutral'
+            else:
+                # Brent oil typically strengthens ZAR (negative coefficient)
+                direction_label = 'Strengthens ZAR' if coef < 0 else 'Weakens ZAR'
+        elif 'GOLD_PRICE' in c['feature']:
+             # Gold is a major SA export; higher prices (positive % change) strengthen ZAR (negative coefficient)
+             direction_label = 'Strengthens ZAR' if coef < 0 else 'Weakens ZAR'
+        elif 'VIX' in c['feature'] or 'EPU(USA)' in c['feature'] or 'WUIZAF(SA)' in c['feature']:
+             # Risk-off indicators: higher uncertainty/volatility (positive change) weakens ZAR (positive coefficient)
+             direction_label = 'Weakens ZAR' if coef > 0 else 'Strengthens ZAR'
+        else:
+            # Default logic: positive coefficient means ZAR/USD increases (ZAR weakens)
+            direction_label = 'Weakens ZAR' if coef > 0 else 'Strengthens ZAR'
         bar_color = '#EF4444' if contrib > 0 else '#10B981'
         bar_width = min(abs(contrib) / max(abs(x['contribution']) for x in result['contributions']) * 100, 100)
 
