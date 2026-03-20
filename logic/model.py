@@ -17,6 +17,11 @@ logger = logging.getLogger("ModelPredictor")
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frozen models', 'zar_usd_model_v1.pkl')
 TRAINSET_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frozen models', 'zar_usd_trainsetmodel.pkl')
 
+# Transform metadata for dynamic coefficient interpretation
+LOG_DIFF_COLS = {'EPU(USA)', 'VIX', 'GOLD_PRICE', 'BRENT_OIL_PRICE', 'ZAR_USD'}
+FIRST_DIFF_COLS = {'WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', '10_YEAR_BOND_RATES(SA)',
+                   'SA_INFLATION_YOY', 'US_CPI_YOY', 'INFLATION_DIFF'}
+
 _model_cache = {}
 
 
@@ -58,6 +63,89 @@ def fetch_data_from_supabase():
     df = df.apply(pd.to_numeric, errors='coerce')
     df = df.sort_index()
     return df
+
+
+def get_transform_type(feature_name):
+    """Return 'log_diff' or 'first_diff' based on the feature's base column."""
+    base = feature_name.replace('_Lag1', '').replace('_3M_Trend', '')
+    if base in LOG_DIFF_COLS:
+        return 'log_diff'
+    elif base in FIRST_DIFF_COLS:
+        return 'first_diff'
+    return 'unknown'
+
+
+def convert_to_raw_space_coefficient(unscaled_coef, transform_type, feature_name, raw_df, current_zar_usd):
+    """
+    Convert coefficient from transformed space to raw space.
+    
+    Model is trained on:
+    - Predictors: transformed (log-diff or first-diff)
+    - Target: log-return (% change)
+    
+    We want coefficients that represent:
+    - Predictors: raw levels
+    - Target: raw ZAR per USD levels
+    
+    Args:
+        unscaled_coef: Unscaled coefficient (effect on log-return in %)
+        transform_type: 'log_diff' or 'first_diff'
+        feature_name: Name of the feature
+        raw_df: Original raw data
+        current_zar_usd: Current ZAR per USD exchange rate level
+    
+    Returns:
+        Coefficient in raw space (raw predictor → raw target)
+        
+    Mathematical derivation:
+    
+    Step 1: Convert target from log-return to level
+    - Model: log_return = β * X_transformed
+    - log_return ≈ ΔS / S * 100
+    - Therefore: ΔS ≈ S * (β * X_transformed / 100)
+    
+    Step 2: Convert predictor from transformed to raw
+    
+    For log-diff predictors:
+    - X_transformed = Δlog(X_raw) * 100 ≈ (ΔX_raw / X_raw) * 100
+    - For a 1-unit increase in X_raw: ΔX_raw = 1
+    - X_transformed ≈ (1 / X_raw) * 100
+    - So: ΔS ≈ S * (β / 100) * (1 / X_raw) * 100 = S * β / X_raw
+    - Raw coefficient: β_raw = S * β / X_raw
+    
+    For first-diff predictors:
+    - X_transformed = ΔX_raw
+    - For a 1-unit increase in X_raw: ΔX_raw = 1
+    - X_transformed = 1
+    - So: ΔS ≈ S * (β / 100)
+    - Raw coefficient: β_raw = S * β / 100
+    """
+    # Step 1: Convert from log-return target to level target
+    zar_level_coef = current_zar_usd * (unscaled_coef / 100)
+    
+    # Step 2: Convert from transformed predictor to raw predictor
+    if transform_type == 'log_diff':
+        # For log-differenced predictors
+        # A 1-unit change in raw X creates a (100/X) change in log-diff space
+        # So we need to divide by current raw level and multiply by 100
+        base_feature = feature_name.replace('_Lag1', '').replace('_3M_Trend', '')
+        if base_feature in raw_df.columns:
+            current_raw_value = raw_df[base_feature].dropna().iloc[-1]
+            # β_raw = (S * β / 100) / (100 / X) = S * β * X / 10000
+            raw_space_coef = zar_level_coef / (100 / current_raw_value)
+        else:
+            raw_space_coef = zar_level_coef
+        
+    elif transform_type == 'first_diff':
+        # For first-differenced predictors
+        # A 1-unit change in raw X creates a 1-unit change in diff space
+        # No additional conversion needed
+        raw_space_coef = zar_level_coef
+        
+    else:
+        raw_space_coef = zar_level_coef
+    
+    return raw_space_coef
 
 
 def engineer_features(df):
@@ -172,9 +260,27 @@ def predict_next_month():
             coef = coefficients.get(feat, model.coef_[idx])
             feat_val = X_scaled[0][idx]
             contribution = coef * feat_val
+            scale = scaler.scale_[idx]
+            transform_type = get_transform_type(feat)
+            
+            # Get interpretable coefficient (raw predictor level → raw target level)
+            # Step 1: Unscale the coefficient (removes StandardScaler effect)
+            unscaled_coef = coef / scale
+            
+            # Step 2: Convert from transformed space to raw space
+            # This accounts for both target transformation (log-return → level)
+            # and predictor transformation (diff/log-diff → raw level)
+            current_zar_usd = raw_df['ZAR_USD'].dropna().iloc[-1]
+            zar_level_coef = convert_to_raw_space_coefficient(
+                unscaled_coef, transform_type, feat, raw_df, current_zar_usd
+            )
+            
             contributions.append({
                 'feature': feat,
                 'coefficient': coef,
+                'unscaled_coefficient': unscaled_coef,
+                'zar_level_coefficient': zar_level_coef,
+                'transform_type': transform_type,
                 'scaled_value': feat_val,
                 'contribution': contribution,
             })
@@ -337,6 +443,49 @@ def predict_next_month():
     last_date = raw_df.index[-1]
     next_month_date = last_date + pd.offsets.MonthEnd(1)
 
+    # Calculate residuals for diagnostic plots (only for validation data)
+    residuals = []
+    qq_data = {}
+    partial_plots = {}
+    
+    if len(validation_actual_levels) > 0 and len(validation_pred_levels) > 0:
+        # Calculate residuals in level space
+        residuals_array = validation_actual_levels.values - validation_pred_levels
+        
+        # QQ plot data (theoretical quantiles vs sample quantiles)
+        from scipy import stats
+        residuals_sorted = np.sort(residuals_array)
+        theoretical_quantiles = stats.norm.ppf(np.linspace(0.01, 0.99, len(residuals_sorted)))
+        
+        qq_data = {
+            'theoretical': [float(q) for q in theoretical_quantiles],
+            'sample': [float(r) for r in residuals_sorted],
+        }
+        
+        # Partial plots for each selected feature
+        # Show relationship between each predictor and target holding others constant
+        for feat in selected_features[:5]:  # Limit to top 5 to avoid overwhelming
+            if feat in trainset_feature_names:
+                feat_idx = trainset_feature_names.index(feat)
+                
+                # Get feature values from validation set
+                feat_values_scaled = X_validation_scaled[:, feat_idx]
+                
+                # Unscale feature values for interpretability
+                feat_scale = trainset_scaler.scale_[feat_idx]
+                feat_mean = trainset_scaler.mean_[feat_idx]
+                feat_values_unscaled = feat_values_scaled * feat_scale + feat_mean
+                
+                # Get partial residuals: residual + feature contribution
+                feat_coef = trainset_model.coef_[feat_idx]
+                partial_residuals = residuals_array + (feat_coef * feat_values_scaled)
+                
+                partial_plots[feat] = {
+                    'x': [float(v) for v in feat_values_unscaled],
+                    'y': [float(r) for r in partial_residuals],
+                    'transform_type': get_transform_type(feat),
+                }
+
     return {
         'predicted_level': round(predicted_level, 4),
         'predicted_change_pct': round(predicted_change_pct, 2),
@@ -367,5 +516,9 @@ def predict_next_month():
             'dates': [d.strftime('%Y-%m-%d') for d in recent_common_idx],
             'actual': [float(v) for v in hist_actual_levels],
             'predicted': [float(v) for v in hist_pred_levels],
+        },
+        'diagnostics': {
+            'qq_plot': qq_data,
+            'partial_plots': partial_plots,
         }
     }

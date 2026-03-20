@@ -46,7 +46,7 @@ def sidebar(active_tab):
 
 def data_tab_content(existing_data=None):
     viz_style = {'display': 'block', 'marginTop': '2rem'} if existing_data else {'display': 'none'}
-    return html.Div(className='tab-content fade-in', children=[
+    return html.Div(id='data-tab', className='tab-content', children=[
         # Page Header
         html.Div(className='page-header', children=[
             html.Div(children=[
@@ -117,7 +117,7 @@ def data_tab_content(existing_data=None):
 
 def model_tab_content(existing_model_data=None):
     model_style = {'display': 'block'} if existing_model_data else {'display': 'none'}
-    return html.Div(className='tab-content fade-in', children=[
+    return html.Div(id='model-tab', className='tab-content', style={'display': 'none'}, children=[
         html.Div(className='page-header', children=[
             html.Div(children=[
                 html.H2('Model', className='page-title'),
@@ -160,7 +160,7 @@ def model_tab_content(existing_model_data=None):
             ]),
 
             # Historical Fit Chart
-            html.Div(id='visualization-container', className='model-card', children=[
+            html.Div(id='model-visualization-container', className='model-card', children=[
                 html.H4('Historical Fit', className='card-title'),
                 html.P('Model predictions vs actual ZAR/USD (level space)',
                        className='card-subtitle'),
@@ -190,6 +190,12 @@ def model_tab_content(existing_model_data=None):
                     'marginTop': '12px'
                 }),
             ]),
+
+            # Diagnostic Plots Section
+            html.Div(className='model-card', children=[
+                html.H4('Diagnostic Plots', className='card-title'),
+                html.Div(id='diagnostics-container'),
+            ]),
         ]),
     ])
 
@@ -199,8 +205,8 @@ def layout():
     return html.Div(id='dashboard-container', className='page-transition sidebar-collapsed', n_clicks=0, children=[
         dcc.Store(id='dashboard-tab', data=active_tab, storage_type='session'),
         dcc.Store(id='sidebar-state', data='collapsed', storage_type='local'),
-        dcc.Store(id='fetched-data', storage_type='session'), # Changed to session for persistence
-        dcc.Store(id='model-prediction-data', storage_type='session'), # Added for persistence
+        dcc.Store(id='fetched-data', storage_type='session'),
+        dcc.Store(id='model-prediction-data', storage_type='session'),
         dcc.Store(id='fetch-trigger', data=0, storage_type='session'),
         dcc.Store(id='model-prediction-trigger', data=0, storage_type='session'),
         dcc.Store(id='predictor-dropdown-options-store', storage_type='session'),
@@ -208,7 +214,10 @@ def layout():
         dcc.Store(id='fetched-data-status', storage_type='session'),
         sidebar(active_tab),
         html.Div(className='content-area', id='content-area', children=[
-            html.Div(id='content-body', children=[data_tab_content()])
+            html.Div(id='content-body', children=[
+                data_tab_content(),
+                model_tab_content(),
+            ])
         ])
     ])
 
@@ -269,40 +278,29 @@ def set_active_tab(data_clicks, model_clicks, signout_clicks, current_tab):
     return current_tab or 'data'
 
 
-# Update sidebar active classes and content area based on active tab
-@callback(
-    Output('nav-data', 'className'),
-    Output('nav-model', 'className'),
-    Output('nav-signout', 'className'),
-    Output('content-body', 'children'),
-    Input('dashboard-tab', 'data'),
-    State('fetched-data', 'data'),
-    State('model-prediction-data', 'data'),
-    prevent_initial_call=False
-)
-def update_view(active_tab, existing_data, existing_model_data):
-    data_cls = 'nav-link-custom active' if active_tab == 'data' else 'nav-link-custom'
-    model_cls = 'nav-link-custom active' if active_tab == 'model' else 'nav-link-custom'
-    signout_cls = 'nav-link-custom active' if active_tab == 'signout' else 'nav-link-custom'
-    
-    if active_tab == 'data':
-        print("DEBUG: Rendering Data Tab")
-        content = data_tab_content(existing_data)
-    elif active_tab == 'model':
-        print("DEBUG: Rendering Model Tab")
-        content = model_tab_content(existing_model_data)
-    else:
-        print(f"DEBUG: Rendering Sign Out or Other Tab: {active_tab}")
-        content = html.Div(className='tab-content fade-in', children=[
-            html.Div(className='page-header', children=[
-                html.Div(children=[
-                    html.H2('Sign Out', className='page-title'),
-                    html.P('You will be redirected to the login page.', className='page-subtitle'),
-                ]),
-            ]),
-        ])
+# Update sidebar active classes and tab visibility via clientside callback (instant, no server roundtrip)
+dash.clientside_callback(
+    """
+    function(activeTab) {
+        // Toggle tab visibility via CSS display
+        var dataTab = document.getElementById('data-tab');
+        var modelTab = document.getElementById('model-tab');
+        if (dataTab) dataTab.style.display = (activeTab === 'data') ? 'block' : 'none';
+        if (modelTab) modelTab.style.display = (activeTab === 'model') ? 'block' : 'none';
 
-    return data_cls, model_cls, signout_cls, content
+        // Update nav link classes
+        var dataCls = (activeTab === 'data') ? 'nav-link-custom active' : 'nav-link-custom';
+        var modelCls = (activeTab === 'model') ? 'nav-link-custom active' : 'nav-link-custom';
+        var signoutCls = (activeTab === 'signout') ? 'nav-link-custom active' : 'nav-link-custom';
+
+        return [dataCls, modelCls, signoutCls];
+    }
+    """,
+    [Output('nav-data', 'className'),
+     Output('nav-model', 'className'),
+     Output('nav-signout', 'className')],
+    Input('dashboard-tab', 'data')
+)
 
 
 # Handle signout: clear session
@@ -333,18 +331,15 @@ def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trig
     fetch_trigger = dash.no_update
     model_trigger = dash.no_update
     
-    # Always try to fetch data if on data tab
-    # We increment the trigger even if existing_data is present, because
-    # switching tabs creates new elements that need to be populated by the callback.
-    if active_tab == 'data':
-        print(f"DEBUG: Triggering data fetch (active_tab={active_tab})")
+    # Only fetch data if we don't have cached data yet
+    # Tabs are now pre-rendered so elements persist across switches
+    if active_tab == 'data' and not existing_data:
+        print(f"DEBUG: Triggering initial data fetch")
         fetch_trigger = (current_fetch_trigger or 0) + 1
         
-    # Always try to run model when on model tab
-    # We increment the trigger even if existing_model_data is present, because
-    # switching tabs creates new elements that need to be populated by the callback.
-    if active_tab == 'model':
-        print(f"DEBUG: Triggering model prediction (active_tab={active_tab})")
+    # Only run model prediction if we don't have cached results yet
+    if active_tab == 'model' and not existing_model_data:
+        print(f"DEBUG: Triggering initial model prediction")
         model_trigger = (current_model_trigger or 0) + 1
         
     return fetch_trigger, model_trigger
@@ -844,28 +839,44 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
 #   Model Page Callbacks
 # ═══════════════════════════════════════════
 
-FRIENDLY_FEATURE_NAMES = {
-    '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate (Monthly Change)',
-    '10_YEAR_BOND_RATES(SA)_Lag1': 'SA 10-Year Bond Rate (Prev. Month Change)',
-    '10_YEAR_BOND_RATES(SA)_3M_Trend': 'SA 10-Year Bond Rate (3M Trend)',
-    'VIX': 'VIX (Monthly % Change)',
-    'VIX_Lag1': 'VIX (Prev. Month % Change)',
-    'VIX_3M_Trend': 'VIX (3M % Change Trend)',
-    'BRENT_OIL_PRICE': 'Brent Crude Oil Price (Monthly % Change)',
-    'BRENT_OIL_PRICE_Lag1': 'Brent Crude Oil Price (Prev. Month % Change)',
-    'BRENT_OIL_PRICE_3M_Trend': 'Brent Crude Oil Price (3M % Change Trend)',
-    'GOLD_PRICE': 'Gold Price (Monthly % Change)',
-    'GOLD_PRICE_Lag1': 'Gold Price (Prev. Month % Change)',
-    'GOLD_PRICE_3M_Trend': 'Gold Price (3M % Change Trend)',
-    'EPU(USA)': 'US Economic Policy Uncertainty (Monthly % Change)',
-    'EPU(USA)_Lag1': 'US Economic Policy Uncertainty (Prev. Month % Change)',
-    'INFLATION_DIFF': 'SA-US Inflation Differential (Monthly Change)',
-    'INFLATION_DIFF_Lag1': 'SA-US Inflation Differential (Prev. Month Change)',
-    'INFLATION_DIFF_3M_Trend': 'SA-US Inflation Differential (3M Trend)',
-    'WUIZAF(SA)': 'SA World Uncertainty Index (Monthly Change)',
-    'ZAR_USD_Lag1': 'ZAR/USD (Prev. Month % Change)',
-    'ZAR_USD_3M_Trend': 'ZAR/USD (3M % Change Trend)',
+BASE_FEATURE_NAMES = {
+    '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate',
+    '10_YEAR_BOND_RATES(USA)': 'US 10-Year Bond Rate',
+    'VIX': 'VIX',
+    'BRENT_OIL_PRICE': 'Brent Crude Oil Price',
+    'GOLD_PRICE': 'Gold Price',
+    'EPU(USA)': 'US Economic Policy Uncertainty',
+    'INFLATION_DIFF': 'SA-US Inflation Differential',
+    'WUIZAF(SA)': 'SA World Uncertainty Index',
+    'ZAR_USD': 'ZAR per USD',
+    'SA_INFLATION_YOY': 'SA Inflation (YoY)',
+    'US_CPI_YOY': 'US CPI (YoY)',
 }
+
+
+def get_friendly_feature_name(feature_name, transform_type):
+    """Dynamically build a friendly name reflecting the actual transform applied."""
+    is_lag = feature_name.endswith('_Lag1')
+    is_trend = feature_name.endswith('_3M_Trend')
+    base = feature_name.replace('_Lag1', '').replace('_3M_Trend', '')
+
+    display_name = BASE_FEATURE_NAMES.get(base, base)
+
+    # Simplified names - now interpretable per unit change in original rate
+    if is_lag:
+        return f"{display_name} (Prev. Month)"
+    elif is_trend:
+        return f"{display_name} (3M Trend)"
+    return display_name
+
+
+def get_coefficient_unit(transform_type):
+    """Return appropriate unit label for interpretable coefficients (MSc research standard)."""
+    if transform_type == 'log_diff':
+        return 'ZAR per USD per 1-unit change in level'
+    elif transform_type == 'first_diff':
+        return 'ZAR per USD per 1-unit change'
+    return 'ZAR per USD per unit'
 
 
 @callback(
@@ -881,6 +892,7 @@ FRIENDLY_FEATURE_NAMES = {
     Output('model-info-content', 'children'),
     Output('model-description-content', 'children'),
     Output('model-prediction-data', 'data'),
+    Output('diagnostics-container', 'children'),
     Input('model-prediction-trigger', 'data'),
     State('model-prediction-data', 'data'),
     State('theme-store', 'data'),
@@ -907,13 +919,13 @@ def run_model_prediction(trigger, existing_model_data, theme):
                 error_msg = 'Model dependencies missing. Install joblib and scikit-learn in your Python environment.'
             empty_fig = go.Figure().to_dict()
             return ({'display': 'none'}, f'Prediction failed: {error_msg}',
-                    '', '', '', 'prediction-change', '', '', empty_fig, '', '', dash.no_update)
+                    '', '', '', 'prediction-change', '', '', empty_fig, '', '', dash.no_update, dash.no_update)
 
     # If still no result (not triggered and no cache), return empty
     if not result:
         empty_fig = go.Figure().to_dict()
         return ({'display': 'none'}, '', '', '', '', 'prediction-change',
-                '', '', empty_fig, '', '', dash.no_update)
+                '', '', empty_fig, '', '', dash.no_update, dash.no_update)
 
     # ── Prediction card ──
     pred_level = result['predicted_level']
@@ -937,31 +949,25 @@ def run_model_prediction(trigger, existing_model_data, theme):
     # ── Feature contributions ──
     contrib_rows = []
     for c in result['contributions']:
-        feat_name = FRIENDLY_FEATURE_NAMES.get(c['feature'], c['feature'])
-        coef = c['coefficient']
+        feat_name = get_friendly_feature_name(c['feature'], c['transform_type'])
+        coef = c['zar_level_coefficient']  # Use ZAR/USD level coefficient for user interpretation
         contrib = c['contribution']
-        # Custom direction labels based on transformation and economic intuition
-        if '10_YEAR_BOND_RATES(SA)' in c['feature']:
-            # For SA Bonds, a higher rate (positive change) attracts capital, strengthening ZAR
-            # Even if the coefficient is negative (meaning ZAR/USD decreases/strengthens as rates rise)
-            direction_label = 'Strengthens ZAR'
-        elif 'BRENT_OIL_PRICE' in c['feature']:
-            if abs(contrib) < 0.01:
-                direction_label = 'Neutral'
-            else:
-                # Brent oil typically strengthens ZAR (negative coefficient)
-                direction_label = 'Strengthens ZAR' if coef < 0 else 'Weakens ZAR'
-        elif 'GOLD_PRICE' in c['feature']:
-             # Gold is a major SA export; higher prices (positive % change) strengthen ZAR (negative coefficient)
-             direction_label = 'Strengthens ZAR' if coef < 0 else 'Weakens ZAR'
-        elif 'VIX' in c['feature'] or 'EPU(USA)' in c['feature'] or 'WUIZAF(SA)' in c['feature']:
-             # Risk-off indicators: higher uncertainty/volatility (positive change) weakens ZAR (positive coefficient)
-             direction_label = 'Weakens ZAR' if coef > 0 else 'Strengthens ZAR'
+        
+        # Direction label based on coefficient sign (MSc research standard)
+        # Positive coef → ZAR per USD increases → ZAR depreciates (weakens)
+        # Negative coef → ZAR per USD decreases → ZAR appreciates (strengthens)
+        if abs(coef) < 0.0001:
+            direction_label = 'Neutral'
+        elif coef > 0:
+            direction_label = 'ZAR Depreciates'
         else:
-            # Default logic: positive coefficient means ZAR/USD increases (ZAR weakens)
-            direction_label = 'Weakens ZAR' if coef > 0 else 'Strengthens ZAR'
+            direction_label = 'ZAR Appreciates'
+        
         bar_color = '#EF4444' if contrib > 0 else '#10B981'
         bar_width = min(abs(contrib) / max(abs(x['contribution']) for x in result['contributions']) * 100, 100)
+        
+        # Add unit suffix based on transform type
+        unit_suffix = get_coefficient_unit(c['transform_type'])
 
         contrib_rows.append(
             html.Div(className='contrib-row', children=[
@@ -975,7 +981,7 @@ def run_model_prediction(trigger, existing_model_data, theme):
                         'backgroundColor': bar_color,
                     }),
                 ]),
-                html.Span(f'{contrib:+.3f}', className='contrib-value',
+                html.Span(f'{coef:+.4f} {unit_suffix}', className='contrib-value',
                            style={'color': bar_color}),
             ])
         )
@@ -1109,19 +1115,19 @@ def run_model_prediction(trigger, existing_model_data, theme):
         ]),
     ])
 
-    # Dynamic Description Generation
+    # Dynamic Description Generation (MSc research standard)
     top_feature = result['contributions'][0] if result['contributions'] else None
     feature_impact_text = ""
     if top_feature:
-        feat_name = FRIENDLY_FEATURE_NAMES.get(top_feature['feature'], top_feature['feature'])
-        impact_dir = "weakening" if top_feature['coefficient'] > 0 else "strengthening"
-        feature_impact_text = f"The most significant driver for this period is {feat_name}, which is currently exerting a {impact_dir} pressure on the ZAR."
+        feat_name = get_friendly_feature_name(top_feature['feature'], top_feature['transform_type'])
+        impact_dir = "depreciation" if top_feature['zar_level_coefficient'] > 0 else "appreciation"
+        feature_impact_text = f"The most significant driver for this period is {feat_name}, which is associated with expected ZAR {impact_dir} pressure."
 
     direction_text = ""
     if direction == 'weaken':
-        direction_text = f"The model forecasts a ZAR weakening of {abs(change_pct):.2f}% against the USD."
+        direction_text = f"The model forecasts a ZAR depreciation of {abs(change_pct):.2f}% against the USD."
     elif direction == 'strengthen':
-        direction_text = f"The model forecasts a ZAR strengthening of {abs(change_pct):.2f}% against the USD."
+        direction_text = f"The model forecasts a ZAR appreciation of {abs(change_pct):.2f}% against the USD."
     else:
         direction_text = "The model expects the ZAR/USD exchange rate to remain relatively stable."
 
@@ -1131,16 +1137,176 @@ def run_model_prediction(trigger, existing_model_data, theme):
         html.P(f"Based on the latest data for {result['last_date']}, {direction_text} {feature_impact_text}"),
         html.P(perf_text),
         html.P("This forecast is based on an ElasticNet (Lasso) regression model that automatically selects the most relevant macroeconomic indicators. "
-               "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates (ZAR/USD) for interpretability.")
+               "Coefficients represent expected changes in ZAR per USD holding all else constant. "
+               "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates for interpretability.")
     ])
 
     prediction_data = {
         'raw_result': result,
         'last_updated': str(datetime.datetime.now())
     }
+    
+    # Render diagnostic plots directly
+    diagnostics_data = result.get('diagnostics', {})
+    diagnostics_children = _build_diagnostic_plots(diagnostics_data, theme)
 
     return ({'display': 'block'}, '', date_text, pred_value, change_text,
-            change_class, baseline_text, contrib_rows, fig_dict, info_items, analysis_content, prediction_data)
+            change_class, baseline_text, contrib_rows, fig_dict, info_items, analysis_content, prediction_data, diagnostics_children)
+
+
+
+def _build_diagnostic_plots(diagnostics_data, theme):
+    """Pre-render diagnostic plots so the toggle only needs to show/hide them."""
+    if not diagnostics_data:
+        return html.P('No diagnostic data available. Run a prediction first.',
+                       style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
+
+    is_dark = (theme == 'dark') if theme else True
+    text_color = '#ffffff' if is_dark else '#0a0a0a'
+    text_muted = '#6b6b6b' if is_dark else '#737373'
+    grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
+    line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
+
+    plots = []
+
+    # QQ Plot
+    qq_data = diagnostics_data.get('qq_plot', {})
+    if qq_data and qq_data.get('theoretical') and qq_data.get('sample'):
+        qq_fig = go.Figure()
+
+        qq_fig.add_trace(go.Scatter(
+            x=qq_data['theoretical'],
+            y=qq_data['sample'],
+            mode='markers',
+            marker=dict(color='#5b8def', size=6, opacity=0.7),
+            name='Sample Quantiles',
+            hovertemplate='Theoretical: %{x:.4f}<br>Sample: %{y:.4f}<extra></extra>'
+        ))
+
+        min_val = min(min(qq_data['theoretical']), min(qq_data['sample']))
+        max_val = max(max(qq_data['theoretical']), max(qq_data['sample']))
+        qq_fig.add_trace(go.Scatter(
+            x=[min_val, max_val],
+            y=[min_val, max_val],
+            mode='lines',
+            line=dict(color='#EF4444', width=2, dash='dash'),
+            name='Normal Distribution',
+            hoverinfo='skip'
+        ))
+
+        qq_fig.update_layout(
+            template=None,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=56, r=24, t=32, b=48),
+            height=400,
+            font=dict(family="Inter, sans-serif", size=12, color=text_color),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
+            ),
+            hovermode="closest",
+            xaxis=dict(
+                title='Theoretical Quantiles',
+                showgrid=True, gridwidth=1, gridcolor=grid_color,
+                zeroline=True, zerolinewidth=1, zerolinecolor=line_color,
+                tickfont=dict(size=10, color=text_muted),
+            ),
+            yaxis=dict(
+                title='Sample Quantiles (Residuals)',
+                showgrid=True, gridwidth=1, gridcolor=grid_color,
+                zeroline=True, zerolinewidth=1, zerolinecolor=line_color,
+                tickfont=dict(size=10, color=text_muted),
+            ),
+        )
+
+        plots.append(html.Div(className='diagnostic-plot-container', children=[
+            html.H5('Q-Q Plot (Normality of Residuals)', style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
+            html.P('Residuals should follow the diagonal line if normally distributed',
+                   style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '12px'}),
+            dcc.Graph(id='diag-qq-plot', figure=qq_fig.to_dict(), style={'height': '400px'},
+                      config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
+        ]))
+
+    # Partial Plots
+    partial_plots = diagnostics_data.get('partial_plots', {})
+    if partial_plots:
+        partial_plot_children = []
+        for feat_name, plot_data in partial_plots.items():
+            if plot_data.get('x') and plot_data.get('y'):
+                partial_fig = go.Figure()
+
+                partial_fig.add_trace(go.Scatter(
+                    x=plot_data['x'],
+                    y=plot_data['y'],
+                    mode='markers',
+                    marker=dict(color='#5b8def', size=6, opacity=0.6),
+                    name=feat_name,
+                    hovertemplate='%{x:.4f}<br>Partial Residual: %{y:.4f}<extra></extra>'
+                ))
+
+                try:
+                    import numpy as np
+                    x_arr = np.array(plot_data['x'])
+                    y_arr = np.array(plot_data['y'])
+
+                    if len(x_arr) > 2:
+                        coeffs = np.polyfit(x_arr, y_arr, 1)
+                        x_line = np.array([x_arr.min(), x_arr.max()])
+                        y_line = np.polyval(coeffs, x_line)
+
+                        partial_fig.add_trace(go.Scatter(
+                            x=x_line,
+                            y=y_line,
+                            mode='lines',
+                            line=dict(color='#F59E0B', width=2),
+                            name='Trend',
+                            hoverinfo='skip'
+                        ))
+                except:
+                    pass
+
+                partial_fig.update_layout(
+                    template=None,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    margin=dict(l=56, r=24, t=32, b=48),
+                    height=350,
+                    font=dict(family="Inter, sans-serif", size=12, color=text_color),
+                    showlegend=False,
+                    hovermode="closest",
+                    xaxis=dict(
+                        title=f'{feat_name} (Transformed)',
+                        showgrid=True, gridwidth=1, gridcolor=grid_color,
+                        tickfont=dict(size=10, color=text_muted),
+                    ),
+                    yaxis=dict(
+                        title='Partial Residual',
+                        showgrid=True, gridwidth=1, gridcolor=grid_color,
+                        tickfont=dict(size=10, color=text_muted),
+                    ),
+                )
+
+                safe_id = feat_name.replace('(', '').replace(')', '').replace(' ', '-').lower()
+                partial_plot_children.append(html.Div(className='diagnostic-plot-container', style={'marginBottom': '24px'}, children=[
+                    html.H6(feat_name, style={'fontSize': '0.875rem', 'fontWeight': '600', 'marginBottom': '4px'}),
+                    dcc.Graph(id=f'diag-partial-{safe_id}', figure=partial_fig.to_dict(), style={'height': '350px'},
+                              config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
+                ]))
+
+        if partial_plot_children:
+            plots.append(html.Div(className='diagnostic-plot-container', style={'marginTop': '32px'}, children=[
+                html.H5('Partial Residual Plots', style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
+                html.P('Shows relationship between each predictor and target, holding other predictors constant',
+                       style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '16px'}),
+                html.Div(children=partial_plot_children)
+            ]))
+
+    if not plots:
+        return html.P('No diagnostic plots available.',
+                       style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
+
+    return plots
 
 
 def _info_pill(label, value, description=None):

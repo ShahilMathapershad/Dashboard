@@ -77,6 +77,9 @@ document.addEventListener('DOMContentLoaded', function () {
             try {
                 const plots = document.querySelectorAll('.js-plotly-plot');
                 plots.forEach((plot) => {
+                    // Skip diagnostic plots - they manage their own height
+                    if (plot.closest('.diagnostic-plot-container')) return;
+
                     // Calculate size based on container
                     const container = plot.closest('.model-card, .viz-container');
                     if (container) {
