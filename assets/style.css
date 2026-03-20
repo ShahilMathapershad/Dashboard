@@ -1902,3 +1902,25 @@ p  { margin: 0; color: var(--text-2); }
         gap: 12px;
     }
 }
+/* =========================================================
+   SCENARIO SLIDER OVERRIDES
+   ========================================================= */
+
+/* Hide the auto-generated number input from Dash sliders */
+.scenario-sliders-panel .dash-range-slider-input,
+.scenario-sliders-panel .dash-input-container {
+    display: none !important;
+}
+
+/* Force the actual slider track to reclaim the empty space */
+.scenario-sliders-panel .rc-slider,
+.scenario-sliders-panel .dash-slider {
+    width: 100% !important;
+    flex-grow: 1 !important;
+}
+
+/* Ensure the wrapper uses flex properly if Dash wraps it */
+.scenario-slider-wrapper > div {
+    display: flex;
+    width: 100%;
+}
