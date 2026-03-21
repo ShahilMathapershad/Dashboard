@@ -7,8 +7,9 @@ import os
 import sys
 import diskcache
 import multiprocess
+import threading
 
-# On macOS, spawn is default but we want to be explicit and avoid crashes
+# On macOS/Render, spawn is default but we want to be explicit and avoid crashes
 # We use multiprocess because DiskcacheManager uses it if available
 try:
     if multiprocess.get_start_method(allow_none=True) is None:
@@ -18,7 +19,8 @@ except RuntimeError:
     pass
 
 # DiskCache for background callbacks
-cache = diskcache.Cache("./.cache")
+# Use a smaller cache size to avoid disk/RAM pressure
+cache = diskcache.Cache("./.cache", size_limit=2**28) # 256MB limit
 background_callback_manager = DiskcacheManager(cache)
 
 # Ensure project root is in sys.path for Render
@@ -214,6 +216,7 @@ app.clientside_callback(
     Output('_pages_location', 'pathname'),
     Input('_pages_location', 'pathname'),
     Input('user-session', 'data'),
+    prevent_initial_call=True
 )
 def auth_redirection(current_path, session_data):
     # Determine if user is logged in

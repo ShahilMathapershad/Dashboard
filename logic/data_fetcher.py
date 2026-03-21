@@ -270,8 +270,17 @@ def process_data(final_df, start_date='2018-01-31', end_date=None):
         end_of_prev_month = (now.replace(day=1) - pd.Timedelta(days=1))
         end_date = end_of_prev_month.strftime('%Y-%m-%d')
     
+    # LIMIT DATA RANGE: To save memory on Render (512MB), we only need 
+    # enough data for engineering features (rolling windows, lags).
+    # 15 years is more than enough.
+    limit_date = (pd.to_datetime(end_date) - pd.DateOffset(years=15)).strftime('%Y-%m-%d')
+    if start_date < limit_date:
+        start_date = limit_date
+        logger.info(f"Limiting start_date to {start_date} for memory efficiency.")
+
     # Sort index
     final_df = final_df.sort_index()
+    final_df = final_df.loc[start_date:]
     
     # Resample to monthly (End of Month) and take the last value
     # Older pandas used 'M', newer use 'ME'
@@ -475,28 +484,30 @@ def should_update_from_api():
     Returns True if today is the last day of the month AND Supabase doesn't have today's month data yet.
     """
     if not is_last_day_of_month():
+        logger.info("should_update_from_api: False (not last day of month)")
         return False
     
     if not supabase:
-        return True # Fallback if supabase not available
+        logger.warning("should_update_from_api: True (no Supabase client)")
+        return True
     
     try:
         # Check the latest date in Supabase
         resp = supabase.table('data').select('Date').order('Date', desc=True).limit(1).execute()
         if not resp.data:
+            logger.info("should_update_from_api: True (Supabase empty)")
             return True
         
         latest_date_str = resp.data[0]['Date']
-        # Handle both 'YYYY-MM-DD' and 'YYYY-MM-DDTHH:MM:SS+00:00'
-        latest_date = pd.to_datetime(latest_date_str).date()
+        latest_date = pd.to_datetime(latest_date_str)
         
-        today = datetime.date.today()
-        # If the latest date in Supabase is already today or from this month's end, we don't need to update again.
+        today = pd.Timestamp.now()
+        # If the latest date in Supabase is already from this month or later, don't re-fetch
         if latest_date.year == today.year and latest_date.month == today.month:
-            # If it's the last day and we already have a record for this month, assume it's updated.
-            # Usually data is monthly-end.
+            logger.info(f"should_update_from_api: False (Latest date {latest_date.date()} is already from this month)")
             return False
             
+        logger.info(f"should_update_from_api: True (Latest date {latest_date.date()} is old)")
         return True
     except Exception as e:
         logger.error(f"Error checking Supabase for latest date: {e}")

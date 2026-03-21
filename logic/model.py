@@ -25,6 +25,8 @@ FIRST_DIFF_COLS = {'WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', '10_YEAR_BOND_RATES(
 
 _model_cache = {}
 _supabase_data_cache = {'df': None, 'time': 0}
+_engineered_features_cache = {'df_features': None, 'df_raw': None, 'input_hash': None, 'time': 0}
+_predict_next_month_cache = {'result': None, 'time': 0}
 
 
 # NWU Color Palette (from MSc research standard)
@@ -201,36 +203,60 @@ def convert_to_raw_space_coefficient(unscaled_coef, transform_type, feature_name
 def engineer_features(df):
     """
     Replicate the exact feature-engineering pipeline used during training.
-    Input df must have columns: EPU(USA), VIX, GOLD_PRICE, BRENT_OIL_PRICE,
-    WUIZAF(SA), 10_YEAR_BOND_RATES(USA), 10_YEAR_BOND_RATES(SA),
-    SA_INFLATION, US_CPI, ZAR_USD
+    Optimised for memory: avoids unnecessary copies and caches results.
     """
+    global _engineered_features_cache
+    now = time.time()
+    
+    # Simple hash of the input dataframe to check if we can use cache
+    # (Using shape and last few values as a proxy for 'same data')
+    if not df.empty:
+        current_hash = (df.shape, df.iloc[-1].sum(), df.index[-1])
+        if (_engineered_features_cache['df_features'] is not None and 
+            _engineered_features_cache['input_hash'] == current_hash and
+            (now - _engineered_features_cache['time'] < 300)):
+            return _engineered_features_cache['df_features'].copy(), _engineered_features_cache['df_raw'].copy()
+    else:
+        current_hash = None
+
+    # Use float32 to save memory if precision allows (standard for these macro models)
     df = df.copy()
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            df[col] = df[col].astype('float32')
 
     # Inflation YoY & Differencing
-    df['SA_INFLATION_YOY'] = df['SA_INFLATION'].pct_change(periods=12) * 100
-    df['US_CPI_YOY'] = df['US_CPI'].pct_change(periods=12) * 100
-    df['INFLATION_DIFF'] = df['SA_INFLATION_YOY'] - df['US_CPI_YOY']
-    df = df.drop(columns=['SA_INFLATION', 'US_CPI'], errors='ignore').dropna()
+    # We use a temporary series to avoid creating many intermediate columns in the main df
+    sa_infl_yoy = df['SA_INFLATION'].pct_change(periods=12) * 100
+    us_cpi_yoy = df['US_CPI'].pct_change(periods=12) * 100
+    df['SA_INFLATION_YOY'] = sa_infl_yoy.astype('float32')
+    df['US_CPI_YOY'] = us_cpi_yoy.astype('float32')
+    df['INFLATION_DIFF'] = (sa_infl_yoy - us_cpi_yoy).astype('float32')
+    df.drop(columns=['SA_INFLATION', 'US_CPI'], errors='ignore', inplace=True)
+    df.dropna(inplace=True)
 
     log_cols = ['EPU(USA)', 'VIX', 'GOLD_PRICE', 'BRENT_OIL_PRICE', 'ZAR_USD']
     diff_cols = ['WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', '10_YEAR_BOND_RATES(SA)',
                  'SA_INFLATION_YOY', 'US_CPI_YOY', 'INFLATION_DIFF']
 
+    # Pre-allocate df_transformed to avoid repeated growth
     df_transformed = pd.DataFrame(index=df.index)
+    
     for col in log_cols:
         if col in df.columns:
-            df_transformed[col] = np.log(df[col]).diff() * 100
+            # Combined log and diff to reduce intermediate objects
+            df_transformed[col] = (np.log(df[col]).diff() * 100).astype('float32')
+            
     for col in diff_cols:
         if col in df.columns:
-            df_transformed[col] = df[col].diff()
-    df_transformed = df_transformed.dropna()
+            df_transformed[col] = df[col].diff().astype('float32')
+            
+    df_transformed.dropna(inplace=True)
 
+    # Use the transformed df as the base for features
     df_features = df_transformed.copy()
 
-    # Lags
-    # Note: ZAR_USD_Lag1 is engineered from df_features (which is diff'd)
-    # The training code has: df_features['ZAR_USD_Lag1'] = df_features['ZAR_USD'].shift(1)
+    # Lags - avoid loop if possible or keep it tight
     df_features['ZAR_USD_Lag1'] = df_features['ZAR_USD'].shift(1)
     lag_columns = ['VIX', '10_YEAR_BOND_RATES(SA)', 'INFLATION_DIFF',
                    'GOLD_PRICE', 'EPU(USA)', 'BRENT_OIL_PRICE']
@@ -243,14 +269,21 @@ def engineer_features(df):
                      'GOLD_PRICE', 'BRENT_OIL_PRICE', 'ZAR_USD']
     for col in trend_columns:
         if col in df_transformed.columns:
+            # Access shifted column directly to avoid extra copy
             df_features[f'{col}_3M_Trend'] = (
-                df_transformed[col].shift(1).rolling(window=3).mean()
+                df_transformed[col].shift(1).rolling(window=3).mean().astype('float32')
             )
 
-    # The target variable for prediction is ZAR_USD in df_features (which is log return * 100)
-    # We keep it for now as 'ZAR_USD' and drop it before feeding to model.
-    df_features = df_features.dropna()
-    return df_features, df
+    df_features.dropna(inplace=True)
+    
+    _engineered_features_cache = {
+        'df_features': df_features,
+        'df_raw': df,
+        'input_hash': current_hash,
+        'time': now
+    }
+    
+    return df_features.copy(), df.copy()
 
 
 def predict_next_month():
@@ -700,6 +733,18 @@ def predict_next_month():
             'reason': reason
         }
 
+    # Limit history to 60 months for UI charts to save memory/bandwidth
+    # The full history is still used for metrics, but we only send 5 years to the frontend
+    chart_limit = 60
+    if len(recent_common_idx) > chart_limit:
+        hist_dates_json = [d.strftime('%Y-%m-%d') for d in recent_common_idx[-chart_limit:]]
+        hist_actual_json = [float(v) for v in hist_actual_levels[-chart_limit:]]
+        hist_pred_json = [float(v) for v in hist_pred_levels[-chart_limit:]]
+    else:
+        hist_dates_json = [d.strftime('%Y-%m-%d') for d in recent_common_idx]
+        hist_actual_json = [float(v) for v in hist_actual_levels]
+        hist_pred_json = [float(v) for v in hist_pred_levels]
+
     return {
         'predicted_level': round(float(predicted_level), 4),
         'predicted_change_pct': round(float(predicted_change_pct), 2),
@@ -731,9 +776,9 @@ def predict_next_month():
             'directional_accuracy': float(directional_accuracy),
         },
         'history': {
-            'dates': [d.strftime('%Y-%m-%d') for d in recent_common_idx],
-            'actual': [float(v) for v in hist_actual_levels],
-            'predicted': [float(v) for v in hist_pred_levels],
+            'dates': hist_dates_json,
+            'actual': hist_actual_json,
+            'predicted': hist_pred_json,
         },
         'diagnostics': {
             'actual_vs_predicted': actual_vs_predicted,
