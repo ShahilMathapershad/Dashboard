@@ -107,7 +107,12 @@ def _render_loading_state(id_prefix, title, subtitle, visible=True):
     style = {'display': 'flex'} if visible else {'display': 'none'}
     return html.Div(id=f'{id_prefix}-loading', className='scenario-loading-state', style=style, children=[
         html.Div(className='empty-state', children=[
-            html.Div('⏳', className='empty-state-icon'),
+            html.Div(className='futuristic-loader', children=[
+                html.Div(className='ring'),
+                html.Div(className='ring'),
+                html.Div(className='ring'),
+                html.Div(className='core'),
+            ]),
             html.H4(title),
             html.P(subtitle),
         ])
@@ -195,8 +200,8 @@ def model_tab_content(existing_model_data=None):
     return html.Div(id='model-tab', className='tab-content', style={'display': 'none'}, children=[
         html.Div(className='page-header', children=[
             html.Div(children=[
-                html.H2('Model', className='page-title'),
-                html.P("Next-month ZAR/USD fair value via frozen ElasticNet (Lasso) model.",
+                html.H2('Model Forecasts', className='page-title'),
+                html.P("ZAR/USD estimates via frozen ElasticNet (Lasso) model.",
                        className='page-subtitle'),
             ]),
             html.Div(className='page-actions', children=[
@@ -212,31 +217,19 @@ def model_tab_content(existing_model_data=None):
                              visible=not existing_model_data),
 
         html.Div(id='model-results-container', style=model_style, children=[
+            # Multi-horizon Forecast Table (Replaces Prediction Card)
+            html.Div(className='model-card', children=[
+                html.H4('Multi-Horizon ZAR/USD Estimates', className='card-title'),
+                html.P('Fair Value vs Spot-based Actual estimates for various horizons.', className='card-subtitle'),
+                html.Div(id='forecast-table-container', className='forecast-table-wrapper')
+            ]),
 
-            # Top row: prediction card + feature contributions
-            html.Div(className='model-top-row', children=[
-
-                # Prediction Card
-                html.Div(className='model-card prediction-hero', children=[
-                    html.Div(className='prediction-header', children=[
-                        html.Span('Next Month Fair Value', className='prediction-label'),
-                        html.Span(id='prediction-date', className='prediction-date'),
-                    ]),
-                    html.Div(id='prediction-value', className='prediction-value'),
-                    html.Div(id='prediction-change', className='prediction-change'),
-                    html.Div(className='prediction-baseline', children=[
-                        html.Span('Current: ', className='baseline-label'),
-                        html.Span(id='prediction-baseline-value', className='baseline-value'),
-                    ]),
-                ]),
-
-                # Feature Contributions
-                html.Div(className='model-card', children=[
-                    html.H4('Key Drivers', className='card-title'),
-                    html.P('Non-zero model coefficients and their current contribution',
-                           className='card-subtitle'),
-                    html.Div(id='feature-contributions'),
-                ]),
+            # Feature Contributions
+            html.Div(className='model-card', children=[
+                html.H4('Key Macro Drivers', className='card-title'),
+                html.P('Non-zero model coefficients and their current contribution to the fair value.',
+                       className='card-subtitle'),
+                html.Div(id='feature-contributions'),
             ]),
 
             # Historical Fit Chart
@@ -258,7 +251,7 @@ def model_tab_content(existing_model_data=None):
 
             # Model Info
             html.Div(className='model-card model-info-card', children=[
-                html.H4('Model Specification & Fair Value Equilibrium', className='card-title'),
+                html.H4('Model Specification & Forecast Equilibrium', className='card-title'),
                 html.Div(id='model-info-content'),
                 # Dynamic model description
                 html.Hr(style={'margin': '24px 0', 'borderTop': '1px solid var(--border)'}),
@@ -401,22 +394,8 @@ def scenario_tab_content():
 
 
 def layout():
-    active_tab = 'data'
     return html.Div(id='dashboard-container', className='page-transition sidebar-collapsed', n_clicks=0, children=[
-        dcc.Store(id='dashboard-tab', data=active_tab, storage_type='session'),
-        dcc.Store(id='sidebar-state', data='collapsed', storage_type='local'),
-        dcc.Store(id='fetched-data', storage_type='session'),
-        dcc.Store(id='model-prediction-data', storage_type='session'),
-        dcc.Store(id='fetch-trigger', data=0, storage_type='session'),
-        dcc.Store(id='model-prediction-trigger', data=0, storage_type='session'),
-        dcc.Store(id='predictor-dropdown-options-store', storage_type='session'),
-        dcc.Store(id='selected-predictors', data=[], storage_type='session'),
-        dcc.Store(id='fetched-data-status', storage_type='session'),
-        dcc.Store(id='scenario-baseline-data', storage_type='session'),
-        dcc.Store(id='scenario-trigger', data=0, storage_type='session'),
-        dcc.Store(id='scenario-current-values', storage_type='session'),
-        dcc.Store(id='saved-scenarios', data=[], storage_type='session'),
-        sidebar(active_tab),
+        sidebar('data'),
         html.Div(className='content-area', id='content-area', children=[
             html.Div(id='content-body', children=[
                 data_tab_content(),
@@ -517,21 +496,20 @@ dash.clientside_callback(
 # Handle signout: clear session
 @callback(
     Output('user-session', 'data', allow_duplicate=True),
-    Output('url', 'pathname', allow_duplicate=True),
     Input('nav-signout', 'n_clicks'),
     prevent_initial_call=True
 )
 def perform_signout(signout_clicks):
     if signout_clicks:
-        return None, "/"
-    return dash.no_update, dash.no_update
+        return None
+    return dash.no_update
 
 
-# Trigger data fetch and model prediction automatically
+# Trigger data fetch and model prediction automatically (fallback/sync)
 @callback(
-    Output('fetch-trigger', 'data'),
-    Output('model-prediction-trigger', 'data'),
-    Output('scenario-trigger', 'data'),
+    Output('fetch-trigger', 'data', allow_duplicate=True),
+    Output('model-prediction-trigger', 'data', allow_duplicate=True),
+    Output('scenario-trigger', 'data', allow_duplicate=True),
     Input('dashboard-tab', 'data'),
     State('fetch-trigger', 'data'),
     State('model-prediction-trigger', 'data'),
@@ -539,7 +517,7 @@ def perform_signout(signout_clicks):
     State('fetched-data', 'data'),
     State('model-prediction-data', 'data'),
     State('scenario-baseline-data', 'data'),
-    prevent_initial_call='initial_duplicate'
+    prevent_initial_call=True
 )
 def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trigger, current_scenario_trigger,
                            existing_data, existing_model_data, existing_scenario_data):
@@ -547,20 +525,18 @@ def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trig
     model_trigger = dash.no_update
     scenario_trigger = dash.no_update
 
-    # Only fetch data if we don't have cached data yet
-    # Tabs are now pre-rendered so elements persist across switches
+    # Fallback: if data is missing, ensure trigger is at least 1
+    # We use (current or 0) + 1 to force a change and thus re-trigger background callback if needed
     if active_tab == 'data' and not existing_data:
-        print(f"DEBUG: Triggering initial data fetch")
+        print(f"DEBUG: Data tab active but no data. Ensuring trigger is active. Current: {current_fetch_trigger}")
         fetch_trigger = (current_fetch_trigger or 0) + 1
 
-    # Only run model prediction if we don't have cached results yet
     if active_tab == 'model' and not existing_model_data:
-        print(f"DEBUG: Triggering initial model prediction")
+        print(f"DEBUG: Model tab active but no data. Ensuring trigger is active. Current: {current_model_trigger}")
         model_trigger = (current_model_trigger or 0) + 1
 
-    # Only load scenario baseline if we don't have cached data yet
     if active_tab == 'scenario' and not existing_scenario_data:
-        print(f"DEBUG: Triggering initial scenario baseline load")
+        print(f"DEBUG: Scenario tab active but no data. Ensuring trigger is active. Current: {current_scenario_trigger}")
         scenario_trigger = (current_scenario_trigger or 0) + 1
 
     return fetch_trigger, model_trigger, scenario_trigger
@@ -675,6 +651,7 @@ def sync_data_tab_ui(active_tab, data, status_info):
     State('selected-predictors', 'data'),
     State('fetched-data-status', 'data'),
     background=True,
+    prevent_initial_call='initial_duplicate',
     running=[
         (Output('progress-container', 'hidden'), False, True),
         (Output('data-error', 'children'), "", ""),
@@ -685,7 +662,6 @@ def sync_data_tab_ui(active_tab, data, status_info):
         Output('progress-percentage', 'children'),
         Output('progress-status', 'children')
     ],
-    prevent_initial_call=True
 )
 def fetch_data(set_progress, trigger_value, existing_data, existing_options, existing_selected, existing_status):
     # Defensive check: set_progress can be None in some edge cases during callback initialization
@@ -1101,77 +1077,116 @@ def get_coefficient_unit(transform_type):
     return 'ZAR per USD per unit'
 
 
+# Background callbacks for Model and Scenario calculation (prerendering support)
+@callback(
+    Output('model-prediction-data', 'data'),
+    Output('model-error', 'children', allow_duplicate=True),
+    Input('model-prediction-trigger', 'data'),
+    State('model-prediction-data', 'data'),
+    background=True,
+    prevent_initial_call='initial_duplicate',
+    running=[
+        (Output('model-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
+        (Output('model-error', 'children'), "", ""),
+    ],
+)
+def fetch_model_prediction(trigger, existing_data):
+    if trigger and not existing_data:
+        print(f"DEBUG: fetch_model_prediction background task started. trigger={trigger}")
+        try:
+            result = predict_next_month()
+            return {'raw_result': result}, ""
+        except Exception as e:
+            traceback.print_exc()
+            return dash.no_update, f"Model Prediction Failed: {str(e)}"
+    return dash.no_update, dash.no_update
+
+
+@callback(
+    Output('scenario-baseline-data', 'data'),
+    Output('scenario-error', 'children', allow_duplicate=True),
+    Input('scenario-trigger', 'data'),
+    State('scenario-baseline-data', 'data'),
+    background=True,
+    prevent_initial_call='initial_duplicate',
+    running=[
+        (Output('scenario-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
+        (Output('scenario-error', 'children'), "", ""),
+    ],
+)
+def fetch_scenario_baseline(trigger, existing_data):
+    if trigger and not existing_data:
+        print(f"DEBUG: fetch_scenario_baseline background task started. trigger={trigger}")
+        try:
+            result = get_scenario_baseline()
+            return result, ""
+        except Exception as e:
+            traceback.print_exc()
+            return dash.no_update, f"Scenario engine load failed: {str(e)}"
+    return dash.no_update, dash.no_update
+
+
 @callback(
     Output('model-results-container', 'style'),
-    Output('model-error', 'children'),
-    Output('prediction-date', 'children'),
-    Output('prediction-value', 'children'),
-    Output('prediction-change', 'children'),
-    Output('prediction-change', 'className'),
-    Output('prediction-baseline-value', 'children'),
+    Output('model-error', 'children', allow_duplicate=True),
+    Output('forecast-table-container', 'children'),
     Output('feature-contributions', 'children'),
     Output('model-history-chart', 'figure'),
     Output('model-info-content', 'children'),
     Output('model-description-content', 'children'),
-    Output('model-prediction-data', 'data'),
     Output('diagnostics-container', 'children'),
     Output('model-loading', 'style'),
-    Input('model-prediction-trigger', 'data'),
     Input('dashboard-tab', 'data'),
-    State('model-prediction-data', 'data'),
+    Input('model-prediction-data', 'data'),
     State('theme-store', 'data'),
-    prevent_initial_call=True
+    prevent_initial_call='initial_duplicate'
 )
-def run_model_prediction(trigger, active_tab, existing_model_data, theme):
+def render_model_ui(active_tab, prediction_data, theme):
     if active_tab != 'model':
-        return [dash.no_update] * 14
+        return [dash.no_update] * 9
 
-    result = None
-    error_msg = ""
+    if not prediction_data:
+        empty_fig = go.Figure().to_dict()
+        return ({'display': 'none'}, '', '', '', empty_fig, '', '', dash.no_update, {'display': 'flex'})
 
-    # Check if we can use cached raw result
-    if existing_model_data and isinstance(existing_model_data, dict) and 'raw_result' in existing_model_data:
-        print("DEBUG: Using existing model raw result from session")
-        result = existing_model_data['raw_result']
-
-    # If no cached result and we have a trigger, run new prediction
-    if not result and trigger:
-        print(f"DEBUG: Running new model prediction. trigger={trigger}")
-        try:
-            result = predict_next_month()
-        except Exception as e:
-            traceback.print_exc()
-            error_msg = str(e)
-            if 'Model dependencies are unavailable' in error_msg:
-                error_msg = 'Model dependencies missing. Install joblib and scikit-learn in your Python environment.'
-            empty_fig = go.Figure().to_dict()
-            return ({'display': 'none'}, f'Prediction failed: {error_msg}',
-                    '', '', '', 'prediction-change', '', '', empty_fig, '', '', dash.no_update, dash.no_update, {'display': 'none'})
-
-    # If still no result (not triggered and no cache), return empty
+    result = prediction_data.get('raw_result')
     if not result:
         empty_fig = go.Figure().to_dict()
-        return ({'display': 'none'}, '', '', '', '', 'prediction-change',
-                '', '', empty_fig, '', '', dash.no_update, dash.no_update, {'display': 'flex'})
+        return ({'display': 'none'}, 'Prediction results unavailable.', '', '', empty_fig, '', '', dash.no_update, {'display': 'none'})
 
-    # ── Prediction card ──
     pred_level = result['predicted_level']
-    change_pct = result['predicted_change_pct']
     direction = result['direction']
-
+    change_pct = result['predicted_change_pct']
+    date_text = result['next_month_date']
     pred_value = f"R {pred_level:.4f}"
-    if direction == 'weaken':
-        change_text = f"▲ {abs(change_pct):.2f}% (Undervalued)"
-        change_class = 'prediction-change change-negative'
-    elif direction == 'strengthen':
-        change_text = f"▼ {abs(change_pct):.2f}% (Overvalued)"
-        change_class = 'prediction-change change-positive'
-    else:
-        change_text = f"~ {abs(change_pct):.2f}% (stable)"
-        change_class = 'prediction-change change-neutral'
+    baseline_text = f"Current: R {result['last_zar_usd']:.4f} ({result['last_date']})"
 
-    baseline_text = f"R {result['last_zar_usd']:.4f}  ({result['last_date']})"
-    date_text = f"for {result['next_month_date']}"
+    # ── Multi-Horizon Forecast Table ──
+    forecasts = result.get('forecasts', {})
+    table_header = html.Thead(html.Tr([
+        html.Th('Horizon'),
+        html.Th('Actual Estimate (Spot)'),
+        html.Th('Fair Value Estimate'),
+        html.Th('Reasoning'),
+    ]))
+    
+    table_rows = []
+    horizon_labels = {'1m': '1 Month', '3m': '3 Months', '6m': '6 Months'}
+    
+    for key, label in horizon_labels.items():
+        if key in forecasts:
+            f = forecasts[key]
+            table_rows.append(html.Tr([
+                html.Td(label, style={'fontWeight': '600'}),
+                html.Td(f"R {f['actual_estimate']:.4f}"),
+                html.Td(f"R {f['fair_value']:.4f}", style={'color': 'var(--accent)', 'fontWeight': '600'}),
+                html.Td(f['reason'], style={'fontSize': '0.8125rem', 'color': 'var(--text-2)'}),
+            ]))
+            
+    forecast_table = html.Table(className='forecast-table', children=[
+        table_header,
+        html.Tbody(table_rows)
+    ])
 
     # ── Feature contributions ──
     contrib_rows = []
@@ -1353,8 +1368,25 @@ def run_model_prediction(trigger, active_tab, existing_model_data, theme):
                        'Explains how much of the ZAR/USD volatility is captured by the model (0 to 1 scale).'),
             _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%",
                        'Mean Absolute Percentage Error: Average error relative to the exchange rate level.'),
+            _info_pill('MedAE', f"ZAR {metrics.get('medae', 0):.4f}",
+                       'Median Absolute Error: The median value of all absolute errors. Robust to outliers.'),
+            _info_pill('Max Error', f"ZAR {metrics.get('max_error', 0):.4f}",
+                       'Maximum Error: The largest absolute difference between actual and predicted ZAR/USD.'),
+            _info_pill('Explained Variance', f"{metrics.get('evs', 0):.4f}",
+                       'Measures how much of the variation in ZAR/USD is captured by the model.'),
             _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%",
                        'Percentage of months where the model correctly predicted if the ZAR would strengthen or weaken.'),
+        ]),
+        html.H5('Forward Model Estimates',
+                style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px',
+                       'marginBottom': '12px'}),
+        html.Div(className='model-info-grid', children=[
+            _info_pill('1 Month Forward', f"R {result.get('forecasts', {}).get('1m', {}).get('fair_value', 0):.4f}",
+                       f"Estimate for {result.get('forecasts', {}).get('1m', {}).get('date', 'next month')}. Using latest macro drivers."),
+            _info_pill('3 Month Forward', f"R {result.get('forecasts', {}).get('3m', {}).get('fair_value', 0):.4f}",
+                       f"Estimate for {result.get('forecasts', {}).get('3m', {}).get('date', 'in 3 months')}. Iterative multi-horizon forecast."),
+            _info_pill('6 Month Forward', f"R {result.get('forecasts', {}).get('6m', {}).get('fair_value', 0):.4f}",
+                       f"Estimate for {result.get('forecasts', {}).get('6m', {}).get('date', 'in 6 months')}. Assuming macro conditions persist."),
         ]),
     ])
 
@@ -1385,17 +1417,11 @@ def run_model_prediction(trigger, active_tab, existing_model_data, theme):
             "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates for interpretability.")
     ])
 
-    prediction_data = {
-        'raw_result': result,
-        'last_updated': str(datetime.datetime.now())
-    }
-
     # Render diagnostic plots directly
     diagnostics_data = result.get('diagnostics', {})
     diagnostics_children = _build_diagnostic_plots(diagnostics_data, theme)
 
-    return ({'display': 'block'}, '', date_text, pred_value, change_text,
-            change_class, baseline_text, contrib_rows, fig_dict, info_items, analysis_content, prediction_data,
+    return ({'display': 'block'}, '', forecast_table, contrib_rows, fig_dict, info_items, analysis_content,
             diagnostics_children, {'display': 'none'})
 
 
@@ -1411,34 +1437,39 @@ def _build_diagnostic_plots(diagnostics_data, theme):
     grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
     line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
 
-    plots = []
+    # Actual vs Predicted Plot (Replaces QQ Plot)
+    avp_data = diagnostics_data.get('actual_vs_predicted', {})
+    avp_plot = html.Div('No comparison data available', style={'color': text_muted})
+    
+    if avp_data and avp_data.get('actual') and avp_data.get('predicted'):
+        avp_fig = go.Figure()
 
-    # QQ Plot
-    qq_data = diagnostics_data.get('qq_plot', {})
-    if qq_data and qq_data.get('theoretical') and qq_data.get('sample'):
-        qq_fig = go.Figure()
-
-        qq_fig.add_trace(go.Scatter(
-            x=qq_data['theoretical'],
-            y=qq_data['sample'],
+        actual = avp_data['actual']
+        predicted = avp_data['predicted']
+        
+        avp_fig.add_trace(go.Scatter(
+            x=actual,
+            y=predicted,
             mode='markers',
-            marker=dict(color='#5b8def', size=6, opacity=0.7),
-            name='Sample Quantiles',
-            hovertemplate='Theoretical: %{x:.4f}<br>Sample: %{y:.4f}<extra></extra>'
+            marker=dict(color='#5b8def', size=8, opacity=0.7, 
+                        line=dict(width=1, color='rgba(255,255,255,0.1)' if is_dark else 'rgba(0,0,0,0.1)')),
+            name='Observations',
+            hovertemplate='Actual: R %{x:.4f}<br>Predicted: R %{y:.4f}<extra></extra>'
         ))
 
-        min_val = min(min(qq_data['theoretical']), min(qq_data['sample']))
-        max_val = max(max(qq_data['theoretical']), max(qq_data['sample']))
-        qq_fig.add_trace(go.Scatter(
+        min_val = min(min(actual), min(predicted)) * 0.98
+        max_val = max(max(actual), max(predicted)) * 1.02
+        
+        avp_fig.add_trace(go.Scatter(
             x=[min_val, max_val],
             y=[min_val, max_val],
             mode='lines',
             line=dict(color='#EF4444', width=2, dash='dash'),
-            name='Normal Distribution',
+            name='Ideal (y=x)',
             hoverinfo='skip'
         ))
 
-        qq_fig.update_layout(
+        avp_fig.update_layout(
             template=None,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
@@ -1451,33 +1482,33 @@ def _build_diagnostic_plots(diagnostics_data, theme):
             ),
             hovermode="closest",
             xaxis=dict(
-                title='Theoretical Quantiles',
+                title='Actual ZAR / USD',
                 showgrid=True, gridwidth=1, gridcolor=grid_color,
-                zeroline=True, zerolinewidth=1, zerolinecolor=line_color,
                 tickfont=dict(size=10, color=text_muted),
+                tickformat=".2f",
             ),
             yaxis=dict(
-                title='Sample Quantiles (Residuals)',
+                title='Predicted ZAR / USD',
                 showgrid=True, gridwidth=1, gridcolor=grid_color,
-                zeroline=True, zerolinewidth=1, zerolinecolor=line_color,
                 tickfont=dict(size=10, color=text_muted),
+                tickformat=".2f",
             ),
         )
 
-        plots.append(html.Div(className='diagnostic-plot-container', children=[
-            html.H5('Q-Q Plot (Normality of Residuals)',
+        avp_plot = html.Div(className='diagnostic-plot-container', children=[
+            html.H5('Actual vs Predicted ZAR/USD (Validation Set)',
                     style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
-            html.P('Residuals should follow the diagonal line if normally distributed',
+            html.P('Points should cluster around the diagonal line for accurate level predictions',
                    style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '12px'}),
-            dcc.Graph(id='diag-qq-plot', figure=qq_fig.to_dict(), style={'height': '400px'},
+            dcc.Graph(id='diag-avp-plot', figure=avp_fig.to_dict(), style={'height': '400px'},
                       config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
-        ]))
+        ])
 
     # Partial Plots
-    partial_plots = diagnostics_data.get('partial_plots', {})
-    if partial_plots:
-        partial_plot_children = []
-        for feat_name, plot_data in partial_plots.items():
+    partial_plot_children = []
+    partial_plots_data = diagnostics_data.get('partial_plots', {})
+    if partial_plots_data:
+        for feat_name, plot_data in partial_plots_data.items():
             if plot_data.get('x') and plot_data.get('y'):
                 partial_fig = go.Figure()
 
@@ -1534,26 +1565,23 @@ def _build_diagnostic_plots(diagnostics_data, theme):
 
                 safe_id = feat_name.replace('(', '').replace(')', '').replace(' ', '-').lower()
                 partial_plot_children.append(
-                    html.Div(className='diagnostic-plot-container', style={'marginBottom': '24px'}, children=[
+                    html.Div(className='diagnostic-plot-container', children=[
                         html.H6(feat_name, style={'fontSize': '0.875rem', 'fontWeight': '600', 'marginBottom': '4px'}),
                         dcc.Graph(id=f'diag-partial-{safe_id}', figure=partial_fig.to_dict(), style={'height': '350px'},
                                   config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
                     ]))
 
-        if partial_plot_children:
-            plots.append(html.Div(className='diagnostic-plot-container', style={'marginTop': '32px'}, children=[
-                html.H5('Partial Residual Plots',
-                        style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
-                html.P('Shows relationship between each predictor and target, holding other predictors constant',
-                       style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '16px'}),
-                html.Div(children=partial_plot_children)
-            ]))
-
-    if not plots:
-        return html.P('No diagnostic plots available.',
-                      style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
-
-    return plots
+    # Combine into a grid layout to prevent horizontal stretching
+    return html.Div(className='diagnostics-grid', children=[
+        html.Div(avp_plot, className='diagnostics-full-width'),
+        html.Div(className='partial-plots-section', children=[
+            html.H5('Partial Residual Plots',
+                    style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px', 'marginTop': '32px'}),
+            html.P('Shows relationship between each predictor and target, holding other predictors constant',
+                   style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '20px'}),
+            html.Div(className='partial-plots-grid', children=partial_plot_children)
+        ])
+    ])
 
 
 def _info_pill(label, value, description=None):
@@ -1598,37 +1626,24 @@ SCENARIO_UNITS = {
 
 
 @callback(
-    Output('scenario-baseline-data', 'data'),
-    Output('scenario-error', 'children'),
+    Output('scenario-error', 'children', allow_duplicate=True),
     Output('scenario-loading', 'style'),
     Output('scenario-content', 'style'),
     Output('scenario-current-values', 'data'),
-    Input('scenario-trigger', 'data'),
     Input('dashboard-tab', 'data'),
-    State('scenario-baseline-data', 'data'),
+    Input('scenario-baseline-data', 'data'),
+    prevent_initial_call='initial_duplicate'
 )
-def load_scenario_baseline(trigger, active_tab, existing_baseline):
+def sync_scenario_ui(active_tab, existing_baseline):
     if active_tab != 'scenario':
-        return [dash.no_update] * 5
+        return [dash.no_update] * 4
 
-    if existing_baseline and (trigger is None or trigger == 0):
-        # Already have baseline, no new trigger, just return current state
-        current_vals = {p['raw_col']: p['current_value'] for p in existing_baseline.get('predictors', [])}
-        return existing_baseline, '', {'display': 'none'}, {'display': 'block'}, current_vals
+    if not existing_baseline:
+        return '', {'display': 'flex'}, {'display': 'none'}, dash.no_update
 
-    if not trigger and not existing_baseline:
-        # No trigger, no baseline - wait for auto_trigger_callbacks
-        return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update
-
-    try:
-        print("DEBUG: Loading scenario baseline data...")
-        baseline = get_scenario_baseline()
-        current_vals = {p['raw_col']: p['current_value'] for p in baseline.get('predictors', [])}
-        print(f"DEBUG: Scenario baseline loaded. {len(baseline['predictors'])} predictors available.")
-        return baseline, '', {'display': 'none'}, {'display': 'block'}, current_vals
-    except Exception as e:
-        traceback.print_exc()
-        return dash.no_update, f'Failed to load scenario engine: {str(e)}', dash.no_update, dash.no_update, dash.no_update
+    # Already have baseline, just return current state
+    current_vals = {p['raw_col']: p['current_value'] for p in existing_baseline.get('predictors', [])}
+    return '', {'display': 'none'}, {'display': 'block'}, current_vals
 
 
 @callback(

@@ -25,6 +25,37 @@ FIRST_DIFF_COLS = {'WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', '10_YEAR_BOND_RATES(
 _model_cache = {}
 
 
+# NWU Color Palette (from MSc research standard)
+BASE_FEATURE_NAMES = {
+    'VIX': 'Volatility Index (VIX)',
+    '10_YEAR_BOND_RATES(USA)': 'US 10Y Bond Rate',
+    '10_YEAR_BOND_RATES(SA)': 'SA 10Y Bond Rate',
+    'GOLD_PRICE': 'Gold Price',
+    'EPU(USA)': 'US Economic Policy Uncertainty',
+    'INFLATION_DIFF': 'SA-US Inflation Differential',
+    'WUIZAF(SA)': 'SA World Uncertainty Index',
+    'ZAR_USD': 'ZAR per USD',
+    'SA_INFLATION_YOY': 'SA Inflation (YoY)',
+    'US_CPI_YOY': 'US CPI (YoY)',
+}
+
+
+def get_friendly_feature_name(feature_name, transform_type):
+    """Dynamically build a friendly name reflecting the actual transform applied."""
+    is_lag = feature_name.endswith('_Lag1')
+    is_trend = feature_name.endswith('_3M_Trend')
+    base = feature_name.replace('_Lag1', '').replace('_3M_Trend', '')
+
+    display_name = BASE_FEATURE_NAMES.get(base, base)
+
+    # Simplified names - now interpretable per unit change in original rate
+    if is_lag:
+        return f"{display_name} (Prev. Month)"
+    elif is_trend:
+        return f"{display_name} (3M Trend)"
+    return display_name
+
+
 def load_model(trainset_model=False):
     """Load the frozen ElasticNet model from disk (cached).
     
@@ -248,18 +279,56 @@ def predict_next_month():
     if df_features.empty:
         raise ValueError("Not enough data to compute features.")
 
-    # Prepare the latest row for prediction
-    latest_row = df_features.iloc[[-1]]
-    X_latest = latest_row.drop(columns=['ZAR_USD'], errors='ignore')
+    # ── NEXT MONTH PREDICTION ──
+    # To predict the NEXT month (T+1), we need features derived from the LATEST data (T).
+    # The df_features last row (index T) contains Target(T) and Features(T-1).
+    # We need to construct Features(T) to predict Target(T+1).
+    
+    # Get the latest transformed data (at time T)
+    # We'll use the unshifted transformed data to build the lags for T+1
+    df_transformed, _ = engineer_features(raw_df) # This actually returns (features, raw) 
+    # Wait, engineer_features returns (df_features, df_raw) where df_features is already shifted.
+    # I need the unshifted ones.
+    
+    # Let's re-calculate unshifted features for the last period
+    last_raw_date = raw_df.index[-1]
+    
+    # We'll build the feature vector for T+1 manually using data up to T
+    # 1. Get latest returns (T)
+    # We need the same logic as engineer_features but without the final shift
+    log_cols = ['EPU(USA)', 'VIX', 'GOLD_PRICE', 'BRENT_OIL_PRICE', 'ZAR_USD']
+    diff_cols = ['WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', '10_YEAR_BOND_RATES(SA)',
+                 'SA_INFLATION_YOY', 'US_CPI_YOY', 'INFLATION_DIFF']
+    
+    # Use the df_transformed logic but specifically for the latest values
+    # We can just use df_features without the dropna and before the shift if we were inside engineer_features
+    # But since we are outside, let's just use the fact that df_features[col] (the un-lagged ones) 
+    # are the current period returns.
+    
+    next_month_features = {}
+    # Target in df_features is unshifted return. 
+    # So df_features['VIX'] at index T is VIX return at T.
+    # This will be 'VIX_Lag1' for T+1.
+    for col in ['VIX', '10_YEAR_BOND_RATES(SA)', 'INFLATION_DIFF', 'GOLD_PRICE', 'EPU(USA)', 'BRENT_OIL_PRICE', 'ZAR_USD']:
+        if col in df_features.columns:
+            next_month_features[f'{col}_Lag1'] = df_features[col].iloc[-1]
+            
+    # 3M Trends for T+1 use T, T-1, T-2
+    for col in ['VIX', '10_YEAR_BOND_RATES(SA)', 'INFLATION_DIFF', 'GOLD_PRICE', 'BRENT_OIL_PRICE', 'ZAR_USD']:
+        if col in df_features.columns:
+            next_month_features[f'{col}_3M_Trend'] = df_features[col].tail(3).mean()
 
-    # Ensure column order matches training
-    missing = [f for f in feature_names if f not in X_latest.columns]
-    for col in missing:
-        X_latest[col] = 0.0
-    X_latest = X_latest[feature_names]
+    X_next = pd.DataFrame([next_month_features])
+    
+    # Ensure all required features are present and in correct order
+    feature_set = set(X_next.columns)
+    for col in feature_names:
+        if col not in feature_set:
+            X_next[col] = 0.0
+    X_next = X_next[feature_names]
 
     # Scale and predict
-    X_scaled = scaler.transform(X_latest)
+    X_scaled = scaler.transform(X_next)
     predicted_log_return = model.predict(X_scaled)[0]
 
     # Convert to level: prediction is log-return in % terms
@@ -310,22 +379,27 @@ def predict_next_month():
     contributions.sort(key=lambda x: abs(x['contribution']), reverse=True)
 
     # Build historical predictions for display only (limited to recent data to avoid leakage)
-    # Use only last 50 observations for chart to avoid showing training performance
-    recent_features = df_features.tail(50)
+    # Use only last 120 observations (10 years) for chart to show more context
+    recent_features = df_features.tail(120)
+    # Ensure column order matches training
     X_recent = recent_features.drop(columns=['ZAR_USD'], errors='ignore')
-    for col in missing:
-        X_recent[col] = 0.0
+    feature_set_recent = set(X_recent.columns)
+    for col in feature_names:
+        if col not in feature_set_recent:
+            X_recent[col] = 0.0
     X_recent = X_recent[feature_names]
     X_recent_scaled = scaler.transform(X_recent)
     recent_predicted_returns = model.predict(X_recent_scaled)
     
     # Convert to levels for recent data only
-    # Alignment fix: recent_predicted_returns corresponds to recent_features.index
-    # recent_actual_prev should align with the index and shift
+    # Alignment fix: recent_predicted_returns corresponds to recent_features.index (Target at T)
+    # We need raw_df['ZAR_USD'] at T-1 to multiply by exp(Predicted_Return_at_T)
+    # Since df_features index is T, we need raw_df['ZAR_USD'].shift(1) at those indices
     recent_actual_prev = raw_df['ZAR_USD'].shift(1).reindex(recent_features.index)
+    recent_actual_current = raw_df['ZAR_USD'].reindex(recent_features.index)
     
     # Filter for non-NaN indices where both previous value and prediction exist
-    valid_mask = recent_actual_prev.notna()
+    valid_mask = recent_actual_prev.notna() & recent_actual_current.notna()
     recent_common_idx = recent_features.index[valid_mask]
     
     if len(recent_common_idx) > 0:
@@ -340,38 +414,22 @@ def predict_next_month():
 
     # Clean recent data: remove any NaN values
     if len(recent_common_idx) > 0 and len(hist_actual_levels) > 0:
-        # Convert to numpy arrays consistently
+        actual_values = hist_actual_levels.values
+        pred_values = hist_pred_levels
         
-        # Get values as numpy arrays
-        if isinstance(hist_actual_levels, pd.Series):
-            actual_values = hist_actual_levels.values
-        else:
-            actual_values = np.array(hist_actual_levels)
-            
-        if isinstance(hist_pred_levels, pd.Series):
-            pred_values = hist_pred_levels.values
-        else:
-            pred_values = np.array(hist_pred_levels)
+        # Create boolean mask for NaNs
+        final_valid_mask = ~(np.isnan(actual_values) | np.isnan(pred_values))
         
-        # Create boolean mask
-        valid_mask = ~(np.isnan(actual_values) | np.isnan(pred_values))
+        actual_values = actual_values[final_valid_mask]
+        pred_values = pred_values[final_valid_mask]
+        recent_common_idx = [recent_common_idx[i] for i, valid in enumerate(final_valid_mask) if valid]
         
-        # Apply mask to both arrays
-        actual_values = actual_values[valid_mask]
-        pred_values = pred_values[valid_mask]
-        
-        # Update index to match filtered data
-        valid_indices = [i for i, valid in enumerate(valid_mask) if valid]
-        recent_common_idx = [recent_common_idx[i] for i in valid_indices]
-        
-        # Convert back to pandas Series for consistency with downstream code
-        if isinstance(hist_actual_levels, pd.Series):
-            hist_actual_levels = pd.Series(actual_values)
-        else:
-            hist_actual_levels = actual_values
+        hist_actual_levels = actual_values
         hist_pred_levels = pred_values
     else:
         recent_common_idx = []
+        hist_actual_levels = np.array([])
+        hist_pred_levels = np.array([])
 
     # Load trainset model for validation metrics
     trainset_model_data = load_model(trainset_model=True)
@@ -463,45 +521,45 @@ def predict_next_month():
         validation_pred_levels = np.array([])
     
     # Calculate validation metrics using only out-of-sample data
-    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, median_absolute_error, explained_variance_score
     if len(validation_actual_levels) > 0 and len(validation_pred_levels) > 0:
-        mae = mean_absolute_error(validation_actual_levels, validation_pred_levels)
-        rmse = np.sqrt(mean_squared_error(validation_actual_levels, validation_pred_levels))
-        r2 = r2_score(validation_actual_levels, validation_pred_levels)
-        mape = np.mean(np.abs((validation_actual_levels.values - validation_pred_levels) / validation_actual_levels.values)) * 100
+        actual_val_arr = validation_actual_levels.values
+        pred_val_arr = validation_pred_levels
+        
+        mae = mean_absolute_error(actual_val_arr, pred_val_arr)
+        rmse = np.sqrt(mean_squared_error(actual_val_arr, pred_val_arr))
+        r2 = r2_score(actual_val_arr, pred_val_arr)
+        mape = np.mean(np.abs((actual_val_arr - pred_val_arr) / actual_val_arr)) * 100
+        medae = median_absolute_error(actual_val_arr, pred_val_arr)
+        evs = explained_variance_score(actual_val_arr, pred_val_arr)
+        max_err = np.max(np.abs(actual_val_arr - pred_val_arr))
         
         # Directional accuracy using out-of-sample data
-        if len(validation_actual_levels) > 1:
-            actual_changes = np.sign(validation_actual_levels.values[1:] - validation_actual_levels.values[:-1])
-            pred_changes = np.sign(validation_pred_levels[1:] - validation_actual_levels.values[:-1])
+        if len(actual_val_arr) > 1:
+            actual_changes = np.sign(actual_val_arr[1:] - actual_val_arr[:-1])
+            pred_changes = np.sign(pred_val_arr[1:] - actual_val_arr[:-1])
             directional_accuracy = (actual_changes == pred_changes).mean() * 100
         else:
             directional_accuracy = 0.0
     else:
-        # Metrics already set to 0.0 in fallback section above
-        pass
+        mae = rmse = r2 = mape = directional_accuracy = medae = evs = max_err = 0.0
 
     # Last date and next month date
     last_date = raw_df.index[-1]
     next_month_date = last_date + pd.offsets.MonthEnd(1)
 
-    # Calculate residuals for diagnostic plots (only for validation data)
-    residuals = []
-    qq_data = {}
+    # Actual vs Predicted for diagnostic plots (only for validation data)
+    actual_vs_predicted = {}
     partial_plots = {}
     
     if len(validation_actual_levels) > 0 and len(validation_pred_levels) > 0:
         # Calculate residuals in level space
         residuals_array = validation_actual_levels.values - validation_pred_levels
         
-        # QQ plot data (theoretical quantiles vs sample quantiles)
-        from scipy import stats
-        residuals_sorted = np.sort(residuals_array)
-        theoretical_quantiles = stats.norm.ppf(np.linspace(0.01, 0.99, len(residuals_sorted)))
-        
-        qq_data = {
-            'theoretical': [float(q) for q in theoretical_quantiles],
-            'sample': [float(r) for r in residuals_sorted],
+        # Actual vs Predicted data
+        actual_vs_predicted = {
+            'actual': [float(a) for a in validation_actual_levels.values],
+            'predicted': [float(p) for p in validation_pred_levels],
         }
         
         # Partial plots for each selected feature
@@ -557,6 +615,75 @@ def predict_next_month():
         except Exception:
             training_range = "Unknown"
 
+    # Multi-horizon predictions (1m, 3m, 6m, 1y) with reasoning
+    forecasts = {}
+    current_idx = raw_df.index[-1]
+    last_zar_usd = float(raw_df['ZAR_USD'].dropna().iloc[-1])
+    
+    # Get top 3 drivers for reasoning
+    top_drivers = []
+    for c in contributions[:3]:
+        feat_name = get_friendly_feature_name(c['feature'], c['transform_type'])
+        impact = "upward" if c['contribution'] > 0 else "downward"
+        top_drivers.append(f"{feat_name} ({impact})")
+    
+    base_reason = "Mainly driven by " + ", ".join(top_drivers) if top_drivers else "Stabilized by offsetting macro factors."
+    
+    # Iteratively predict for 1m, 3m, 6m horizons
+    # For a baseline forecast, we assume macro drivers stay at their last levels
+    temp_df = raw_df.copy()
+    horizons = {'1m': 1, '3m': 3, '6m': 6}
+    
+    for label, h in horizons.items():
+        # Predict iteratively up to h
+        # (Re-using the logic but correctly tracking steps)
+        current_temp_df = raw_df.copy()
+        for i in range(1, h + 1):
+            try:
+                df_feat_iter, _ = engineer_features(current_temp_df)
+                if df_feat_iter.empty: break
+                X_iter = df_feat_iter.iloc[[-1]].drop(columns=['ZAR_USD'], errors='ignore')
+                for col in feature_names:
+                    if col not in X_iter.columns: X_iter[col] = 0.0
+                X_iter = X_iter[feature_names]
+                X_iter_scaled = scaler.transform(X_iter)
+                pred_log_ret_iter = model.predict(X_iter_scaled)[0]
+                
+                next_date_iter = current_temp_df.index[-1] + pd.offsets.MonthEnd(1)
+                last_level_iter = current_temp_df['ZAR_USD'].iloc[-1]
+                next_level_iter = last_level_iter * np.exp(pred_log_ret_iter / 100)
+                
+                new_row = current_temp_df.iloc[-1].copy()
+                new_row.name = next_date_iter
+                new_row['ZAR_USD'] = next_level_iter
+                current_temp_df = pd.concat([current_temp_df, pd.DataFrame([new_row])])
+            except:
+                break
+        
+        final_level = float(current_temp_df['ZAR_USD'].iloc[-1])
+        
+        # "Actual Estimate": We use the current spot price as the baseline for "Actual"
+        actual_est = last_zar_usd 
+        
+        diff = final_level - actual_est
+        pct_diff = (diff / actual_est) * 100
+        
+        if abs(pct_diff) < 0.5:
+            reason = "Fair value is aligned with current spot, suggesting the market has fully priced in macro drivers."
+        elif diff > 0:
+            driver = top_drivers[0] if top_drivers else "macro factors"
+            reason = f"Model identifies undervaluation; {driver} suggest a fair value higher than current spot."
+        else:
+            driver = top_drivers[0] if top_drivers else "macro factors"
+            reason = f"Model identifies overvaluation; strong fundamentals in {driver} suggest ZAR should be stronger than current spot."
+
+        forecasts[label] = {
+            'fair_value': round(final_level, 4),
+            'actual_estimate': round(actual_est, 4),
+            'date': current_temp_df.index[-1].strftime('%Y-%m-%d'),
+            'reason': reason
+        }
+
     return {
         'predicted_level': round(float(predicted_level), 4),
         'predicted_change_pct': round(float(predicted_change_pct), 2),
@@ -567,6 +694,7 @@ def predict_next_month():
         'next_month_date': next_month_date.strftime('%Y-%m-%d'),
         'contributions': contributions,
         'selected_features': selected_features,
+        'forecasts': forecasts,
         'model_info': {
             'alpha': float(alpha) if alpha is not None else None,
             'l1_ratio': float(l1_ratio) if l1_ratio is not None else None,
@@ -577,11 +705,14 @@ def predict_next_month():
             'n_selected': len(selected_features),
         },
         'metrics': {
-            'mae': round(mae, 4),
-            'rmse': round(rmse, 4),
-            'r2': round(r2, 4),
-            'mape': round(mape, 2),
-            'directional_accuracy': round(directional_accuracy, 1),
+            'mae': float(mae),
+            'rmse': float(rmse),
+            'r2': float(r2),
+            'mape': float(mape),
+            'medae': float(medae),
+            'evs': float(evs),
+            'max_error': float(max_err),
+            'directional_accuracy': float(directional_accuracy),
         },
         'history': {
             'dates': [d.strftime('%Y-%m-%d') for d in recent_common_idx],
@@ -589,7 +720,7 @@ def predict_next_month():
             'predicted': [float(v) for v in hist_pred_levels],
         },
         'diagnostics': {
-            'qq_plot': qq_data,
+            'actual_vs_predicted': actual_vs_predicted,
             'partial_plots': partial_plots,
         }
     }

@@ -99,7 +99,6 @@ def update_stage_classes(stage):
 @callback(
     Output('user-session', 'data', allow_duplicate=True),
     Output('login-output', 'children'),
-    Output('url', 'pathname', allow_duplicate=True),
     Input('login-button', 'n_clicks'),
     State('username', 'value'),
     State('password', 'value'),
@@ -109,7 +108,7 @@ def login_auth(n_clicks, username, password):
     print(f"DEBUG: login_auth triggered with n_clicks={n_clicks}")
     if n_clicks > 0:
         if not username or not password:
-            return None, "Please enter both username and password", dash.no_update
+            return None, "Please enter both username and password"
 
         if not supabase:
             return None, "System error: Supabase connection not established."
@@ -121,12 +120,12 @@ def login_auth(n_clicks, username, password):
 
             if response.data:
                 print(f"--- Login: Successful for '{username}' ---")
-                return {'username': username}, "", "/dashboard"
+                return {'username': username}, ""
             else:
                 print(f"--- Login: Failed for '{username}' ---")
-                return None, "Invalid credentials. Please try again.", dash.no_update
+                return None, "Invalid credentials. Please try again."
         except Exception as e:
             print(f"--- Login Error: {str(e)} ---")
-            return None, f"System error: {str(e)}", dash.no_update
+            return None, f"System error: {str(e)}"
 
-    return dash.no_update, dash.no_update, dash.no_update
+    return dash.no_update, dash.no_update

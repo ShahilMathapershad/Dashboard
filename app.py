@@ -43,9 +43,24 @@ app = Dash(
 )
 
 app.layout = html.Div(id='theme-main-container', children=[
-    dcc.Location(id='url', refresh=True),
     dcc.Store(id='user-session', storage_type='session'),
     dcc.Store(id='theme-store', storage_type='local', data='dark'),
+    
+    # Global stores for prerendering (moved from dashboard.py)
+    dcc.Store(id='dashboard-tab', data='data', storage_type='session'),
+    dcc.Store(id='sidebar-state', data='collapsed', storage_type='local'),
+    dcc.Store(id='fetched-data', storage_type='session'),
+    dcc.Store(id='model-prediction-data', storage_type='session'),
+    dcc.Store(id='fetch-trigger', data=0, storage_type='session'),
+    dcc.Store(id='model-prediction-trigger', data=0, storage_type='session'),
+    dcc.Store(id='predictor-dropdown-options-store', storage_type='session'),
+    dcc.Store(id='selected-predictors', data=[], storage_type='session'),
+    dcc.Store(id='fetched-data-status', storage_type='session'),
+    dcc.Store(id='scenario-baseline-data', storage_type='session'),
+    dcc.Store(id='scenario-trigger', data=0, storage_type='session'),
+    dcc.Store(id='scenario-current-values', storage_type='session'),
+    dcc.Store(id='saved-scenarios', data=[], storage_type='session'),
+
     dash.page_container,
     html.Button(
         "🌙",
@@ -127,6 +142,25 @@ app.clientside_callback(
     Input('visualization-container', 'style'),
 )
 
+
+# Global prerender trigger - starts fetching data as soon as the app is accessed
+@callback(
+    Output('fetch-trigger', 'data', allow_duplicate=True),
+    Output('model-prediction-trigger', 'data', allow_duplicate=True),
+    Output('scenario-trigger', 'data', allow_duplicate=True),
+    Input('_pages_location', 'pathname'),
+    State('fetch-trigger', 'data'),
+    State('model-prediction-trigger', 'data'),
+    State('scenario-trigger', 'data'),
+    prevent_initial_call=True
+)
+def global_prerender_trigger(pathname, f_trig, m_trig, s_trig):
+    # Only trigger if they are at 0 (initial session state) AND on the dashboard where components exist
+    if pathname == '/dashboard' and (f_trig or 0) == 0:
+        print(f"DEBUG: Initial access to {pathname}. Triggering global prerendering.")
+        return 1, 1, 1
+    return dash.no_update, dash.no_update, dash.no_update
+
 # Simplized clientside callback for figure changes
 app.clientside_callback(
     """
@@ -145,44 +179,39 @@ app.clientside_callback(
 )
 
 
-# Auth guard: separate callbacks for clearer logic and to avoid circular loops
+# Global auth and navigation guard
 @callback(
-    Output('url', 'pathname', allow_duplicate=True),
+    Output('_pages_location', 'pathname'),
+    Input('_pages_location', 'pathname'),
     Input('user-session', 'data'),
-    State('url', 'pathname'),
-    prevent_initial_call='initial_duplicate'
 )
-def redirect_on_session_change(session_data, current_path):
+def auth_redirection(current_path, session_data):
+    # Determine if user is logged in
     logged_in = session_data and session_data.get('username')
-    print(f"DEBUG: Session change. Path: {current_path}, Logged In: {logged_in}")
-    if logged_in:
-        if current_path in ['/', '/registration', None]:
-            print("DEBUG: Logged in, redirecting to /dashboard")
-            return '/dashboard'
-    else:
-        if current_path not in ['/', '/registration', None]:
-            print("DEBUG: Logged out, redirecting to /")
-            return '/'
-    return dash.no_update
-
-
-@callback(
-    Output('url', 'pathname', allow_duplicate=True),
-    Input('url', 'pathname'),
-    State('user-session', 'data'),
-    prevent_initial_call='initial_duplicate'
-)
-def redirect_on_path_change(current_path, session_data):
-    logged_in = session_data and session_data.get('username')
-    print(f"DEBUG: Path change. Path: {current_path}, Logged In: {logged_in}")
-    if not logged_in:
-        if current_path not in ['/', '/registration', None]:
-            print("DEBUG: Unauthenticated access, redirecting to /")
-            return '/'
-    else:
-        if current_path in ['/', '/registration']:
-            print("DEBUG: Authenticated user on login page, redirecting to /dashboard")
-            return '/dashboard'
+    
+    # We want to know what triggered the callback
+    ctx = dash.callback_context
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else 'initial'
+    
+    print(f"DEBUG: Auth check. Trigger: {trigger_id}, Path: '{current_path}', Logged In: {bool(logged_in)}")
+    
+    try:
+        # Unauthenticated access control
+        if not logged_in:
+            # If trying to access protected pages (not / or /registration), redirect to login
+            if current_path not in ['/', '/registration', None]:
+                print(f"DEBUG: Redirecting Unauthenticated user from {current_path} to /")
+                return '/'
+        
+        # Authenticated user control
+        else:
+            # If already logged in and visiting login/landing pages, redirect to dashboard
+            if current_path in ['/', '/registration', None]:
+                print(f"DEBUG: Redirecting Authenticated user from {current_path} to /dashboard")
+                return '/dashboard'
+    except Exception as e:
+        print(f"ERROR in auth_redirection: {str(e)}")
+            
     return dash.no_update
 
 
