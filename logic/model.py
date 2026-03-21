@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 import logging
+import time
 
 from logic.supabase_client import supabase
 
@@ -23,6 +24,7 @@ FIRST_DIFF_COLS = {'WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', '10_YEAR_BOND_RATES(
                    'SA_INFLATION_YOY', 'US_CPI_YOY', 'INFLATION_DIFF'}
 
 _model_cache = {}
+_supabase_data_cache = {'df': None, 'time': 0}
 
 
 # NWU Color Palette (from MSc research standard)
@@ -89,7 +91,14 @@ def load_model(trainset_model=False):
 
 
 def fetch_data_from_supabase():
-    """Fetch all rows from the Supabase 'data' table, return a DatetimeIndex DataFrame."""
+    """Fetch all rows from the Supabase 'data' table, return a DatetimeIndex DataFrame (with 5-min caching)."""
+    global _supabase_data_cache
+    now = time.time()
+    
+    # 5-minute process-level cache to reduce redundant fetches across redundant calls
+    if _supabase_data_cache['df'] is not None and (now - _supabase_data_cache['time'] < 300):
+        return _supabase_data_cache['df'].copy()
+
     if not supabase:
         raise RuntimeError("Supabase client not initialised.")
     resp = supabase.table('data').select('*').order('Date').execute()
@@ -101,7 +110,9 @@ def fetch_data_from_supabase():
     df.set_index('Date', inplace=True)
     df = df.apply(pd.to_numeric, errors='coerce')
     df = df.sort_index()
-    return df
+    
+    _supabase_data_cache = {'df': df, 'time': now}
+    return df.copy()
 
 
 def get_transform_type(feature_name):
@@ -273,7 +284,7 @@ def predict_next_month():
     # Fetch raw data
     raw_df = fetch_data_from_supabase()
 
-    # Engineer features
+    # Engineer features once
     df_features, df_raw = engineer_features(raw_df)
 
     if df_features.empty:
@@ -281,14 +292,6 @@ def predict_next_month():
 
     # ── NEXT MONTH PREDICTION ──
     # To predict the NEXT month (T+1), we need features derived from the LATEST data (T).
-    # The df_features last row (index T) contains Target(T) and Features(T-1).
-    # We need to construct Features(T) to predict Target(T+1).
-    
-    # Get the latest transformed data (at time T)
-    # We'll use the unshifted transformed data to build the lags for T+1
-    df_transformed, _ = engineer_features(raw_df) # This actually returns (features, raw) 
-    # Wait, engineer_features returns (df_features, df_raw) where df_features is already shifted.
-    # I need the unshifted ones.
     
     # Let's re-calculate unshifted features for the last period
     last_raw_date = raw_df.index[-1]
@@ -631,40 +634,53 @@ def predict_next_month():
     
     # Iteratively predict for 1m, 3m, 6m horizons
     # For a baseline forecast, we assume macro drivers stay at their last levels
-    temp_df = raw_df.copy()
     horizons = {'1m': 1, '3m': 3, '6m': 6}
+    max_h = max(horizons.values())
     
-    for label, h in horizons.items():
-        # Predict iteratively up to h
-        # (Re-using the logic but correctly tracking steps)
-        current_temp_df = raw_df.copy()
-        for i in range(1, h + 1):
-            try:
-                df_feat_iter, _ = engineer_features(current_temp_df)
-                if df_feat_iter.empty: break
-                X_iter = df_feat_iter.iloc[[-1]].drop(columns=['ZAR_USD'], errors='ignore')
-                for col in feature_names:
-                    if col not in X_iter.columns: X_iter[col] = 0.0
-                X_iter = X_iter[feature_names]
-                X_iter_scaled = scaler.transform(X_iter)
-                pred_log_ret_iter = model.predict(X_iter_scaled)[0]
-                
-                next_date_iter = current_temp_df.index[-1] + pd.offsets.MonthEnd(1)
-                last_level_iter = current_temp_df['ZAR_USD'].iloc[-1]
-                next_level_iter = last_level_iter * np.exp(pred_log_ret_iter / 100)
-                
-                new_row = current_temp_df.iloc[-1].copy()
-                new_row.name = next_date_iter
-                new_row['ZAR_USD'] = next_level_iter
-                current_temp_df = pd.concat([current_temp_df, pd.DataFrame([new_row])])
-            except:
-                break
-        
-        final_level = float(current_temp_df['ZAR_USD'].iloc[-1])
-        
-        # "Actual Estimate": We use the current spot price as the baseline for "Actual"
+    iterative_df = raw_df.copy()
+    h_levels = {}
+    
+    # Pre-calculate engineer_features only once per step for all horizons combined
+    for i in range(1, max_h + 1):
+        try:
+            # We only need the latest features, but engineer_features processes everything.
+            # However, for 100 rows, it's faster to just call it than to re-implement.
+            # We optimize by not doing it 10 times.
+            df_feat_iter, _ = engineer_features(iterative_df)
+            if df_feat_iter.empty: break
+            
+            X_iter = df_feat_iter.iloc[[-1]].drop(columns=['ZAR_USD'], errors='ignore')
+            # Ensure columns match
+            X_iter_aligned = pd.DataFrame(index=[0], columns=feature_names).fillna(0.0)
+            for col in feature_names:
+                if col in X_iter.columns:
+                    X_iter_aligned.at[0, col] = X_iter[col].iloc[0]
+            
+            X_iter_scaled = scaler.transform(X_iter_aligned)
+            pred_log_ret_iter = model.predict(X_iter_scaled)[0]
+            
+            last_level_iter = iterative_df['ZAR_USD'].iloc[-1]
+            next_level_iter = last_level_iter * np.exp(pred_log_ret_iter / 100)
+            
+            next_date_iter = iterative_df.index[-1] + pd.offsets.MonthEnd(1)
+            new_row = iterative_df.iloc[-1].copy()
+            new_row.name = next_date_iter
+            new_row['ZAR_USD'] = next_level_iter
+            iterative_df = pd.concat([iterative_df, pd.DataFrame([new_row])])
+            
+            # Store levels for specific horizons
+            for label, h_val in horizons.items():
+                if i == h_val:
+                    h_levels[label] = (float(next_level_iter), next_date_iter)
+        except Exception:
+            break
+
+    for label, h_val in horizons.items():
+        if label not in h_levels:
+            continue
+            
+        final_level, final_date = h_levels[label]
         actual_est = last_zar_usd 
-        
         diff = final_level - actual_est
         pct_diff = (diff / actual_est) * 100
         
@@ -680,7 +696,7 @@ def predict_next_month():
         forecasts[label] = {
             'fair_value': round(final_level, 4),
             'actual_estimate': round(actual_est, 4),
-            'date': current_temp_df.index[-1].strftime('%Y-%m-%d'),
+            'date': final_date.strftime('%Y-%m-%d'),
             'reason': reason
         }
 

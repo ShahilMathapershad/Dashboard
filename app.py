@@ -157,9 +157,39 @@ app.clientside_callback(
 def global_prerender_trigger(pathname, f_trig, m_trig, s_trig):
     # Only trigger if they are at 0 (initial session state) AND on the dashboard where components exist
     if pathname == '/dashboard' and (f_trig or 0) == 0:
-        print(f"DEBUG: Initial access to {pathname}. Triggering global prerendering.")
-        return 1, 1, 1
+        print(f"DEBUG: Initial access to {pathname}. Triggering first step of global prerendering (data fetch).")
+        # Step 1: Trigger only data fetch first to avoid memory spike
+        return 1, dash.no_update, dash.no_update
     return dash.no_update, dash.no_update, dash.no_update
+
+
+# Sequential background callback chaining - reduces peak memory spikes on Render (512MB)
+@callback(
+    Output('model-prediction-trigger', 'data', allow_duplicate=True),
+    Input('fetched-data', 'data'),
+    State('model-prediction-trigger', 'data'),
+    prevent_initial_call=True
+)
+def chain_model_prediction(fetched_data, current_trigger):
+    # Step 2: Once data is in, start the model prediction task
+    if fetched_data and (current_trigger or 0) == 0:
+        print("DEBUG: fetched-data is ready. Triggering model prediction.")
+        return 1
+    return dash.no_update
+
+
+@callback(
+    Output('scenario-trigger', 'data', allow_duplicate=True),
+    Input('model-prediction-data', 'data'),
+    State('scenario-trigger', 'data'),
+    prevent_initial_call=True
+)
+def chain_scenario_baseline(model_data, current_trigger):
+    # Step 3: Once model is ready, start the scenario engine task
+    if model_data and (current_trigger or 0) == 0:
+        print("DEBUG: model-prediction-data is ready. Triggering scenario engine.")
+        return 1
+    return dash.no_update
 
 # Simplized clientside callback for figure changes
 app.clientside_callback(
