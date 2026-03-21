@@ -1,10 +1,12 @@
-import numpy as np
-import pandas as pd
 import os
 import logging
 import time
+import diskcache
 
-from logic.supabase_client import supabase
+from logic.supabase_client import get_supabase
+
+# Persistent cache for Supabase data to share across separate background processes
+_persistent_cache = diskcache.Cache("./.cache/data", size_limit=2**26) # 64MB limit
 
 try:
     import joblib
@@ -93,17 +95,29 @@ def load_model(trainset_model=False):
 
 
 def fetch_data_from_supabase():
-    """Fetch all rows from the Supabase 'data' table, return a DatetimeIndex DataFrame (with 5-min caching)."""
+    """Fetch recent rows from the Supabase 'data' table (with 5-min caching)."""
+    import pandas as pd
     global _supabase_data_cache
     now = time.time()
     
-    # 5-minute process-level cache to reduce redundant fetches across redundant calls
+    # 1. Check process-level in-memory cache
     if _supabase_data_cache['df'] is not None and (now - _supabase_data_cache['time'] < 300):
         return _supabase_data_cache['df'].copy()
 
+    # 2. Check persistent disk cache (shared across processes)
+    cache_key = "supabase_data_df"
+    cached_df = _persistent_cache.get(cache_key)
+    if cached_df is not None:
+        _supabase_data_cache = {'df': cached_df, 'time': now}
+        return cached_df.copy()
+
+    supabase = get_supabase()
     if not supabase:
         raise RuntimeError("Supabase client not initialised.")
-    resp = supabase.table('data').select('*').order('Date').execute()
+    
+    # LIMIT DATA to last 20 years for speed and memory on Render
+    # Since it's monthly, 240 rows is more than enough for any model training/prediction here.
+    resp = supabase.table('data').select('*').order('Date', desc=True).limit(250).execute()
     rows = resp.data or []
     if not rows:
         raise ValueError("No data returned from Supabase.")
@@ -113,7 +127,10 @@ def fetch_data_from_supabase():
     df = df.apply(pd.to_numeric, errors='coerce')
     df = df.sort_index()
     
+    # Update both caches
     _supabase_data_cache = {'df': df, 'time': now}
+    _persistent_cache.set(cache_key, df, expire=300) # 5 minute expiry
+    
     return df.copy()
 
 
@@ -205,6 +222,8 @@ def engineer_features(df):
     Replicate the exact feature-engineering pipeline used during training.
     Optimised for memory: avoids unnecessary copies and caches results.
     """
+    import pandas as pd
+    import numpy as np
     global _engineered_features_cache
     now = time.time()
     
@@ -291,6 +310,8 @@ def predict_next_month():
     Generate a ZAR/USD prediction for the next month using the frozen model.
     Returns a dict with prediction details.
     """
+    import pandas as pd
+    import numpy as np
     # Load main model for prediction
     model_data = load_model(trainset_model=False)
     model = model_data['model']
@@ -795,6 +816,8 @@ def get_scenario_baseline():
     - Base prediction (no changes)
     - Historical ranges for each raw predictor (for slider bounds)
     """
+    import pandas as pd
+    import numpy as np
     model_data = load_model(trainset_model=False)
     model = model_data['model']
     scaler = model_data['scaler']
@@ -901,6 +924,8 @@ def scenario_predict(scenario_values):
     Returns:
         dict with scenario prediction, base prediction, waterfall contributions
     """
+    import pandas as pd
+    import numpy as np
     model_data = load_model(trainset_model=False)
     model = model_data['model']
     scaler = model_data['scaler']

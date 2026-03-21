@@ -9,11 +9,15 @@ import diskcache
 import multiprocess
 import threading
 
-# On macOS/Render, spawn is default but we want to be explicit and avoid crashes
-# We use multiprocess because DiskcacheManager uses it if available
+# On Render (Linux), fork is much faster and more memory-efficient.
+# On macOS, spawn is often safer for complex libraries.
 try:
     if multiprocess.get_start_method(allow_none=True) is None:
-        multiprocess.set_start_method('spawn')
+        if sys.platform == 'darwin':
+            multiprocess.set_start_method('spawn')
+        else:
+            # Default to fork for Linux (Render) to save RAM and start faster
+            multiprocess.set_start_method('fork')
 except RuntimeError:
     # Already set
     pass

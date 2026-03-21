@@ -664,6 +664,8 @@ def sync_data_tab_ui(active_tab, data, status_info):
     ],
 )
 def fetch_data(set_progress, trigger_value, existing_data, existing_options, existing_selected, existing_status):
+    import pandas as pd
+    import time
     # Defensive check: set_progress can be None in some edge cases during callback initialization
     if set_progress is None:
         print("DEBUG WARNING: set_progress is None, progress updates will be skipped")

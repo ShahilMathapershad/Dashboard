@@ -27,7 +27,7 @@ def layout():
     ], className='login-container')
 
 
-from logic.supabase_client import supabase
+from logic.supabase_client import get_supabase
 
 @callback(
     Output('register-output', 'children'),
@@ -42,6 +42,7 @@ def register_user(n_clicks, username, password):
         if not username or not password:
             return "Please enter both username and password", {}
 
+        supabase = get_supabase()
         if not supabase:
             return "System error: Supabase connection not established.", {}
 

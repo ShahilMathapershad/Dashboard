@@ -1,6 +1,6 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State
-from logic.supabase_client import supabase
+from logic.supabase_client import get_supabase
 
 dash.register_page(__name__, path='/')
 
@@ -110,6 +110,7 @@ def login_auth(n_clicks, username, password):
         if not username or not password:
             return None, "Please enter both username and password"
 
+        supabase = get_supabase()
         if not supabase:
             return None, "System error: Supabase connection not established."
 

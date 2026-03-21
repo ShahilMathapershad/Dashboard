@@ -1,19 +1,13 @@
-import pandas as pd
-import numpy as np
-from fredapi import Fred
 import argparse
 import os
 import ssl
 import time
-import json
 import re
 import urllib.request
 import urllib.parse
 import logging
-import requests
 import datetime
-from dotenv import load_dotenv
-from logic.supabase_client import supabase
+from logic.supabase_client import get_supabase
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("DataFetcher")
@@ -39,6 +33,7 @@ SERIES_CONFIG = {
 }
 
 # Load environment variables explicitly for Render
+from dotenv import load_dotenv
 load_dotenv()
 
 def get_api_keys():
@@ -71,6 +66,7 @@ FRED_API_KEY = os.environ.get('FRED_API_KEY', os.environ.get('FRED_API', API_KEY
 
 def _to_monthly(series):
     """Normalize any date-indexed series to month-end frequency."""
+    import pandas as pd
     if series.empty:
         return series
     series = series.sort_index()
@@ -82,6 +78,8 @@ def _to_monthly(series):
 
 def fetch_fred_data(series_dict, api_key=None, start_date='2018-01-31', progress_callback=None):
     """Fetches data from FRED for each series in the dictionary."""
+    import pandas as pd
+    from fredapi import Fred
     if not api_key:
         api_key = FRED_API_KEY
     
@@ -129,6 +127,7 @@ def fetch_fred_data(series_dict, api_key=None, start_date='2018-01-31', progress
 
 def _get_world_bank_gold_excel_url():
     """Scrape the World Bank commodity markets page for the latest historical data workbook URL."""
+    import requests
     page_url = "https://www.worldbank.org/en/research/commodity-markets"
     logger.info("Fetching World Bank commodity markets page for latest gold workbook link.")
 
@@ -164,6 +163,8 @@ def _get_world_bank_gold_excel_url():
 
 def fetch_world_bank_gold_data(start_date='2018-01-31', end_date=None):
     """Fetch GOLD_PRICE from World Bank monthly commodity workbook (Monthly Prices > Gold)."""
+    import pandas as pd
+    import requests
     if end_date is None:
         end_date = pd.Timestamp.now().strftime('%Y-%m-%d')
 
@@ -218,6 +219,8 @@ def fetch_world_bank_gold_data(start_date='2018-01-31', end_date=None):
 
 def fetch_sa_inflation_hardcoded():
     """Returns the hardcoded SA_INFLATION data as a DataFrame starting from 2018-01-31."""
+    import pandas as pd
+    import numpy as np
     # Monthly date range from January 2018 to February 2026
     # freq='ME' or 'M' gives month ends.
     try:
@@ -262,7 +265,7 @@ def fetch_yahoo_gold_data(ticker='GLD', start_date='2018-01-31', end_date=None):
 
 def process_data(final_df, start_date='2018-01-31', end_date=None):
     """Processes the raw data (sorting, resampling, filling, etc.)."""
-    
+    import pandas as pd
     # If end_date is not provided, use the end of the previous month
     if end_date is None:
         now = pd.Timestamp.now()
@@ -325,6 +328,7 @@ def process_data(final_df, start_date='2018-01-31', end_date=None):
 
 def save_to_supabase(df):
     """Saves the processed DataFrame to the Supabase 'data' table."""
+    import pandas as pd
     if df.empty:
         logger.warning("No data to save.")
         return
@@ -350,6 +354,7 @@ def save_to_supabase(df):
     
     logger.info(f"Saving {len(records)} records to Supabase 'data' table...")
     
+    supabase = get_supabase()
     if not supabase:
         logger.error("Supabase client not initialized.")
         return None
@@ -379,10 +384,12 @@ def save_to_supabase(df):
 
 def replace_gold_price_column_in_supabase(gold_series):
     """Upsert only Date + GOLD_PRICE into Supabase, replacing GOLD_PRICE for existing dates."""
+    import pandas as pd
     if gold_series is None or gold_series.empty:
         logger.warning("No GOLD_PRICE series provided for Supabase replacement.")
         return None
 
+    supabase = get_supabase()
     if not supabase:
         logger.error("Supabase client not initialized.")
         return None
@@ -435,6 +442,7 @@ def replace_gold_price_column_in_supabase(gold_series):
 
 def fetch_and_save_data():
     """Main function to run the fetch, process, and save workflow."""
+    import pandas as pd
     logger.info("Starting main data fetch and save workflow.")
     
     # Prepare FRED series dictionary
@@ -483,16 +491,19 @@ def should_update_from_api():
     Decide whether to fetch from APIs or pull from Supabase.
     Returns True if today is the last day of the month AND Supabase doesn't have today's month data yet.
     """
+    import pandas as pd
     if not is_last_day_of_month():
         logger.info("should_update_from_api: False (not last day of month)")
         return False
     
+    supabase = get_supabase()
     if not supabase:
         logger.warning("should_update_from_api: True (no Supabase client)")
         return True
     
     try:
         # Check the latest date in Supabase
+        # We only need the Date, and we can limit to 1
         resp = supabase.table('data').select('Date').order('Date', desc=True).limit(1).execute()
         if not resp.data:
             logger.info("should_update_from_api: True (Supabase empty)")
