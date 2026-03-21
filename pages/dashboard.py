@@ -103,6 +103,17 @@ def sidebar(active_tab):
     ])
 
 
+def _render_loading_state(id_prefix, title, subtitle, visible=True):
+    style = {'display': 'flex'} if visible else {'display': 'none'}
+    return html.Div(id=f'{id_prefix}-loading', className='scenario-loading-state', style=style, children=[
+        html.Div(className='empty-state', children=[
+            html.Div('⏳', className='empty-state-icon'),
+            html.H4(title),
+            html.P(subtitle),
+        ])
+    ])
+
+
 def data_tab_content(existing_data=None):
     viz_style = {'display': 'block', 'marginTop': '2rem'} if existing_data else {'display': 'none'}
     return html.Div(id='data-tab', className='tab-content', children=[
@@ -129,6 +140,11 @@ def data_tab_content(existing_data=None):
         ]),
 
         html.Div(id='data-error', className='error-message'),
+
+        # Loading state
+        _render_loading_state('data', 'Analyzing historical data...',
+                             'Connecting to database and processing macroeconomic series.',
+                             visible=not existing_data),
 
         # Visualisation Section
         html.Div(id='visualization-container', className='viz-container', style=viz_style, children=[
@@ -189,6 +205,11 @@ def model_tab_content(existing_model_data=None):
         ]),
 
         html.Div(id='model-error', className='error-message'),
+
+        # Loading state
+        _render_loading_state('model', 'Running model prediction...',
+                             'Analyzing latest macroeconomic drivers and generating forecast.',
+                             visible=not existing_model_data),
 
         html.Div(id='model-results-container', style=model_style, children=[
 
@@ -278,13 +299,9 @@ def scenario_tab_content():
         html.Div(id='scenario-error', className='error-message'),
 
         # Loading state while baseline is fetched
-        html.Div(id='scenario-loading', className='scenario-loading-state', children=[
-            html.Div(className='empty-state', children=[
-                html.Div('⏳', className='empty-state-icon'),
-                html.H4('Loading scenario engine...'),
-                html.P('Fetching current predictor values and model configuration.'),
-            ])
-        ]),
+        _render_loading_state('scenario', 'Loading scenario engine...',
+                             'Fetching current predictor values and model configuration.',
+                             visible=True),
 
         html.Div(id='scenario-content', style={'display': 'none'}, children=[
             # Top row: Scenario vs Base comparison cards
@@ -619,6 +636,7 @@ def _generate_data_table(df_all):
     Output('fetch-status-display', 'children'),
     Output('visualization-container', 'style', allow_duplicate=True),
     Output('data-table-container', 'children'),
+    Output('data-loading', 'style'),
     Input('dashboard-tab', 'data'),
     Input('fetched-data', 'data'),
     Input('fetched-data-status', 'data'),
@@ -626,7 +644,7 @@ def _generate_data_table(df_all):
 )
 def sync_data_tab_ui(active_tab, data, status_info):
     if active_tab != 'data':
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     print(f"DEBUG: sync_data_tab_ui triggered. active_tab={active_tab}")
 
@@ -636,11 +654,12 @@ def sync_data_tab_ui(active_tab, data, status_info):
         status_msg = html.Span(status_info.get('text', ''), style={'color': status_info.get('color', '#6b6b6b')})
 
     viz_style = {'display': 'block', 'marginTop': '2rem'} if data else {'display': 'none'}
+    loading_style = {'display': 'none'} if data else {'display': 'flex'}
 
     # Use the helper to rebuild the table from persisted data
     table = _generate_data_table(data) if data else ""
 
-    return status_msg, viz_style, table
+    return status_msg, viz_style, table, loading_style
 
 
 # Fetch data using hardcoded API keys
@@ -658,7 +677,8 @@ def sync_data_tab_ui(active_tab, data, status_info):
     background=True,
     running=[
         (Output('progress-container', 'hidden'), False, True),
-        (Output('data-error', 'children'), "", "")
+        (Output('data-error', 'children'), "", ""),
+        (Output('data-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
     ],
     progress=[
         Output('fetch-progress-bar', 'value'),
@@ -1095,12 +1115,17 @@ def get_coefficient_unit(transform_type):
     Output('model-description-content', 'children'),
     Output('model-prediction-data', 'data'),
     Output('diagnostics-container', 'children'),
+    Output('model-loading', 'style'),
     Input('model-prediction-trigger', 'data'),
+    Input('dashboard-tab', 'data'),
     State('model-prediction-data', 'data'),
     State('theme-store', 'data'),
     prevent_initial_call=True
 )
-def run_model_prediction(trigger, existing_model_data, theme):
+def run_model_prediction(trigger, active_tab, existing_model_data, theme):
+    if active_tab != 'model':
+        return [dash.no_update] * 14
+
     result = None
     error_msg = ""
 
@@ -1121,13 +1146,13 @@ def run_model_prediction(trigger, existing_model_data, theme):
                 error_msg = 'Model dependencies missing. Install joblib and scikit-learn in your Python environment.'
             empty_fig = go.Figure().to_dict()
             return ({'display': 'none'}, f'Prediction failed: {error_msg}',
-                    '', '', '', 'prediction-change', '', '', empty_fig, '', '', dash.no_update, dash.no_update)
+                    '', '', '', 'prediction-change', '', '', empty_fig, '', '', dash.no_update, dash.no_update, {'display': 'none'})
 
     # If still no result (not triggered and no cache), return empty
     if not result:
         empty_fig = go.Figure().to_dict()
         return ({'display': 'none'}, '', '', '', '', 'prediction-change',
-                '', '', empty_fig, '', '', dash.no_update, dash.no_update)
+                '', '', empty_fig, '', '', dash.no_update, dash.no_update, {'display': 'flex'})
 
     # ── Prediction card ──
     pred_level = result['predicted_level']
@@ -1301,17 +1326,17 @@ def run_model_prediction(trigger, existing_model_data, theme):
         html.Div(className='model-info-grid', children=[
             _info_pill('Type', 'ElasticNet (L1 = Lasso)',
                        'Statistical model using both L1 and L2 regularization to find the best predictors.'),
-            _info_pill('Alpha', f"{info['alpha']:.4f}",
+            _info_pill('Alpha', f"{info['alpha']:.4f}" if info.get('alpha') is not None else "N/A",
                        'Regularization strength: higher values mean more indicators are excluded to prevent overfitting.'),
-            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}",
-                       'Balance between Lasso (1.0) and Ridge (0.0) regularization. Current is pure Lasso.'),
-            _info_pill('Intercept', f"{info['intercept']:+.4f}",
+            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}" if info.get('l1_ratio') is not None else "N/A",
+                       'Balance between Lasso (1.0) and Ridge (0.0) regularization.'),
+            _info_pill('Intercept', f"{info['intercept']:+.4f}" if info.get('intercept') is not None else "N/A",
                        'The base log-return forecast before considering macroeconomic indicator impacts.'),
-            _info_pill('Training Obs', str(info['training_observations']),
+            _info_pill('Training Obs', str(info.get('training_observations', 'N/A')),
                        'Number of historical monthly data points used to calibrate the model.'),
-            _info_pill('Features', f"{info['n_selected']} / {info['n_features']} selected",
+            _info_pill('Features', f"{info.get('n_selected', 0)} / {info.get('n_features', 0)} selected",
                        'The number of macroeconomic indicators the model found statistically significant.'),
-            _info_pill('Date Range', info['training_date_range'],
+            _info_pill('Date Range', info.get('training_date_range', 'N/A'),
                        'The historical window of data used for training the current model version.'),
             _info_pill('Target', 'Log-return ZAR/USD (% MoM)',
                        'The model predicts the percentage change in the exchange rate from one month to the next.'),
@@ -1371,7 +1396,7 @@ def run_model_prediction(trigger, existing_model_data, theme):
 
     return ({'display': 'block'}, '', date_text, pred_value, change_text,
             change_class, baseline_text, contrib_rows, fig_dict, info_items, analysis_content, prediction_data,
-            diagnostics_children)
+            diagnostics_children, {'display': 'none'})
 
 
 def _build_diagnostic_plots(diagnostics_data, theme):
@@ -1579,9 +1604,13 @@ SCENARIO_UNITS = {
     Output('scenario-content', 'style'),
     Output('scenario-current-values', 'data'),
     Input('scenario-trigger', 'data'),
+    Input('dashboard-tab', 'data'),
     State('scenario-baseline-data', 'data'),
 )
-def load_scenario_baseline(trigger, existing_baseline):
+def load_scenario_baseline(trigger, active_tab, existing_baseline):
+    if active_tab != 'scenario':
+        return [dash.no_update] * 5
+
     if existing_baseline and (trigger is None or trigger == 0):
         # Already have baseline, no new trigger, just return current state
         current_vals = {p['raw_col']: p['current_value'] for p in existing_baseline.get('predictors', [])}

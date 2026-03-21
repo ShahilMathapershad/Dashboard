@@ -41,11 +41,19 @@ def load_model(trainset_model=False):
     cache_key = 'trainset_model_data' if trainset_model else 'model_data'
     model_path = TRAINSET_MODEL_PATH if trainset_model else MODEL_PATH
     
-    if cache_key not in _model_cache:
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-        _model_cache[cache_key] = joblib.load(model_path)
-        logger.info("Loaded ZAR/USD ElasticNet model from %s", model_path)
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+        
+    mtime = os.path.getmtime(model_path)
+    if cache_key not in _model_cache or _model_cache[cache_key].get('mtime') != mtime:
+        loaded = joblib.load(model_path)
+        if isinstance(loaded, dict):
+            data = loaded
+        else:
+            data = {'model': loaded}
+        data['mtime'] = mtime
+        _model_cache[cache_key] = data
+        logger.info("Loaded ZAR/USD ElasticNet model from %s (mtime: %s)", model_path, mtime)
     return _model_cache[cache_key]
 
 
@@ -212,9 +220,24 @@ def predict_next_month():
     model_data = load_model(trainset_model=False)
     model = model_data['model']
     scaler = model_data['scaler']
-    feature_names = model_data['feature_names']
-    coefficients = model_data.get('coefficients', {})
-    selected_features = model_data.get('selected_features', [])
+    feature_names = model_data.get('feature_names', [])
+    # Trust the model object's coefficients over the dictionary metadata if available
+    if hasattr(model, 'coef_'):
+        # Get feature names from model if possible
+        actual_coefs = model.coef_
+        # Derive selected features (non-zero coefficients)
+        # Sort by absolute coefficient value
+        pairs = []
+        for i, feat in enumerate(feature_names):
+            if i < len(actual_coefs) and actual_coefs[i] != 0:
+                pairs.append((feat, abs(actual_coefs[i]), actual_coefs[i]))
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        selected_features = [p[0] for p in pairs]
+        # Build a coefficients mapping from the actual model
+        coefficients = {p[0]: p[2] for p in pairs}
+    else:
+        coefficients = model_data.get('coefficients', {})
+        selected_features = model_data.get('selected_features', [])
 
     # Fetch raw data
     raw_df = fetch_data_from_supabase()
@@ -354,7 +377,26 @@ def predict_next_month():
     trainset_model_data = load_model(trainset_model=True)
     trainset_model = trainset_model_data['model']
     trainset_scaler = trainset_model_data['scaler']
-    trainset_feature_names = trainset_model_data['feature_names']
+    trainset_feature_names = trainset_model_data.get('feature_names', [])
+    
+    # Robustly handle missing feature names for trainset
+    if not trainset_feature_names and hasattr(trainset_scaler, 'feature_names_in_'):
+        trainset_feature_names = list(trainset_scaler.feature_names_in_)
+
+    # Extract selected features for the trainset model specifically for diagnostic plots
+    # Trust the trainset_model's coefficients
+    if hasattr(trainset_model, 'coef_'):
+        pairs = []
+        for i, feat in enumerate(trainset_feature_names):
+            if i < len(trainset_model.coef_) and trainset_model.coef_[i] != 0:
+                pairs.append((feat, abs(trainset_model.coef_[i])))
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        trainset_selected = [p[0] for p in pairs]
+    else:
+        trainset_selected = trainset_model_data.get('selected_features', [])
+    
+    # Use trainset_selected for plots to ensure they reflect the actual trainset_model residuals
+    plot_features = trainset_selected if trainset_selected else selected_features
     
     # Implement proper walk-forward validation to avoid leakage
     # Use only the last 20% of data for validation (out-of-sample)
@@ -464,7 +506,7 @@ def predict_next_month():
         
         # Partial plots for each selected feature
         # Show relationship between each predictor and target holding others constant
-        for feat in selected_features[:5]:  # Limit to top 5 to avoid overwhelming
+        for feat in plot_features[:5]:  # Limit to top 5 to avoid overwhelming
             if feat in trainset_feature_names:
                 feat_idx = trainset_feature_names.index(feat)
                 
@@ -486,6 +528,35 @@ def predict_next_month():
                     'transform_type': get_transform_type(feat),
                 }
 
+    # Extract model parameters robustly for the dashboard UI
+    alpha = model_data.get('alpha')
+    if alpha is None:
+        alpha = getattr(model, 'alpha_', getattr(model, 'alpha', 0.0))
+    if isinstance(alpha, (list, np.ndarray)) and len(alpha) > 0:
+        alpha = alpha[0]
+
+    l1_ratio = model_data.get('l1_ratio')
+    if l1_ratio is None:
+        l1_ratio = getattr(model, 'l1_ratio_', getattr(model, 'l1_ratio', 0.0))
+    if isinstance(l1_ratio, (list, np.ndarray)) and len(l1_ratio) > 0:
+        l1_ratio = l1_ratio[0]
+
+    intercept = model_data.get('intercept')
+    if intercept is None:
+        intercept = getattr(model, 'intercept_', 0.0)
+    if isinstance(intercept, (list, np.ndarray)) and len(intercept) > 0:
+        intercept = intercept[0]
+
+    training_obs = model_data.get('training_observations', len(df_features))
+    training_range = model_data.get('training_date_range')
+    if training_range is None:
+        try:
+            first_date = df_features.index[0].strftime('%Y-%m')
+            last_date_str = df_features.index[-1].strftime('%Y-%m')
+            training_range = f"{first_date} to {last_date_str}"
+        except Exception:
+            training_range = "Unknown"
+
     return {
         'predicted_level': round(float(predicted_level), 4),
         'predicted_change_pct': round(float(predicted_change_pct), 2),
@@ -497,11 +568,11 @@ def predict_next_month():
         'contributions': contributions,
         'selected_features': selected_features,
         'model_info': {
-            'alpha': float(model_data.get('alpha')) if model_data.get('alpha') is not None else None,
-            'l1_ratio': float(model_data.get('l1_ratio')) if model_data.get('l1_ratio') is not None else None,
-            'intercept': float(model_data.get('intercept')) if model_data.get('intercept') is not None else None,
-            'training_observations': model_data.get('training_observations'),
-            'training_date_range': model_data.get('training_date_range'),
+            'alpha': float(alpha) if alpha is not None else None,
+            'l1_ratio': float(l1_ratio) if l1_ratio is not None else None,
+            'intercept': float(intercept) if intercept is not None else None,
+            'training_observations': training_obs,
+            'training_date_range': training_range,
             'n_features': len(feature_names),
             'n_selected': len(selected_features),
         },
