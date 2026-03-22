@@ -235,6 +235,7 @@ def auth_redirection(current_path, session_data):
             
     return dash.no_update
 
-
+server = app.server
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Render ignores this block, but it's good practice
+    app.run(debug=True, port=int(os.environ.get("PORT", 10000)))
