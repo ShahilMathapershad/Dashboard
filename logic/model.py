@@ -6,7 +6,7 @@ import diskcache
 from logic.supabase_client import get_supabase
 
 # Persistent cache for Supabase data to share across separate background processes
-_persistent_cache = diskcache.Cache("./.cache/data", size_limit=2**26) # 64MB limit
+_persistent_cache = diskcache.Cache("./.cache/data", size_limit=2**25) # 32MB limit
 
 try:
     import joblib
@@ -312,6 +312,22 @@ def predict_next_month():
     """
     import pandas as pd
     import numpy as np
+    global _predict_next_month_cache
+    now = time.time()
+
+    # Check in-memory cache (5-min expiry)
+    if _predict_next_month_cache['result'] is not None and (now - _predict_next_month_cache['time'] < 300):
+        logger.info("predict_next_month: returning in-memory cached result")
+        return _predict_next_month_cache['result']
+
+    # Check persistent disk cache (shared across background processes)
+    _pnm_cache_key = "predict_next_month_result"
+    _cached = _persistent_cache.get(_pnm_cache_key)
+    if _cached is not None:
+        _predict_next_month_cache = {'result': _cached, 'time': now}
+        logger.info("predict_next_month: returning disk-cached result")
+        return _cached
+
     # Load main model for prediction
     model_data = load_model(trainset_model=False)
     model = model_data['model']
@@ -690,16 +706,14 @@ def predict_next_month():
     # For a baseline forecast, we assume macro drivers stay at their last levels
     horizons = {'1m': 1, '3m': 3, '6m': 6}
     max_h = max(horizons.values())
-    
-    iterative_df = raw_df.copy()
+
+    # Only keep last 30 rows for iterative prediction (needs ~16 months context for
+    # pct_change(12) + diff + lag + 3M trend). 30 rows gives ample buffer.
+    iterative_df = raw_df.tail(30).copy()
     h_levels = {}
-    
-    # Pre-calculate engineer_features only once per step for all horizons combined
+
     for i in range(1, max_h + 1):
         try:
-            # We only need the latest features, but engineer_features processes everything.
-            # However, for 100 rows, it's faster to just call it than to re-implement.
-            # We optimize by not doing it 10 times.
             df_feat_iter, _ = engineer_features(iterative_df)
             if df_feat_iter.empty: break
             
@@ -766,7 +780,7 @@ def predict_next_month():
         hist_actual_json = [float(v) for v in hist_actual_levels]
         hist_pred_json = [float(v) for v in hist_pred_levels]
 
-    return {
+    _result = {
         'predicted_level': round(float(predicted_level), 4),
         'predicted_change_pct': round(float(predicted_change_pct), 2),
         'predicted_log_return': round(float(predicted_log_return), 4),
@@ -807,6 +821,13 @@ def predict_next_month():
         }
     }
 
+    # Cache result for subsequent requests (5-min expiry)
+    _predict_next_month_cache = {'result': _result, 'time': time.time()}
+    _persistent_cache.set(_pnm_cache_key, _result, expire=300)
+    logger.info("predict_next_month: computed and cached new result")
+
+    return _result
+
 
 def get_scenario_baseline():
     """
@@ -818,6 +839,14 @@ def get_scenario_baseline():
     """
     import pandas as pd
     import numpy as np
+
+    # Check persistent disk cache (5-min expiry, shared across processes)
+    _sb_cache_key = "scenario_baseline_result"
+    _cached = _persistent_cache.get(_sb_cache_key)
+    if _cached is not None:
+        logger.info("get_scenario_baseline: returning cached result")
+        return _cached
+
     model_data = load_model(trainset_model=False)
     model = model_data['model']
     scaler = model_data['scaler']
@@ -901,7 +930,7 @@ def get_scenario_baseline():
             'transform_type': transform_type,
         })
 
-    return {
+    _sb_result = {
         'predictors': predictors_config,
         'base_prediction': round(float(base_level), 4),
         'base_log_return': round(float(base_log_return), 4),
@@ -911,6 +940,10 @@ def get_scenario_baseline():
         'selected_features': selected_features,
         'feature_names': feature_names,
     }
+
+    _persistent_cache.set(_sb_cache_key, _sb_result, expire=300)
+    logger.info("get_scenario_baseline: computed and cached new result")
+    return _sb_result
 
 
 def scenario_predict(scenario_values):

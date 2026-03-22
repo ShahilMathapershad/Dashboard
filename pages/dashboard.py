@@ -8,9 +8,7 @@ from logic.data_fetcher import (
 )
 from logic.model import predict_next_month, fetch_data_from_supabase, get_scenario_baseline, scenario_predict
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import traceback
 import datetime
 
@@ -526,17 +524,13 @@ def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trig
     scenario_trigger = dash.no_update
 
     # Fallback: if data is missing, ensure trigger is at least 1
-    # We use (current or 0) + 1 to force a change and thus re-trigger background callback if needed
     if active_tab == 'data' and not existing_data:
-        print(f"DEBUG: Data tab active but no data. Ensuring trigger is active. Current: {current_fetch_trigger}")
         fetch_trigger = (current_fetch_trigger or 0) + 1
 
     if active_tab == 'model' and not existing_model_data:
-        print(f"DEBUG: Model tab active but no data. Ensuring trigger is active. Current: {current_model_trigger}")
         model_trigger = (current_model_trigger or 0) + 1
 
     if active_tab == 'scenario' and not existing_scenario_data:
-        print(f"DEBUG: Scenario tab active but no data. Ensuring trigger is active. Current: {current_scenario_trigger}")
         scenario_trigger = (current_scenario_trigger or 0) + 1
 
     return fetch_trigger, model_trigger, scenario_trigger
@@ -622,8 +616,6 @@ def sync_data_tab_ui(active_tab, data, status_info):
     if active_tab != 'data':
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
-    print(f"DEBUG: sync_data_tab_ui triggered. active_tab={active_tab}")
-
     status_msg = ""
     if status_info:
         # Reconstruct the status badge
@@ -672,11 +664,8 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
         set_progress = lambda x: None  # No-op function
 
     if trigger_value:
-        print(f"DEBUG: fetch_data background callback started. trigger_value={trigger_value}")
-
         # If we already have data in session, just return it to re-populate UI
         if existing_data:
-            print("DEBUG: Using existing data from session to re-populate UI")
             return existing_data, "", existing_options, existing_selected, existing_status
 
         try:
@@ -685,27 +674,21 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
 
             if not use_api:
                 set_progress((20, '20%', 'Fetching data from Supabase...'))
-                print("DEBUG: Pulling data from Supabase (not last day or already updated)")
                 processed = fetch_data_from_supabase()
                 status_data = {'text': '● Live (Supabase)', 'color': '#10B981'}
-                # Need wb_gold for replace_gold_price_column_in_supabase if we follow same structure
-                # But if we pull from Supabase, we don't need to replace gold.
                 wb_gold = pd.Series()
             else:
                 set_progress((0, '0%', 'Connecting to API sources...'))
-                print("DEBUG: Fetching data from APIs (last day of month)")
                 # Use unified configuration from data_fetcher
                 fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
 
                 def update_progress(percent, status_msg):
-                    print(f"DEBUG: Progress update: {percent}% - {status_msg}")
                     if set_progress:
                         try:
                             set_progress((percent, f'{percent}%', status_msg))
-                        except Exception as e:
-                            print(f"DEBUG WARNING: set_progress failed: {e}")
+                        except Exception:
+                            pass
 
-                print("DEBUG: Calling fetch_fred_data...")
                 raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=update_progress)
 
                 # Fetch GOLD_PRICE from World Bank monthly commodity data.
@@ -719,35 +702,33 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
                 raw = pd.concat([raw, sa_inflation], axis=1)
 
                 if raw.empty:
-                    print("DEBUG: raw_df is empty")
                     return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
 
-                print(f"DEBUG: Successfully fetched raw data with {len(raw)} rows. Processing...")
                 if set_progress:
                     set_progress((95, '95%', 'Finalising...'))
                 processed = process_data(raw, start_date='2018-01-31')
                 status_data = {'text': '● Updated from API', 'color': '#3B82F6'}
 
             if processed.empty:
-                print("DEBUG: processed_df is empty")
                 return dash.no_update, 'No data available.', dash.no_update, dash.no_update, dash.no_update
 
             # Save to Supabase only if we fetched from API
             if use_api:
                 try:
-                    print("DEBUG: Attempting to save to Supabase...")
                     save_to_supabase(processed)
                     if not wb_gold.empty:
                         replace_gold_price_column_in_supabase(wb_gold)
-                    print("DEBUG: Save to Supabase successful")
                 except Exception as e:
-                    print(f"DEBUG Warning: Could not save to Supabase: {e}")
+                    print(f"Warning: Could not save to Supabase: {e}")
                     status_data = {'text': '● Updated (Supabase error)', 'color': '#F59E0B'}
 
             # Prepare for display
-            print("DEBUG: Preparing data for display...")
             df_all = processed.reset_index()
             df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
+
+            # Round numeric columns to reduce JSON payload size in dcc.Store
+            numeric_cols = df_all.select_dtypes(include='number').columns
+            df_all[numeric_cols] = df_all[numeric_cols].round(6)
 
             # Get predictors (all columns except Date and ZAR_USD)
             predictors = [c for c in df_all.columns if c not in ['Date', 'ZAR_USD']]
@@ -760,12 +741,10 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
             # Default to first 1 predictor selected
             default_predictors = predictors[:1] if len(predictors) >= 1 else predictors
 
-            print("DEBUG: Background fetch_data complete. Returning results.")
             if set_progress:
                 set_progress((100, '100%', 'Complete'))
             return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data
         except Exception as e:
-            print(f"DEBUG Error in fetch_data: {str(e)}")
             traceback.print_exc()
             return dash.no_update, f'Error: {str(e)}', dash.no_update, dash.no_update, dash.no_update
     return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update
@@ -1094,7 +1073,6 @@ def get_coefficient_unit(transform_type):
 )
 def fetch_model_prediction(trigger, existing_data):
     if trigger and not existing_data:
-        print(f"DEBUG: fetch_model_prediction background task started. trigger={trigger}")
         try:
             result = predict_next_month()
             return {'raw_result': result}, ""
@@ -1118,7 +1096,6 @@ def fetch_model_prediction(trigger, existing_data):
 )
 def fetch_scenario_baseline(trigger, existing_data):
     if trigger and not existing_data:
-        print(f"DEBUG: fetch_scenario_baseline background task started. trigger={trigger}")
         try:
             result = get_scenario_baseline()
             return result, ""

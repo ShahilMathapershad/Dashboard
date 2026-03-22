@@ -24,7 +24,7 @@ except RuntimeError:
 
 # DiskCache for background callbacks
 # Use a smaller cache size to avoid disk/RAM pressure
-cache = diskcache.Cache("./.cache", size_limit=2**28) # 256MB limit
+cache = diskcache.Cache("./.cache", size_limit=2**27) # 128MB limit
 background_callback_manager = DiskcacheManager(cache)
 
 # Ensure project root is in sys.path for Render
@@ -161,10 +161,7 @@ app.clientside_callback(
     prevent_initial_call=True
 )
 def global_prerender_trigger(pathname, f_trig, m_trig, s_trig):
-    # Only trigger if they are at 0 (initial session state) AND on the dashboard where components exist
     if pathname == '/dashboard' and (f_trig or 0) == 0:
-        print(f"DEBUG: Initial access to {pathname}. Triggering first step of global prerendering (data fetch).")
-        # Step 1: Trigger only data fetch first to avoid memory spike
         return 1, dash.no_update, dash.no_update
     return dash.no_update, dash.no_update, dash.no_update
 
@@ -177,9 +174,7 @@ def global_prerender_trigger(pathname, f_trig, m_trig, s_trig):
     prevent_initial_call=True
 )
 def chain_model_prediction(fetched_data, current_trigger):
-    # Step 2: Once data is in, start the model prediction task
     if fetched_data and (current_trigger or 0) == 0:
-        print("DEBUG: fetched-data is ready. Triggering model prediction.")
         return 1
     return dash.no_update
 
@@ -191,9 +186,7 @@ def chain_model_prediction(fetched_data, current_trigger):
     prevent_initial_call=True
 )
 def chain_scenario_baseline(model_data, current_trigger):
-    # Step 3: Once model is ready, start the scenario engine task
     if model_data and (current_trigger or 0) == 0:
-        print("DEBUG: model-prediction-data is ready. Triggering scenario engine.")
         return 1
     return dash.no_update
 
@@ -230,24 +223,15 @@ def auth_redirection(current_path, session_data):
     ctx = dash.callback_context
     trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else 'initial'
     
-    print(f"DEBUG: Auth check. Trigger: {trigger_id}, Path: '{current_path}', Logged In: {bool(logged_in)}")
-    
     try:
-        # Unauthenticated access control
         if not logged_in:
-            # If trying to access protected pages (not / or /registration), redirect to login
             if current_path not in ['/', '/registration', None]:
-                print(f"DEBUG: Redirecting Unauthenticated user from {current_path} to /")
                 return '/'
-        
-        # Authenticated user control
         else:
-            # If already logged in and visiting login/landing pages, redirect to dashboard
             if current_path in ['/', '/registration', None]:
-                print(f"DEBUG: Redirecting Authenticated user from {current_path} to /dashboard")
                 return '/dashboard'
-    except Exception as e:
-        print(f"ERROR in auth_redirection: {str(e)}")
+    except Exception:
+        pass
             
     return dash.no_update
 

@@ -258,11 +258,6 @@ def fetch_sa_inflation_hardcoded():
     return df_cpi
 
 
-def fetch_yahoo_gold_data(ticker='GLD', start_date='2018-01-31', end_date=None):
-    """Backward-compatible alias: GOLD_PRICE now comes from World Bank monthly data."""
-    logger.warning("fetch_yahoo_gold_data is deprecated; using World Bank monthly gold data instead.")
-    return fetch_world_bank_gold_data(start_date=start_date, end_date=end_date)
-
 def process_data(final_df, start_date='2018-01-31', end_date=None):
     """Processes the raw data (sorting, resampling, filling, etc.)."""
     import pandas as pd
