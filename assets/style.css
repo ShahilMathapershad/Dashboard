@@ -1188,7 +1188,6 @@ p  { margin: 0; color: var(--text-2); }
     overflow: hidden;
     margin-top: 4px;
     width: 100%;
-    height: calc(100% - 130px); /* Subtract padding, header, and selector space */
 }
 
 /* Data Chart */

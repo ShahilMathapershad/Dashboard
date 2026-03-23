@@ -132,16 +132,6 @@ def data_tab_content(existing_data=None):
             ])
         ]),
 
-        # Progress Bar
-        html.Div(id='progress-container', hidden=True, className='progress-card', children=[
-            html.Div(className='progress-wrapper', children=[
-                dbc.Progress(id='fetch-progress-bar', value=0, max=100, striped=True, animated=True,
-                             className='progress-bar-custom'),
-                html.Div(id='progress-percentage', className='progress-pct', children='0%')
-            ]),
-            html.Div(id='progress-status', className='progress-status')
-        ]),
-
         html.Div(id='data-error', className='error-message'),
 
         # Loading state
@@ -238,6 +228,7 @@ def model_tab_content(existing_model_data=None):
                 dcc.Graph(
                     id='model-history-chart',
                     className='model-chart',
+                    style={'height': '420px'},
                     config={
                         'displayModeBar': 'hover',
                         'displaylogo': False,
@@ -645,23 +636,13 @@ def sync_data_tab_ui(active_tab, data, status_info):
     background=True,
     prevent_initial_call='initial_duplicate',
     running=[
-        (Output('progress-container', 'hidden'), False, True),
         (Output('data-error', 'children'), "", ""),
         (Output('data-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
     ],
-    progress=[
-        Output('fetch-progress-bar', 'value'),
-        Output('progress-percentage', 'children'),
-        Output('progress-status', 'children')
-    ],
 )
-def fetch_data(set_progress, trigger_value, existing_data, existing_options, existing_selected, existing_status):
+def fetch_data(trigger_value, existing_data, existing_options, existing_selected, existing_status):
     import pandas as pd
     import time
-    # Defensive check: set_progress can be None in some edge cases during callback initialization
-    if set_progress is None:
-        print("DEBUG WARNING: set_progress is None, progress updates will be skipped")
-        set_progress = lambda x: None  # No-op function
 
     if trigger_value:
         # If we already have data in session, just return it to re-populate UI
@@ -673,23 +654,14 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
             use_api = should_update_from_api()
 
             if not use_api:
-                set_progress((20, '20%', 'Fetching data from Supabase...'))
                 processed = fetch_data_from_supabase()
                 status_data = {'text': '● Live (Supabase)', 'color': '#10B981'}
                 wb_gold = pd.Series()
             else:
-                set_progress((0, '0%', 'Connecting to API sources...'))
                 # Use unified configuration from data_fetcher
                 fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
 
-                def update_progress(percent, status_msg):
-                    if set_progress:
-                        try:
-                            set_progress((percent, f'{percent}%', status_msg))
-                        except Exception:
-                            pass
-
-                raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=update_progress)
+                raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=None)
 
                 # Fetch GOLD_PRICE from World Bank monthly commodity data.
                 wb_gold = fetch_world_bank_gold_data(start_date='2018-01-31')
@@ -704,8 +676,6 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
                 if raw.empty:
                     return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
 
-                if set_progress:
-                    set_progress((95, '95%', 'Finalising...'))
                 processed = process_data(raw, start_date='2018-01-31')
                 status_data = {'text': '● Updated from API', 'color': '#3B82F6'}
 
@@ -741,8 +711,6 @@ def fetch_data(set_progress, trigger_value, existing_data, existing_options, exi
             # Default to first 1 predictor selected
             default_predictors = predictors[:1] if len(predictors) >= 1 else predictors
 
-            if set_progress:
-                set_progress((100, '100%', 'Complete'))
             return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data
         except Exception as e:
             traceback.print_exc()
@@ -1113,7 +1081,6 @@ def fetch_scenario_baseline(trigger, existing_data):
     Output('model-history-chart', 'figure'),
     Output('model-info-content', 'children'),
     Output('model-description-content', 'children'),
-    Output('diagnostics-container', 'children'),
     Output('model-loading', 'style'),
     Input('dashboard-tab', 'data'),
     Input('model-prediction-data', 'data'),
@@ -1122,16 +1089,16 @@ def fetch_scenario_baseline(trigger, existing_data):
 )
 def render_model_ui(active_tab, prediction_data, theme):
     if active_tab != 'model':
-        return [dash.no_update] * 9
+        return [dash.no_update] * 8
 
     if not prediction_data:
         empty_fig = go.Figure().to_dict()
-        return ({'display': 'none'}, '', '', '', empty_fig, '', '', dash.no_update, {'display': 'flex'})
+        return ({'display': 'none'}, '', '', '', empty_fig, '', '', {'display': 'flex'})
 
     result = prediction_data.get('raw_result')
     if not result:
         empty_fig = go.Figure().to_dict()
-        return ({'display': 'none'}, 'Prediction results unavailable.', '', '', empty_fig, '', '', dash.no_update, {'display': 'none'})
+        return ({'display': 'none'}, 'Prediction results unavailable.', '', '', empty_fig, '', '', {'display': 'none'})
 
     pred_level = result['predicted_level']
     direction = result['direction']
@@ -1396,12 +1363,8 @@ def render_model_ui(active_tab, prediction_data, theme):
             "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates for interpretability.")
     ])
 
-    # Render diagnostic plots directly
-    diagnostics_data = result.get('diagnostics', {})
-    diagnostics_children = _build_diagnostic_plots(diagnostics_data, theme)
-
     return ({'display': 'block'}, '', forecast_table, contrib_rows, fig_dict, info_items, analysis_content,
-            diagnostics_children, {'display': 'none'})
+            {'display': 'none'})
 
 
 def _build_diagnostic_plots(diagnostics_data, theme):
@@ -1561,6 +1524,23 @@ def _build_diagnostic_plots(diagnostics_data, theme):
             html.Div(className='partial-plots-grid', children=partial_plot_children)
         ])
     ])
+
+
+@callback(
+    Output('diagnostics-container', 'children'),
+    Input('model-prediction-data', 'data'),
+    Input('dashboard-tab', 'data'),
+    State('theme-store', 'data'),
+    prevent_initial_call='initial_duplicate'
+)
+def render_diagnostics(prediction_data, active_tab, theme):
+    if active_tab != 'model' or not prediction_data:
+        return dash.no_update
+    result = prediction_data.get('raw_result')
+    if not result:
+        return dash.no_update
+    diagnostics_data = result.get('diagnostics', {})
+    return _build_diagnostic_plots(diagnostics_data, theme)
 
 
 def _info_pill(label, value, description=None):
