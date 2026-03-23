@@ -4,9 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with procfile v2">
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-    </list>
+    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with req" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -167,15 +165,7 @@
       <workItem from="1774206438345" duration="3322000" />
       <workItem from="1774209922168" duration="260000" />
       <workItem from="1774211077383" duration="120000" />
-      <workItem from="1774211308558" duration="451000" />
-    </task>
-    <task id="LOCAL-00001" summary="h">
-      <option name="closed" value="true" />
-      <created>1772054264146</created>
-      <option name="number" value="00001" />
-      <option name="presentableId" value="LOCAL-00001" />
-      <option name="project" value="LOCAL" />
-      <updated>1772054264146</updated>
+      <workItem from="1774211308558" duration="486000" />
     </task>
     <task id="LOCAL-00002" summary="h">
       <option name="closed" value="true" />
@@ -553,7 +543,23 @@
       <option name="project" value="LOCAL" />
       <updated>1774211371091</updated>
     </task>
-    <option name="localTasksCounter" value="49" />
+    <task id="LOCAL-00049" summary="lastest with procfile v2">
+      <option name="closed" value="true" />
+      <created>1774211768558</created>
+      <option name="number" value="00049" />
+      <option name="presentableId" value="LOCAL-00049" />
+      <option name="project" value="LOCAL" />
+      <updated>1774211768558</updated>
+    </task>
+    <task id="LOCAL-00050" summary="lastest with req">
+      <option name="closed" value="true" />
+      <created>1774211792015</created>
+      <option name="number" value="00050" />
+      <option name="presentableId" value="LOCAL-00050" />
+      <option name="project" value="LOCAL" />
+      <updated>1774211792016</updated>
+    </task>
+    <option name="localTasksCounter" value="51" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -589,10 +595,10 @@
     <MESSAGE value="latest claude" />
     <MESSAGE value="scrollbar" />
     <MESSAGE value="lastest" />
-    <MESSAGE value="lastest with req" />
     <MESSAGE value="lastest with procfile" />
     <MESSAGE value="lastest with procfile v2" />
-    <option name="LAST_COMMIT_MESSAGE" value="lastest with procfile v2" />
+    <MESSAGE value="lastest with req" />
+    <option name="LAST_COMMIT_MESSAGE" value="lastest with req" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Dash$app.coverage" NAME="app Coverage Results" MODIFIED="1772054274074" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
