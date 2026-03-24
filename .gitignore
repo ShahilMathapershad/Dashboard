@@ -7,9 +7,6 @@ venv/
 env/
 .env
 
-# Data (If you don't want to reset users on every push)
-# data/users.csv
-
 # OS
 .DS_Store
 

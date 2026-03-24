@@ -203,6 +203,42 @@ def data_tab_content(existing_data=None):
             # Data Table (hidden by default)
             html.Div(id='data-table-container', className='table-card', style={'display': 'none'})
         ]),
+
+        # ── AI Chat Panel ──
+        html.Div(id='chat-panel', className='chat-panel', children=[
+            html.Div(className='chat-header', children=[
+                html.Div(className='chat-header-left', children=[
+                    html.Span('✦', className='chat-header-icon'),
+                    html.Span('AI Assistant', className='chat-header-title'),
+                ]),
+                html.Button('✕', id='chat-close-btn', className='chat-close-btn', n_clicks=0),
+            ]),
+            html.Div(id='chat-messages', className='chat-messages', children=[
+                html.Div(className='chat-message chat-message-ai', children=[
+                    html.Div("Ask me about the data on the chart — trends, predictors, ZAR/USD dynamics, or economics.",
+                             className='chat-bubble chat-bubble-ai')
+                ])
+            ]),
+            html.Div(className='chat-input-area', children=[
+                dcc.Input(
+                    id='chat-input',
+                    type='text',
+                    placeholder='Ask about the chart or economics...',
+                    className='chat-input',
+                    debounce=False,
+                    n_submit=0,
+                ),
+                html.Button('→', id='chat-send-btn', className='chat-send-btn', n_clicks=0),
+            ]),
+        ]),
+
+        # Chat toggle FAB
+        html.Button(
+            html.Span('✦', className='chat-fab-icon'),
+            id='chat-toggle-btn',
+            className='chat-fab',
+            n_clicks=0,
+        ),
     ])
 
 
@@ -2182,3 +2218,189 @@ def render_scenario_comparison(saved_scenarios, baseline, theme):
     )
 
     return scenario_cards, fig.to_dict()
+
+
+# ═══════════════════════════════════════════
+#   AI Chatbot (Data Explorer)
+# ═══════════════════════════════════════════
+
+GOOGLE_API_KEY = 'AIzaSyCACUAIY96FjGsx5jWuJvZYCf9c67Z9GQw'
+
+# Toggle chat panel open/closed
+dash.clientside_callback(
+    """
+    function(toggleClicks, closeClicks) {
+        const panel = document.getElementById('chat-panel');
+        const fab = document.getElementById('chat-toggle-btn');
+        if (!panel) return window.dash_clientside.no_update;
+
+        const isOpen = panel.classList.contains('chat-panel-open');
+        if (isOpen) {
+            panel.classList.remove('chat-panel-open');
+            if (fab) fab.classList.remove('chat-fab-hidden');
+        } else {
+            panel.classList.add('chat-panel-open');
+            if (fab) fab.classList.add('chat-fab-hidden');
+            // Focus input
+            setTimeout(() => {
+                const input = document.getElementById('chat-input');
+                if (input) input.focus();
+            }, 300);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('chat-panel', 'id'),
+    Input('chat-toggle-btn', 'n_clicks'),
+    Input('chat-close-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
+
+# Auto-scroll chat to bottom on new messages
+dash.clientside_callback(
+    """
+    function(children) {
+        setTimeout(() => {
+            const el = document.getElementById('chat-messages');
+            if (el) el.scrollTop = el.scrollHeight;
+        }, 50);
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('chat-send-btn', 'id'),
+    Input('chat-messages', 'children'),
+    prevent_initial_call=True
+)
+
+
+def _build_plot_context(data, selected_predictors, options):
+    """Build a text summary of what the user sees on the chart."""
+    if not data or not selected_predictors:
+        return "The chart is currently empty — no data has been loaded yet."
+
+    df = pd.DataFrame(data)
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values('Date')
+
+    label_map = {opt['value']: opt['label'] for opt in (options or [])}
+
+    lines = []
+    # Date range
+    lines.append(f"Date range: {df['Date'].min().strftime('%Y-%m')} to {df['Date'].max().strftime('%Y-%m')}")
+    lines.append(f"Data points: {len(df)}")
+
+    # ZAR/USD summary
+    zar = df['ZAR_USD'].dropna()
+    if not zar.empty:
+        lines.append(f"ZAR/USD — latest: {zar.iloc[-1]:.4f}, min: {zar.min():.4f}, max: {zar.max():.4f}")
+        if len(zar) >= 2:
+            pct = ((zar.iloc[-1] - zar.iloc[-2]) / zar.iloc[-2]) * 100
+            lines.append(f"  Last month change: {pct:+.2f}%")
+        if len(zar) >= 12:
+            yoy = ((zar.iloc[-1] - zar.iloc[-12]) / zar.iloc[-12]) * 100
+            lines.append(f"  Year-over-year change: {yoy:+.2f}%")
+
+    # Selected predictors
+    lines.append(f"\nPredictors currently shown on chart (normalized 0–100):")
+    for pred in selected_predictors:
+        if pred in df.columns:
+            s = df[pred].dropna()
+            friendly = label_map.get(pred, pred)
+            if not s.empty:
+                lines.append(f"  • {friendly}: latest={s.iloc[-1]:.4f}, min={s.min():.4f}, max={s.max():.4f}")
+                if len(s) >= 2:
+                    pct_m = ((s.iloc[-1] - s.iloc[-2]) / abs(s.iloc[-2])) * 100 if s.iloc[-2] != 0 else 0
+                    lines.append(f"    Last month: {pct_m:+.2f}%")
+
+    return "\n".join(lines)
+
+
+@callback(
+    Output('chat-messages', 'children'),
+    Output('chat-input', 'value'),
+    Output('chat-history', 'data'),
+    Input('chat-send-btn', 'n_clicks'),
+    Input('chat-input', 'n_submit'),
+    State('chat-input', 'value'),
+    State('chat-messages', 'children'),
+    State('chat-history', 'data'),
+    State('fetched-data', 'data'),
+    State('selected-predictors', 'data'),
+    State('predictor-dropdown-options-store', 'data'),
+    prevent_initial_call=True
+)
+def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_history,
+                     fetched_data, selected_predictors, predictor_options):
+    if not user_msg or not user_msg.strip():
+        return dash.no_update, dash.no_update, dash.no_update
+
+    user_msg = user_msg.strip()
+    current_messages = current_messages or []
+    chat_history = chat_history or []
+
+    # Add user message bubble
+    current_messages.append(
+        html.Div(className='chat-message chat-message-user', children=[
+            html.Div(user_msg, className='chat-bubble chat-bubble-user')
+        ])
+    )
+
+    # Build context from what's on the chart
+    plot_context = _build_plot_context(fetched_data, selected_predictors, predictor_options)
+
+    # Add to conversation history for Gemini
+    chat_history.append({'role': 'user', 'parts': [user_msg]})
+
+    # Call Gemini
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=GOOGLE_API_KEY)
+
+        system_instruction = (
+            "You are an economics assistant embedded in a ZAR/USD exchange rate dashboard. "
+            "You ONLY answer questions about: the data shown on the chart, ZAR/USD exchange rate dynamics, "
+            "macroeconomic indicators (interest rates, inflation, oil prices, gold, VIX, economic policy uncertainty), "
+            "South African and US economics, and how these factors relate to the Rand. "
+            "If the user asks about anything unrelated, politely decline and redirect them to chart or economics questions. "
+            "Keep answers concise (2-4 sentences) unless the user asks for detail. "
+            "Use the CHART CONTEXT below to ground your answers in what the user can actually see.\n\n"
+            f"CHART CONTEXT:\n{plot_context}"
+        )
+
+        # Build contents list for the API
+        contents = []
+        for msg in chat_history:
+            contents.append(types.Content(
+                role=msg['role'],
+                parts=[types.Part.from_text(text=msg['parts'][0])]
+            ))
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                max_output_tokens=2048,
+                temperature=0.7,
+            )
+        )
+
+        ai_text = (response.text or "I couldn't generate a response. Please try again.").strip()
+    except Exception as e:
+        print(f"[Chatbot Error] {type(e).__name__}: {e}")
+        traceback.print_exc()
+        ai_text = f"Sorry, I couldn't process that request. ({type(e).__name__}: {e})"
+
+    # Save AI response to history
+    chat_history.append({'role': 'model', 'parts': [ai_text]})
+
+    # Add AI message bubble
+    current_messages.append(
+        html.Div(className='chat-message chat-message-ai', children=[
+            html.Div(ai_text, className='chat-bubble chat-bubble-ai')
+        ])
+    )
+
+    return current_messages, '', chat_history
