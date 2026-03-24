@@ -1,0 +1,29 @@
+--- Supabase Client: Initializing with URL https://nugwzktxrbpaynkwussb.supabase.co and Key sb_secret_...OuiHk ---
+Starting the Dash application...
+Dash is running on http://127.0.0.1:8050/
+
+2026-03-21 21:03:05,087 - dash.dash - INFO - Dash is running on http://127.0.0.1:8050/
+
+ * Serving Flask app 'app'
+ * Debug mode: off
+2026-03-21 21:03:05,094 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:8050
+2026-03-21 21:03:05,094 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2026-03-21 21:03:05,122 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:05] "GET / HTTP/1.1" 200 -
+2026-03-21 21:03:06,044 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "GET / HTTP/1.1" 200 -
+2026-03-21 21:03:06,109 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "[36mGET /assets/style.css?m=1774119403.518276 HTTP/1.1[0m" 304 -
+2026-03-21 21:03:06,113 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "[36mGET /assets/interactions.js HTTP/1.1[0m" 304 -
+2026-03-21 21:03:06,114 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "[36mGET /assets/interactions.js?m=1774026358.7885654 HTTP/1.1[0m" 304 -
+2026-03-21 21:03:06,278 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "GET /_dash-layout HTTP/1.1" 200 -
+2026-03-21 21:03:06,295 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "GET /_dash-dependencies HTTP/1.1" 200 -
+2026-03-21 21:03:06,369 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:06,377 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:06,379 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:06,405 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:06,413 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:06,431 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "[36mGET /assets/logo_light.svg HTTP/1.1[0m" 304 -
+2026-03-21 21:03:06,436 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "[36mGET /assets/logo_dark.svg HTTP/1.1[0m" 304 -
+2026-03-21 21:03:06,441 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:06,443 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:06] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:12,427 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:12] "POST /_dash-update-component HTTP/1.1" 200 -
+2026-03-21 21:03:12,436 - werkzeug - INFO - 127.0.0.1 - - [21/Mar/2026 21:03:12] "POST /_dash-update-component HTTP/1.1" 200 -
