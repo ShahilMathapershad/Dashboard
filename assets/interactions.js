@@ -202,14 +202,42 @@ document.addEventListener('DOMContentLoaded', function () {
             if (container && !container.dataset.injected) {
                 container.dataset.injected = 'true';
                 container.innerHTML = `
-                    <svg viewBox="0 0 1000 400" style="width: 100%; height: 100%; pointer-events: none;">
-                        <path 
-                            class="trendline-path" 
-                            d="M0,350 Q100,340 200,300 T400,250 T600,280 T800,150 T1000,100" 
-                            fill="none" 
-                            stroke="#5b8def" 
-                            stroke-width="2">
+                    <svg viewBox="0 0 1200 500" preserveAspectRatio="none" style="width: 100%; height: 100%; pointer-events: none;">
+                        <defs>
+                            <linearGradient id="tl-grad1" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#5b8def;stop-opacity:0"/>
+                                <stop offset="40%" style="stop-color:#5b8def;stop-opacity:1"/>
+                                <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:0.6"/>
+                            </linearGradient>
+                            <linearGradient id="tl-grad2" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:0"/>
+                                <stop offset="50%" style="stop-color:#7c3aed;stop-opacity:0.7"/>
+                                <stop offset="100%" style="stop-color:#5b8def;stop-opacity:0"/>
+                            </linearGradient>
+                        </defs>
+                        <!-- Primary trend line -->
+                        <path
+                            class="trendline-path"
+                            d="M0,380 C120,360 200,310 320,270 S500,240 620,260 S820,180 950,140 S1100,110 1200,90"
+                            fill="none"
+                            stroke="url(#tl-grad1)"
+                            stroke-width="2"
+                            stroke-linecap="round">
                         </path>
+                        <!-- Secondary decorative line -->
+                        <path
+                            d="M0,420 C150,400 280,370 400,340 S560,310 680,330 S880,270 1000,220 S1150,190 1200,170"
+                            fill="none"
+                            stroke="url(#tl-grad2)"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-dasharray="6 4"
+                            opacity="0.5"
+                            style="animation: drawPath 10s ease-in-out 2s infinite">
+                        </path>
+                        <!-- Subtle grid lines -->
+                        <line x1="0" y1="150" x2="1200" y2="150" stroke="#5b8def" stroke-width="0.5" opacity="0.15"/>
+                        <line x1="0" y1="300" x2="1200" y2="300" stroke="#5b8def" stroke-width="0.5" opacity="0.1"/>
                     </svg>
                 `;
             }
@@ -250,11 +278,37 @@ document.addEventListener('DOMContentLoaded', function () {
         observer.observe(document.body, { childList: true, subtree: true });
     };
 
+    // Scroll-triggered fade-in animations using IntersectionObserver
+    const observeScrollAnimations = () => {
+        const io = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    io.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.08, rootMargin: '0px 0px -30px 0px' });
+
+        const attachObserver = () => {
+            document.querySelectorAll('.fade-in-up:not(.visible)').forEach(el => {
+                io.observe(el);
+            });
+        };
+
+        attachObserver();
+
+        const domWatcher = new MutationObserver(() => {
+            attachObserver();
+        });
+        domWatcher.observe(document.body, { childList: true, subtree: true });
+    };
+
     handleLoginEnterKey();
     observeChips();
     observeChartVisibility();
     observeTrendline();
     observeSliders();
+    observeScrollAnimations();
     
     // Listen for custom plotly resize events from Dash callbacks
     window.addEventListener('plotlyResize', () => {

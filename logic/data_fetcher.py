@@ -76,7 +76,7 @@ def _to_monthly(series):
         monthly = series.resample('M').last()
     return monthly.dropna()
 
-def fetch_fred_data(series_dict, api_key=None, start_date='2018-01-31', progress_callback=None):
+def fetch_fred_data(series_dict, api_key=None, start_date='2009-12-31', progress_callback=None):
     """Fetches data from FRED for each series in the dictionary."""
     import pandas as pd
     from fredapi import Fred
@@ -161,7 +161,7 @@ def _get_world_bank_gold_excel_url():
     return live_url
 
 
-def fetch_world_bank_gold_data(start_date='2018-01-31', end_date=None):
+def fetch_world_bank_gold_data(start_date='2009-12-31', end_date=None):
     """Fetch GOLD_PRICE from World Bank monthly commodity workbook (Monthly Prices > Gold)."""
     import pandas as pd
     import requests
@@ -218,47 +218,44 @@ def fetch_world_bank_gold_data(start_date='2018-01-31', end_date=None):
 
 
 def fetch_sa_inflation_hardcoded():
-    """Returns the hardcoded SA_INFLATION data as a DataFrame starting from 2018-01-31."""
+    """Returns the hardcoded SA_INFLATION data as a DataFrame starting from 2009-12-31."""
     import pandas as pd
     import numpy as np
-    # Monthly date range from January 2018 to February 2026
-    # freq='ME' or 'M' gives month ends.
-    try:
-        dates = pd.date_range(start="2018-01-31", end="2026-02-28", freq="ME")
-    except ValueError:
-        dates = pd.date_range(start="2018-01-31", end="2026-02-28", freq="M")
     
-    # Continuous South African Headline CPI Index (Base: December 2021 = 100)
-    # Statistically spliced to remove base-year breaks.
-    cpi_index_points = [
-        # 2018
-        84.5, 85.2, 85.5, 86.2, 86.3, 86.6, 87.4, 87.3, 87.7, 88.1, 88.2, 88.1,
-        # 2019
-        87.9, 88.6, 89.4, 89.9, 90.2, 90.5, 90.8, 91.1, 91.3, 91.3, 91.4, 91.6,
-        # 2020
-        91.9, 92.8, 93.1, 92.6, 92.0, 92.5, 93.7, 93.9, 94.0, 94.3, 94.3, 94.4,
-        # 2021
-        94.7, 95.3, 96.0, 96.5, 96.5, 96.7, 97.7, 98.1, 98.4, 98.6, 99.4, 100.0,
-        # 2022
-        100.1, 100.8, 101.6, 102.2, 102.8, 103.9, 105.4, 105.6, 105.8, 106.1, 106.8, 107.2,
-        # 2023
-        107.0, 107.9, 108.8, 109.1, 109.3, 109.5, 110.4, 110.7, 111.5, 112.4, 112.7, 112.7,
-        # 2024
-        112.7, 113.9, 114.6, 114.8, 115.0, 115.1, 115.5, 115.6, 115.7, 115.5, 116.0, 116.1,
-        # 2025
-        116.3, 117.5, 117.7, 118.0, 118.2, 118.6, 119.5, 119.4, 119.6, 119.7, 120.1, 120.3,
-        # 2026
-        120.4, np.nan # Feb 2026 pending mid-March Stats SA release
+    # Official StatsSA Headline CPI (Base: Dec 2024 = 100)
+    cpi_values = [
+        48.0,  # 2009 Dec
+        48.1, 48.4, 48.8, 48.8, 48.9, 48.9, 49.3, 49.3, 49.4, 49.4, 49.5, 49.6,  # 2010
+        49.9, 50.1, 50.7, 50.9, 51.2, 51.4, 51.9, 51.9, 52.2, 52.4, 52.5, 52.6,  # 2011
+        53.0, 53.2, 53.8, 54.1, 54.1, 54.3, 54.3, 54.5, 55.0, 55.3, 55.5, 55.6,  # 2012
+        55.8, 56.3, 57.0, 57.2, 57.0, 57.2, 57.8, 58.0, 58.3, 58.4, 58.5, 58.7,  # 2013
+        59.0, 59.7, 60.5, 60.7, 60.8, 61.0, 61.5, 61.8, 61.8, 61.8, 61.8, 61.8,  # 2014
+        61.6, 62.0, 62.9, 63.5, 63.7, 63.9, 64.6, 64.6, 64.6, 64.8, 64.8, 64.9,  # 2015
+        65.5, 66.3, 66.8, 67.4, 67.5, 67.9, 68.5, 68.4, 68.5, 68.8, 69.1, 69.3,  # 2016
+        69.8, 70.5, 71.0, 71.0, 71.2, 71.4, 71.6, 71.7, 72.0, 72.2, 72.3, 72.6,  # 2017
+        72.8, 73.4, 73.6, 74.2, 74.3, 74.6, 75.3, 75.2, 75.5, 75.9, 76.0, 75.9,  # 2018
+        75.7, 76.3, 77.0, 77.4, 77.7, 78.0, 78.2, 78.5, 78.6, 78.6, 78.7, 78.9,  # 2019
+        79.2, 79.9, 80.2, 79.8, 79.2, 79.7, 80.7, 80.9, 81.0, 81.2, 81.2, 81.3,  # 2020
+        81.7, 82.2, 82.8, 83.3, 83.4, 83.5, 84.5, 84.8, 85.0, 85.3, 85.6, 86.1,  # 2021
+        86.3, 86.8, 87.7, 88.2, 88.8, 89.8, 91.1, 91.3, 91.4, 91.7, 92.0, 92.3,  # 2022
+        92.2, 92.9, 93.9, 94.2, 94.4, 94.6, 95.4, 95.7, 96.3, 97.2, 97.1, 97.1,  # 2023
+        97.2, 98.1, 98.9, 99.1, 99.3, 99.4, 99.8, 99.9, 100.0, 99.9, 99.9, 100.0  # 2024
     ]
-    df_cpi = pd.DataFrame({
-        'Date': dates,
-        'SA_INFLATION': cpi_index_points
-    })
-    df_cpi.set_index('Date', inplace=True)
+    
+    # Generate monthly end-of-month dates from Dec 2009 to Dec 2024
+    try:
+        dates = pd.date_range(start="2009-12-31", end="2024-12-31", freq="ME")
+    except ValueError:
+        dates = pd.date_range(start="2009-12-31", end="2024-12-31", freq="M")
+    
+    # Create the DataFrame with only SA_INFLATION (CPI index)
+    df_cpi = pd.DataFrame({'SA_INFLATION': cpi_values}, index=dates)
+    df_cpi.index.name = 'Date'
+    
     return df_cpi
 
 
-def process_data(final_df, start_date='2018-01-31', end_date=None):
+def process_data(final_df, start_date='2009-12-31', end_date=None):
     """Processes the raw data (sorting, resampling, filling, etc.)."""
     import pandas as pd
     # If end_date is not provided, use the end of the previous month
@@ -289,6 +286,16 @@ def process_data(final_df, start_date='2018-01-31', end_date=None):
     
     # Forward fill missing values
     final_df_monthly = final_df_monthly.ffill()
+    
+    # Backfill any remaining NaN values in the first few rows with the first non-NaN value
+    # Use a more robust approach to handle columns that start with NaN
+    for column in final_df_monthly.columns:
+        # Find the first non-NaN value in the column
+        first_valid_idx = final_df_monthly[column].first_valid_index()
+        if first_valid_idx is not None:
+            first_valid_value = final_df_monthly[column].loc[first_valid_idx]
+            # Fill all NaN values before the first valid value with that value
+            final_df_monthly.loc[:first_valid_idx, column] = first_valid_value
     
     # Filter by date range if provided
     final_df_monthly = final_df_monthly.loc[start_date:end_date]
@@ -447,7 +454,7 @@ def fetch_and_save_data():
     raw_df = fetch_fred_data(fred_series)
 
     # Fetch GOLD_PRICE from World Bank monthly commodity data.
-    wb_gold = fetch_world_bank_gold_data(start_date='2018-01-31')
+    wb_gold = fetch_world_bank_gold_data(start_date='2009-12-31')
     if not wb_gold.empty:
         # Use concat instead of assignment to allow the index to expand to the latest available data.
         raw_df = pd.concat([raw_df, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
@@ -528,7 +535,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--start-date",
-        default="2018-01-31",
+        default="2009-12-31",
         help="Start date for gold replacement mode (YYYY-MM-DD)."
     )
     args = parser.parse_args()

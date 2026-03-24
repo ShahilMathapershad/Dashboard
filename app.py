@@ -230,6 +230,7 @@ def auth_redirection(current_path, session_data):
         else:
             if current_path in ['/', '/registration', None]:
                 return '/dashboard'
+            # /profile and /dashboard are valid authenticated routes — no redirect needed
     except Exception:
         pass
             

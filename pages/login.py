@@ -17,31 +17,65 @@ def layout():
             html.Div('GDP', className='particle-node', style={'top': '25%', 'left': '15%', 'animationDelay': '0s'}),
             html.Div('VIX', className='particle-node', style={'top': '65%', 'left': '80%', 'animationDelay': '-5s'}),
             html.Div('Gold', className='particle-node', style={'top': '20%', 'left': '70%', 'animationDelay': '-10s'}),
+            html.Div('CPI', className='particle-node', style={'top': '75%', 'left': '20%', 'animationDelay': '-3s'}),
+            html.Div('LIBOR', className='particle-node', style={'top': '40%', 'left': '88%', 'animationDelay': '-8s'}),
+            html.Div('PMI', className='particle-node', style={'top': '10%', 'left': '45%', 'animationDelay': '-6s'}),
+            html.Div('USD', className='particle-node', style={'top': '85%', 'left': '55%', 'animationDelay': '-12s'}),
         ]),
 
         # Stage 1: Landing Page
         html.Div(id='landing-stage', className='landing-stage', children=[
-            html.H1("Understand the Forces Driving the ZAR/USD Exchange Rate", className='landing-headline'),
+            html.H1([
+                "Understand the Forces Driving the ",
+                html.Span("ZAR/USD", className='landing-headline-accent'),
+                " Exchange Rate",
+            ], className='landing-headline'),
             html.P(
                 "A transparent, data-driven forecasting tool built for South African agribusiness to navigate ZAR/USD exchange rate volatility with clarity",
                 className='landing-subheadline'
             ),
-            
+
+            # Glowing divider
+            html.Div(className='landing-divider'),
+
+            # Stat pills
+            html.Div(className='stat-pills', children=[
+                html.Div(className='stat-pill', children=[
+                    html.Span('24', className='stat-pill-number'),
+                    html.Span('Features', className='stat-pill-label'),
+                ]),
+                html.Div(className='stat-pill', children=[
+                    html.Span('3', className='stat-pill-number'),
+                    html.Span('Horizons', className='stat-pill-label'),
+                ]),
+                html.Div(className='stat-pill', children=[
+                    html.Span('Monthly', className='stat-pill-number'),
+                    html.Span('Data Refresh', className='stat-pill-label'),
+                ]),
+                html.Div(className='stat-pill', children=[
+                    html.Span('ElasticNet', className='stat-pill-number'),
+                    html.Span('Algorithm', className='stat-pill-label'),
+                ]),
+            ]),
+
             html.Div(className='feature-cards', children=[
                 html.Div(className='feature-card', children=[
+                    html.Div("↗", className='feature-icon-wrap'),
                     html.Div("Macroeconomic Drivers", className='feature-title'),
                     html.Div("Highlighting how variables like commodity prices and interest rate differentials impact the ZAR.", className='feature-desc'),
                 ]),
                 html.Div(className='feature-card', children=[
+                    html.Div("⚙", className='feature-icon-wrap'),
                     html.Div("Scenario Modeling", className='feature-title'),
                     html.Div("Explaining the ability to test hypothetical changes in underlying factors.", className='feature-desc'),
                 ]),
                 html.Div(className='feature-card', children=[
+                    html.Div("◎", className='feature-icon-wrap'),
                     html.Div("Automated Precision", className='feature-title'),
                     html.Div("Showcasing monthly updates synced with FRED and Statistics South Africa.", className='feature-desc'),
                 ]),
             ]),
-            
+
             html.Button('Get Started', id='get-started-button', n_clicks=0, className='btn-get-started'),
         ]),
 

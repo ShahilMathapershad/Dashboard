@@ -93,11 +93,34 @@ def sidebar(active_tab):
             link('nav-scenario', 'Scenario', 'scenario'),
         ]),
         html.Div(className='sidebar-footer', children=[
+            html.A(href='/profile', className='nav-link-profile', children=[
+                html.Span('◉', className='nav-icon'),
+                html.Span('Profile', className='nav-label'),
+            ]),
             html.Div(id='nav-signout', className='nav-link-custom', children=[
                 html.Span('→', className='nav-icon'),
                 html.Span('Sign out', className='nav-label')
             ], n_clicks=0)
         ])
+    ])
+
+
+def topbar():
+    now = datetime.datetime.now()
+    date_str = f"{now.strftime('%a, %b')} {now.day}, {now.year}"
+    return html.Div(className='topbar', children=[
+        html.Div(className='topbar-breadcrumb', children=[
+            html.Span('ZAR/USD Dashboard', className='topbar-root'),
+            html.Span(' / ', className='topbar-sep'),
+            html.Span('Data Explorer', id='topbar-page-name', className='topbar-page'),
+        ]),
+        html.Div(className='topbar-right', children=[
+            html.Span(date_str, className='topbar-date'),
+            html.A(href='/profile', className='topbar-user', children=[
+                html.Div('?', id='topbar-avatar', className='topbar-avatar'),
+                html.Span('User', id='topbar-username', className='topbar-username'),
+            ]),
+        ]),
     ])
 
 
@@ -386,7 +409,8 @@ def layout():
     return html.Div(id='dashboard-container', className='page-transition sidebar-collapsed', n_clicks=0, children=[
         sidebar('data'),
         html.Div(className='content-area', id='content-area', children=[
-            html.Div(id='content-body', children=[
+            topbar(),
+            html.Div(id='content-body', className='content-body', children=[
                 data_tab_content(),
                 model_tab_content(),
                 scenario_tab_content(),
@@ -457,13 +481,39 @@ def set_active_tab(data_clicks, model_clicks, scenario_clicks, signout_clicks, c
 dash.clientside_callback(
     """
     function(activeTab) {
-        // Toggle tab visibility via CSS display
-        var dataTab = document.getElementById('data-tab');
-        var modelTab = document.getElementById('model-tab');
-        var scenarioTab = document.getElementById('scenario-tab');
-        if (dataTab) dataTab.style.display = (activeTab === 'data') ? 'block' : 'none';
-        if (modelTab) modelTab.style.display = (activeTab === 'model') ? 'block' : 'none';
-        if (scenarioTab) scenarioTab.style.display = (activeTab === 'scenario') ? 'block' : 'none';
+        var tabIds = ['data-tab', 'model-tab', 'scenario-tab'];
+        var tabKeys = ['data', 'model', 'scenario'];
+        var tabNames = {
+            'data': 'Data Explorer',
+            'model': 'Model Forecasts',
+            'scenario': 'Scenario Analysis'
+        };
+
+        // Hide all tabs first
+        tabIds.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+
+        // Show active tab with smooth fade-in animation
+        for (var i = 0; i < tabKeys.length; i++) {
+            if (tabKeys[i] === activeTab) {
+                var activeEl = document.getElementById(tabIds[i]);
+                if (activeEl) {
+                    activeEl.style.display = 'block';
+                    activeEl.style.animation = 'none';
+                    void activeEl.offsetWidth; // force reflow
+                    activeEl.style.animation = 'tabFadeIn 0.32s cubic-bezier(0,0,0.2,1)';
+                }
+                break;
+            }
+        }
+
+        // Update topbar breadcrumb page name
+        var breadcrumb = document.getElementById('topbar-page-name');
+        if (breadcrumb && tabNames[activeTab]) {
+            breadcrumb.innerText = tabNames[activeTab];
+        }
 
         // Update nav link classes
         var dataCls = (activeTab === 'data') ? 'nav-link-custom active' : 'nav-link-custom';
@@ -480,6 +530,18 @@ dash.clientside_callback(
      Output('nav-signout', 'className')],
     Input('dashboard-tab', 'data')
 )
+
+
+@callback(
+    Output('topbar-avatar', 'children'),
+    Output('topbar-username', 'children'),
+    Input('user-session', 'data'),
+)
+def update_topbar_user(session_data):
+    if session_data and session_data.get('username'):
+        username = session_data['username']
+        return username[0].upper(), username
+    return '?', 'User'
 
 
 # Handle signout: clear session
@@ -664,19 +726,20 @@ def fetch_data(trigger_value, existing_data, existing_options, existing_selected
                 raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=None)
 
                 # Fetch GOLD_PRICE from World Bank monthly commodity data.
-                wb_gold = fetch_world_bank_gold_data(start_date='2018-01-31')
+                wb_gold = fetch_world_bank_gold_data(start_date='2009-12-31')
                 if not wb_gold.empty:
                     # Use concat instead of assignment to allow the index to expand to the latest available data.
                     raw = pd.concat([raw, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
 
                 # Fetch SA_INFLATION (Hardcoded)
-                sa_inflation = fetch_sa_inflation_hardcoded()
+                sa_inflation = (fetch_sa_inflation_hardcoded
+                                ())
                 raw = pd.concat([raw, sa_inflation], axis=1)
 
                 if raw.empty:
                     return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
 
-                processed = process_data(raw, start_date='2018-01-31')
+                processed = process_data(raw, start_date='2009-12-31')
                 status_data = {'text': '● Updated from API', 'color': '#3B82F6'}
 
             if processed.empty:
