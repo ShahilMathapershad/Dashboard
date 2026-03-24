@@ -40,9 +40,15 @@
     --shadow-lg: 0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
     --shadow-xl: 0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.10);
 
+    /* Standard easing */
     --ease: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-out: cubic-bezier(0, 0, 0.2, 1);
     --dur: 0.2s;
+
+    /* Apple-calibrated easing — use these for all UI motion */
+    --spring: cubic-bezier(0.16, 1, 0.3, 1);       /* Expo-out: snappy start, silky landing  */
+    --smooth: cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Ease-out sine: natural, physical feel  */
+    --snappy: cubic-bezier(0.36, 0, 0.66, -0.1);   /* Slightly undershooting, glass-like     */
 
     --sidebar-w: 240px;
     --sidebar-w-collapsed: 64px;
@@ -354,7 +360,9 @@ p  { margin: 0; color: var(--text-2); }
     text-align: center;
     z-index: 10;
     padding: 40px 24px;
-    transition: all 0.8s var(--ease);
+    will-change: opacity, transform;
+    transition: opacity 0.75s var(--spring), transform 0.75s var(--spring);
+    transform-origin: center center;
 }
 
 .landing-headline {
@@ -398,13 +406,15 @@ p  { margin: 0; color: var(--text-2); }
     flex: 1;
     min-width: 280px;
     max-width: 340px;
-    transition: border-color 0.3s var(--ease), transform 0.3s var(--ease), box-shadow 0.3s var(--ease), background 0.3s var(--ease);
+    transition: border-color 0.3s var(--spring), transform 0.35s var(--spring),
+                box-shadow 0.35s var(--spring), background 0.3s var(--spring);
     text-align: left;
     display: flex;
     flex-direction: column;
     gap: 12px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    will-change: transform;
 }
 
 .feature-card:hover {
@@ -475,20 +485,22 @@ p  { margin: 0; color: var(--text-2); }
     z-index: 5;
     opacity: 0;
     pointer-events: none;
-    transform: scale(0.9);
-    transition: all 0.8s var(--ease);
+    transform: scale(0.94) translateY(8px);
+    will-change: opacity, transform;
+    transition: opacity 0.75s var(--spring), transform 0.75s var(--spring);
+    transform-origin: center center;
 }
 
 .stage-active {
     opacity: 1 !important;
     pointer-events: auto !important;
-    transform: scale(1) !important;
+    transform: scale(1) translateY(0) !important;
 }
 
 .stage-hidden {
     opacity: 0 !important;
     pointer-events: none !important;
-    transform: scale(1.1) !important;
+    transform: scale(1.06) translateY(-6px) !important;
 }
 
 /* Glassmorphism Card — Apple frosted glass */
@@ -2127,11 +2139,13 @@ p  { margin: 0; color: var(--text-2); }
     padding: 16px 24px;
     backdrop-filter: saturate(160%) blur(16px);
     -webkit-backdrop-filter: saturate(160%) blur(16px);
-    transition: border-color 0.35s var(--ease), transform 0.35s var(--ease), box-shadow 0.35s var(--ease), background 0.35s var(--ease);
+    transition: border-color 0.3s var(--spring), transform 0.3s var(--spring),
+                box-shadow 0.3s var(--spring), background 0.3s var(--spring);
     min-width: 96px;
     cursor: default;
-    animation: pillEntrance 0.6s var(--ease-out) both;
+    animation: pillEntrance 0.6s var(--spring) both;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    will-change: transform;
 }
 .stat-pill:nth-child(1) { animation-delay: 0.05s; }
 .stat-pill:nth-child(2) { animation-delay: 0.15s; }
@@ -2342,8 +2356,8 @@ p  { margin: 0; color: var(--text-2); }
    Tab Fade-In Animation
 ───────────────────────────────────────── */
 @keyframes tabFadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(14px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ─────────────────────────────────────────
@@ -2363,8 +2377,9 @@ p  { margin: 0; color: var(--text-2); }
 ───────────────────────────────────────── */
 .fade-in-up {
     opacity: 0;
-    transform: translateY(18px);
-    transition: opacity 0.5s var(--ease-out), transform 0.5s var(--ease-out);
+    transform: translateY(16px);
+    transition: opacity 0.55s var(--spring), transform 0.55s var(--spring);
+    will-change: opacity, transform;
 }
 .fade-in-up.visible {
     opacity: 1;
@@ -2590,3 +2605,121 @@ p  { margin: 0; color: var(--text-2); }
 }
 .profile-msg.success { color: var(--success); }
 .profile-msg.error   { color: var(--error); }
+
+
+/* ═══════════════════════════════════════════
+   Plotly: Transparent defaults & smooth fade-in
+   Prevents white-axes flash on first render
+   ═══════════════════════════════════════════ */
+
+/* Force Plotly SVG backgrounds transparent — kills white flash */
+.js-plotly-plot .bg            { fill: transparent !important; }
+.js-plotly-plot .main-svg      { background: transparent !important; }
+.js-plotly-plot .plot-container{ background: transparent !important; }
+
+/* Plot container fade-in — JS adds/removes .plot-loading class */
+.js-plotly-plot {
+    transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.js-plotly-plot.plot-loading {
+    opacity: 0 !important;
+}
+
+/* ═══════════════════════════════════════════
+   GPU Compositing — Prevent paint jank
+   ═══════════════════════════════════════════ */
+
+/* Sidebar and content area slide — GPU composited */
+.sidebar {
+    will-change: width, transform;
+    transform: translateZ(0);
+}
+.content-area {
+    will-change: margin-left;
+    transform: translateZ(0);
+}
+
+/* Nav link active indicator — GPU composited */
+.nav-link-custom {
+    will-change: background, color;
+}
+
+/* Theme switch button */
+.theme-switch-btn {
+    will-change: transform, box-shadow;
+}
+
+/* Login card glass entrance */
+.login-card-glass {
+    will-change: opacity, transform;
+}
+
+/* ═══════════════════════════════════════════
+   Smooth Login Card Entrance Animation
+   ═══════════════════════════════════════════ */
+@keyframes glassCardIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.97);
+        filter: blur(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+.login-stage.stage-active .login-card-glass {
+    animation: glassCardIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ═══════════════════════════════════════════
+   Pill & Card Entrance — Smoother keyframes
+   ═══════════════════════════════════════════ */
+@keyframes pillEntrance {
+    from { opacity: 0; transform: translateY(12px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes cardStaggerIn {
+    from { opacity: 0; transform: translateY(18px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ═══════════════════════════════════════════
+   Tab Content — Spring entrance
+   ═══════════════════════════════════════════ */
+.tab-content[style*="display: block"],
+.tab-content[style*="display:block"] {
+    animation: tabFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ═══════════════════════════════════════════
+   Progress Bar — Smoother fill animation
+   ═══════════════════════════════════════════ */
+.progress-bar-custom .progress-bar {
+    transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* ═══════════════════════════════════════════
+   Button active states — tactile Apple feel
+   ═══════════════════════════════════════════ */
+.btn-primary:active,
+.login-button:active,
+.btn-get-started:active {
+    transform: scale(0.97) !important;
+    transition: transform 0.1s cubic-bezier(0.36, 0, 0.66, -0.1) !important;
+}
+
+/* ═══════════════════════════════════════════
+   Scrollbar — Thinner, macOS-style
+   ═══════════════════════════════════════════ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 100px;
+    transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }

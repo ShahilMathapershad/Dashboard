@@ -1,284 +1,260 @@
-// Minimal interactions for premium dashboard
-// No gimmicky effects - just smooth, functional enhancements
+'use strict';
 
-document.addEventListener('DOMContentLoaded', function () {
-    // Handle Enter key for login form
+/**
+ * ZAR Dashboard — Interactions & Animations
+ *
+ * Philosophy: every visible state change is GPU-composited (opacity + transform only).
+ * Apple-calibrated timing: cubic-bezier(0.16, 1, 0.3, 1)  — expo-out, silky landing.
+ * Heavy UI logic runs here on the client; zero server round-trips for pure UI state.
+ */
+
+/* ─── Timing constants ─────────────────────────────────────────────────── */
+const SPRING  = 'cubic-bezier(0.16, 1, 0.3, 1)';   // Expo-out — snappy, smooth landing
+const SMOOTH  = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'; // Ease-out sine
+const MIN_RESIZE_MS = 180;
+
+document.addEventListener('DOMContentLoaded', () => {
+
+    /* ── Login: Enter key ───────────────────────────────────────────────── */
     const handleLoginEnterKey = () => {
-        const addEnterKeyListeners = () => {
-            const usernameInput = document.getElementById('username');
-            const passwordInput = document.getElementById('password');
-            const loginButton = document.getElementById('login-button');
-
-            if (usernameInput && passwordInput && loginButton) {
-                const handleEnter = (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        // Trigger login button click
-                        loginButton.click();
-                    }
-                };
-
-                // Remove existing listeners to avoid duplicates
-                usernameInput.removeEventListener('keydown', handleEnter);
-                passwordInput.removeEventListener('keydown', handleEnter);
-                
-                // Add new listeners
-                usernameInput.addEventListener('keydown', handleEnter);
-                passwordInput.addEventListener('keydown', handleEnter);
-            }
+        const bind = () => {
+            const user = document.getElementById('username');
+            const pass = document.getElementById('password');
+            const btn  = document.getElementById('login-button');
+            if (!user || !pass || !btn) return;
+            const onEnter = (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
+            // Replace listeners idempotently
+            user.replaceEventListener?.('keydown', onEnter)
+                ?? (user.removeEventListener('keydown', user._loginEnter),
+                   user.addEventListener('keydown', user._loginEnter = onEnter));
+            pass.replaceEventListener?.('keydown', onEnter)
+                ?? (pass.removeEventListener('keydown', pass._loginEnter),
+                   pass.addEventListener('keydown', pass._loginEnter = onEnter));
         };
-
-        // Initial check
-        addEnterKeyListeners();
-
-        // Watch for DOM changes (Dash is a SPA, elements may be added/removed)
-        const observer = new MutationObserver(() => {
-            addEnterKeyListeners();
-        });
-
-        observer.observe(document.body, { childList: true, subtree: true });
+        bind();
+        new MutationObserver(bind).observe(document.body, { childList: true, subtree: true });
     };
 
-    // Stagger fade-in for predictor chips when they appear
-    const observeChips = () => {
-        const observer = new MutationObserver(() => {
-            const chips = document.querySelectorAll('.predictor-checkbox-item');
-            chips.forEach((chip, i) => {
-                if (!chip.dataset.revealed) {
-                    chip.dataset.revealed = 'true';
-                    chip.style.opacity = '0';
-                    chip.style.transform = 'translateY(4px)';
-                    setTimeout(() => {
-                        chip.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
-                        chip.style.opacity = '1';
-                        chip.style.transform = 'translateY(0)';
-                    }, i * 30);
+    /* ── Plot: fade-in on first render — eliminates white-axes flash ────── */
+    const managePlotFadeIn = () => {
+        /**
+         * Strategy:
+         *  1. Mark every new .js-plotly-plot as .plot-loading (opacity: 0).
+         *  2. Attach a plotly_afterplot listener. When Plotly finishes drawing
+         *     and the figure has traces, remove .plot-loading → fade in.
+         *  3. Fallback: poll for 2 s in case the event never fires (cached figures).
+         */
+        function setup(plot) {
+            if (plot.dataset.fadeReady) return;
+            plot.dataset.fadeReady = 'true';
+            plot.classList.add('plot-loading');
+
+            const reveal = () => {
+                if (plot._fullData && plot._fullData.length > 0) {
+                    requestAnimationFrame(() => plot.classList.remove('plot-loading'));
+                    return true;
                 }
-            });
-        });
+                return false;
+            };
 
-        observer.observe(document.body, { childList: true, subtree: true });
-    };
+            // Plotly event
+            try { plot.on('plotly_afterplot', reveal); } catch (_) {}
 
-    const observeChartVisibility = () => {
-        let resizeInProgress = false;
-        let lastResizeTime = 0;
-        const MIN_RESIZE_INTERVAL = 200; // Minimum time between resizes
-
-        const resizePlot = () => {
-            if (resizeInProgress) return;
-            
-            const now = Date.now();
-            if (now - lastResizeTime < MIN_RESIZE_INTERVAL) return;
-            
-            resizeInProgress = true;
-            lastResizeTime = now;
-            
-            try {
-                const plots = document.querySelectorAll('.js-plotly-plot');
-                plots.forEach((plot) => {
-                    // Get the graph div (dcc.Graph component)
-                    const graphDiv = plot.closest('.dash-graph');
-                    if (!graphDiv) return;
-                    
-                    // Use the graph div's computed style height if available
-                    const graphStyle = getComputedStyle(graphDiv);
-                    const graphHeight = graphDiv.offsetHeight;
-                    const graphWidth = graphDiv.offsetWidth;
-                    
-                    if (graphHeight > 0 && graphWidth > 0) {
-                        // Use the container's actual dimensions
-                        plot.style.width = '100%';
-                        plot.style.height = '100%';
-                        
-                        // Update plotly layout to match container
-                        if (window.Plotly && typeof window.Plotly.relayout === 'function') {
-                            window.Plotly.relayout(plot, {
-                                height: graphHeight,
-                                width: graphWidth,
-                                autosize: true
-                            });
-                        }
-                    }
-                    
-                    // Always call resize to ensure proper rendering
-                    if (window.Plotly && typeof window.Plotly.Plots.resize === 'function') {
-                        window.Plotly.Plots.resize(plot);
-                    }
-                });
-            } finally {
-                resizeInProgress = false;
-            }
-        };
-
-        const checkAndResize = () => {
-            // Check for any visualization container or plotly plots
-            const containers = document.querySelectorAll('#visualization-container, .model-chart, .js-plotly-plot');
-            let hasVisibleContainer = false;
-            
-            containers.forEach(el => {
-                const container = el.closest('#visualization-container') || el;
-                const isVisible = container.offsetParent !== null && getComputedStyle(container).display !== 'none';
-                if (isVisible) {
-                    hasVisibleContainer = true;
-                }
-            });
-            
-            if (hasVisibleContainer) {
-                requestAnimationFrame(() => {
-                    setTimeout(resizePlot, 100);
-                });
-            }
-        };
-
-        // Debounced observer to prevent excessive calls
-        let observerTimeout;
-        const observer = new MutationObserver(() => {
-            clearTimeout(observerTimeout);
-            observerTimeout = setTimeout(checkAndResize, 50);
-        });
-
-        // More targeted observation - only watch for specific changes
-        observer.observe(document.body, { 
-            childList: true, 
-            subtree: true,
-            attributes: false  // Remove attribute watching to reduce frequency
-        });
-        
-        // Initial check on load
-        setTimeout(checkAndResize, 200);
-        
-        // Debounced window resize handler
-        let resizeTimeout;
-        window.addEventListener('resize', () => {
-            clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(resizePlot, 150);
-        });
-    };
-
-    // Scroll-based trendline drawing for landing page
-    const handleTrendlineScroll = () => {
-        const path = document.querySelector('.trendline-path');
-        if (path) {
-            const scrollY = window.scrollY;
-            const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-            const scrollPercent = Math.min(1, scrollY / maxScroll);
-            
-            // Only use scroll-based drawing if the user has actually scrolled
-            // Otherwise, let the CSS animation handle it or keep it at start
-            if (scrollY > 10) {
-                path.style.animation = 'none';
-                const drawLength = 2000 * scrollPercent;
-                path.style.strokeDashoffset = 2000 - drawLength;
-                path.style.opacity = 0.15 + (scrollPercent * 0.1);
-            }
+            // Fallback poll (clears itself once revealed or timeout)
+            let ticks = 0;
+            const poll = setInterval(() => {
+                if (reveal() || ++ticks > 20) clearInterval(poll);
+            }, 100);
         }
-    };
 
-    window.addEventListener('scroll', handleTrendlineScroll);
-    
-    // Mouse-aware parallax for particles
-    const handleParticleParallax = (e) => {
-        const particles = document.querySelectorAll('.particle-node');
-        const mouseX = e.clientX / window.innerWidth;
-        const mouseY = e.clientY / window.innerHeight;
-        
-        particles.forEach((p, i) => {
-            const speed = (i + 1) * 20;
-            const x = (mouseX - 0.5) * speed;
-            const y = (mouseY - 0.5) * speed;
-            // Combine with existing floating animation via CSS variable or direct transform
-            // For simplicity, we'll just use a subtle translate
-            p.style.margin = `${y}px 0 0 ${x}px`;
+        const scan = () => document.querySelectorAll('.js-plotly-plot').forEach(setup);
+        scan();
+        new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+
+        // Also re-reveal after every external plotlyResize (figure may have changed)
+        window.addEventListener('plotlyResize', () => {
+            document.querySelectorAll('.js-plotly-plot').forEach(plot => {
+                if (plot._fullData && plot._fullData.length > 0) {
+                    plot.classList.remove('plot-loading');
+                }
+            });
         });
     };
 
-    window.addEventListener('mousemove', handleParticleParallax);
+    /* ── Plotly resize — throttled, rAF-scheduled ───────────────────────── */
+    const setupPlotResize = () => {
+        let lastResize = 0;
+        let rafHandle = null;
 
-    // Inject background trendline SVG dynamically to avoid Dash 4.0.0 limitations with html.Svg
-    const observeTrendline = () => {
-        const injectSVG = () => {
-            const container = document.getElementById('bg-trendline-container');
-            if (container && !container.dataset.injected) {
-                container.dataset.injected = 'true';
-                container.innerHTML = `
-                    <svg viewBox="0 0 1200 500" preserveAspectRatio="none" style="width: 100%; height: 100%; pointer-events: none;">
-                        <defs>
-                            <linearGradient id="tl-grad1" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" style="stop-color:#5b8def;stop-opacity:0"/>
-                                <stop offset="40%" style="stop-color:#5b8def;stop-opacity:1"/>
-                                <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:0.6"/>
-                            </linearGradient>
-                            <linearGradient id="tl-grad2" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:0"/>
-                                <stop offset="50%" style="stop-color:#7c3aed;stop-opacity:0.7"/>
-                                <stop offset="100%" style="stop-color:#5b8def;stop-opacity:0"/>
-                            </linearGradient>
-                        </defs>
-                        <!-- Primary trend line -->
-                        <path
-                            class="trendline-path"
-                            d="M0,380 C120,360 200,310 320,270 S500,240 620,260 S820,180 950,140 S1100,110 1200,90"
-                            fill="none"
-                            stroke="url(#tl-grad1)"
-                            stroke-width="2"
-                            stroke-linecap="round">
-                        </path>
-                        <!-- Secondary decorative line -->
-                        <path
-                            d="M0,420 C150,400 280,370 400,340 S560,310 680,330 S880,270 1000,220 S1150,190 1200,170"
-                            fill="none"
-                            stroke="url(#tl-grad2)"
-                            stroke-width="1.5"
-                            stroke-linecap="round"
-                            stroke-dasharray="6 4"
-                            opacity="0.5"
-                            style="animation: drawPath 10s ease-in-out 2s infinite">
-                        </path>
-                        <!-- Subtle grid lines -->
-                        <line x1="0" y1="150" x2="1200" y2="150" stroke="#5b8def" stroke-width="0.5" opacity="0.15"/>
-                        <line x1="0" y1="300" x2="1200" y2="300" stroke="#5b8def" stroke-width="0.5" opacity="0.1"/>
-                    </svg>
-                `;
+        const doResize = () => {
+            rafHandle = null;
+            const now = Date.now();
+            if (now - lastResize < MIN_RESIZE_MS) return;
+            lastResize = now;
+            if (!window.Plotly) return;
+            document.querySelectorAll('.js-plotly-plot').forEach(plot => {
+                try { window.Plotly.Plots.resize(plot); } catch (_) {}
+            });
+        };
+
+        const schedule = (delay = 0) => {
+            if (delay) {
+                setTimeout(() => {
+                    if (!rafHandle) rafHandle = requestAnimationFrame(doResize);
+                }, delay);
+            } else {
+                if (!rafHandle) rafHandle = requestAnimationFrame(doResize);
             }
         };
 
-        // Initial check
-        injectSVG();
+        // Window resize — debounced
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => schedule(), 120);
+        }, { passive: true });
 
-        // Watch for DOM changes (Dash is a SPA)
-        const observer = new MutationObserver(() => {
-            injectSVG();
+        // Custom event from Dash callbacks
+        window.addEventListener('plotlyResize', () => schedule(50));
+
+        // Tab navigation clicks
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('#nav-data, #nav-model, #nav-scenario')) {
+                schedule(300);  // After tab transition
+            }
+            if (e.target.closest('#toggle-table-btn')) {
+                schedule(80);
+            }
         });
 
-        observer.observe(document.body, { childList: true, subtree: true });
+        // Initial render
+        schedule(300);
     };
 
-    // Force hide slider marks (white boxes)
+    /* ── Predictor chips: staggered spring entrance ─────────────────────── */
+    const observeChips = () => {
+        new MutationObserver(() => {
+            document.querySelectorAll('.predictor-checkbox-item:not([data-revealed])').forEach((chip, i) => {
+                chip.dataset.revealed = 'true';
+                chip.style.opacity = '0';
+                chip.style.transform = 'translateY(8px) scale(0.96)';
+                chip.style.willChange = 'opacity, transform';
+                setTimeout(() => {
+                    chip.style.transition = `opacity 0.25s ${SPRING}, transform 0.25s ${SPRING}`;
+                    chip.style.opacity = '1';
+                    chip.style.transform = 'translateY(0) scale(1)';
+                    setTimeout(() => { chip.style.willChange = ''; }, 400);
+                }, i * 30);
+            });
+        }).observe(document.body, { childList: true, subtree: true });
+    };
+
+    /* ── Landing page: SVG trendline injection ──────────────────────────── */
+    const observeTrendline = () => {
+        const inject = () => {
+            const container = document.getElementById('bg-trendline-container');
+            if (!container || container.dataset.injected) return;
+            container.dataset.injected = 'true';
+            container.innerHTML = `
+                <svg viewBox="0 0 1200 500" preserveAspectRatio="none"
+                     style="width:100%;height:100%;pointer-events:none;">
+                    <defs>
+                        <linearGradient id="tl-grad1" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%"   style="stop-color:#5b8def;stop-opacity:0"/>
+                            <stop offset="40%"  style="stop-color:#5b8def;stop-opacity:1"/>
+                            <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:0.6"/>
+                        </linearGradient>
+                        <linearGradient id="tl-grad2" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%"   style="stop-color:#7c3aed;stop-opacity:0"/>
+                            <stop offset="50%"  style="stop-color:#7c3aed;stop-opacity:0.7"/>
+                            <stop offset="100%" style="stop-color:#5b8def;stop-opacity:0"/>
+                        </linearGradient>
+                    </defs>
+                    <path class="trendline-path"
+                          d="M0,380 C120,360 200,310 320,270 S500,240 620,260 S820,180 950,140 S1100,110 1200,90"
+                          fill="none" stroke="url(#tl-grad1)" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M0,420 C150,400 280,370 400,340 S560,310 680,330 S880,270 1000,220 S1150,190 1200,170"
+                          fill="none" stroke="url(#tl-grad2)" stroke-width="1.5" stroke-linecap="round"
+                          stroke-dasharray="6 4" opacity="0.45"
+                          style="animation:drawPath 10s ease-in-out 2s infinite"/>
+                    <line x1="0" y1="150" x2="1200" y2="150" stroke="#5b8def" stroke-width="0.5" opacity="0.10"/>
+                    <line x1="0" y1="300" x2="1200" y2="300" stroke="#5b8def" stroke-width="0.5" opacity="0.06"/>
+                </svg>`;
+        };
+        inject();
+        new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
+    };
+
+    /* ── Landing: scroll trendline + mouse parallax ─────────────────────── */
+    window.addEventListener('scroll', () => {
+        const path = document.querySelector('.trendline-path');
+        if (!path) return;
+        const scrollY = window.scrollY;
+        if (scrollY > 10) {
+            const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+            const pct = Math.min(1, scrollY / maxScroll);
+            path.style.animation = 'none';
+            path.style.strokeDashoffset = 2000 - (2000 * pct);
+            path.style.opacity = String(0.15 + pct * 0.08);
+        }
+    }, { passive: true });
+
+    window.addEventListener('mousemove', (e) => {
+        const particles = document.querySelectorAll('.particle-node');
+        if (!particles.length) return;
+        const mx = e.clientX / window.innerWidth - 0.5;
+        const my = e.clientY / window.innerHeight - 0.5;
+        particles.forEach((p, i) => {
+            const s = (i + 1) * 16;
+            p.style.margin = `${my * s}px 0 0 ${mx * s}px`;
+        });
+    }, { passive: true });
+
+    /* ── Stage: spring entrance on page load ────────────────────────────── */
+    const initStageEntrance = () => {
+        // Only run once on first visit — if Dash SPA navigates back, skip
+        const landing = document.getElementById('landing-stage');
+        if (!landing || landing.dataset.entered) return;
+
+        // Only animate if the stage is actually visible (has stage-active or no class yet)
+        const isActive = landing.classList.contains('stage-active') ||
+                         (!landing.classList.contains('stage-hidden'));
+        if (!isActive) return;
+
+        landing.dataset.entered = 'true';
+        landing.style.opacity = '0';
+        landing.style.transform = 'translateY(16px)';
+        landing.style.willChange = 'opacity, transform';
+
+        // Double-rAF ensures paint is committed before transition starts
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                landing.style.transition = `opacity 0.8s ${SPRING}, transform 0.8s ${SPRING}`;
+                landing.style.opacity = '1';
+                landing.style.transform = 'translateY(0)';
+                setTimeout(() => { landing.style.willChange = ''; }, 1000);
+            });
+        });
+    };
+
+    /* ── Slider marks: force-hide white boxes ───────────────────────────── */
     const hideSliderMarks = () => {
-        const marks = document.querySelectorAll('.rc-slider-mark, .rc-slider-dot, .rc-slider-tooltip, .rc-slider-step');
-        marks.forEach(mark => {
-            mark.style.setProperty('display', 'none', 'important');
-            mark.style.setProperty('visibility', 'hidden', 'important');
-            mark.style.setProperty('height', '0', 'important');
-            mark.style.setProperty('width', '0', 'important');
-            mark.style.setProperty('opacity', '0', 'important');
-            mark.style.setProperty('pointer-events', 'none', 'important');
-        });
+        const kill = (el) => {
+            el.style.setProperty('display',        'none',   'important');
+            el.style.setProperty('visibility',     'hidden', 'important');
+            el.style.setProperty('height',         '0',      'important');
+            el.style.setProperty('width',          '0',      'important');
+            el.style.setProperty('opacity',        '0',      'important');
+            el.style.setProperty('pointer-events', 'none',   'important');
+        };
+        const scan = () => document.querySelectorAll(
+            '.rc-slider-mark, .rc-slider-dot, .rc-slider-tooltip, .rc-slider-step'
+        ).forEach(kill);
+        scan();
+        new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
     };
 
-    // Observer to continuously hide slider marks
-    const observeSliders = () => {
-        hideSliderMarks();
-        
-        const observer = new MutationObserver(() => {
-            hideSliderMarks();
-        });
-
-        observer.observe(document.body, { childList: true, subtree: true });
-    };
-
-    // Scroll-triggered fade-in animations using IntersectionObserver
+    /* ── Scroll-triggered fade-in (IntersectionObserver) ───────────────── */
     const observeScrollAnimations = () => {
         const io = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
@@ -287,53 +263,22 @@ document.addEventListener('DOMContentLoaded', function () {
                     io.unobserve(entry.target);
                 }
             });
-        }, { threshold: 0.08, rootMargin: '0px 0px -30px 0px' });
+        }, { threshold: 0.06, rootMargin: '0px 0px -24px 0px' });
 
-        const attachObserver = () => {
-            document.querySelectorAll('.fade-in-up:not(.visible)').forEach(el => {
-                io.observe(el);
-            });
-        };
-
-        attachObserver();
-
-        const domWatcher = new MutationObserver(() => {
-            attachObserver();
-        });
-        domWatcher.observe(document.body, { childList: true, subtree: true });
+        const attach = () =>
+            document.querySelectorAll('.fade-in-up:not(.visible)').forEach(el => io.observe(el));
+        attach();
+        new MutationObserver(attach).observe(document.body, { childList: true, subtree: true });
     };
 
+    /* ── Init ────────────────────────────────────────────────────────────── */
     handleLoginEnterKey();
+    managePlotFadeIn();
+    setupPlotResize();
     observeChips();
-    observeChartVisibility();
     observeTrendline();
-    observeSliders();
+    hideSliderMarks();
     observeScrollAnimations();
-    
-    // Listen for custom plotly resize events from Dash callbacks
-    window.addEventListener('plotlyResize', () => {
-        const plots = document.querySelectorAll('.js-plotly-plot');
-        plots.forEach((plot) => {
-            if (window.Plotly && typeof window.Plotly.Plots.resize === 'function') {
-                window.Plotly.Plots.resize(plot);
-            }
-        });
-    });
-    
-    // Optimized navigation resize handler
-    document.addEventListener('click', (e) => {
-        if (e.target.closest('#nav-data') || e.target.closest('#nav-model') || e.target.closest('#nav-scenario')) {
-            // Use a single delayed resize instead of multiple calls
-            setTimeout(() => {
-                window.dispatchEvent(new Event('plotlyResize'));
-            }, 300); // Single delay for tab transition
-        }
-        
-        // Also trigger resize when toggle table button is clicked
-        if (e.target.closest('#toggle-table-btn')) {
-            setTimeout(() => {
-                window.dispatchEvent(new Event('plotlyResize'));
-            }, 100); // Shorter delay for immediate feedback
-        }
-    });
+    // Deferred — let Dash render the landing stage first
+    setTimeout(initStageEntrance, 50);
 });
