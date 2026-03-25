@@ -50,7 +50,7 @@ app = Dash(
 
 app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='user-session', storage_type='session'),
-    dcc.Store(id='theme-store', storage_type='local', data='dark'),
+    dcc.Store(id='theme-store', storage_type='local'),
     
     # Global stores for prerendering (moved from dashboard.py)
     dcc.Store(id='dashboard-tab', data='data', storage_type='session'),
@@ -71,50 +71,42 @@ app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='selected-compare-vars', data=[], storage_type='session'),
 
     dash.page_container,
-    # Theme button — rendered here for global scope, positioned by sidebar via CSS
-    html.Button(
-        "🌙",
-        id='theme-switch-button',
-        className='theme-switch-btn',
-        n_clicks=0
-    )
 ])
 
 
-@callback(
-    Output('theme-main-container', 'className'),
-    Output('theme-switch-button', 'children'),
-    Output('theme-store', 'data'),
-    Input('theme-switch-button', 'n_clicks'),
-    State('theme-store', 'data')
-)
-def update_theme(n_clicks, stored_theme):
-    ctx = callback_context
-    theme = stored_theme or 'dark'
-    
-    if ctx.triggered:
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger_id == 'theme-switch-button' and n_clicks > 0:
-            theme = 'light' if stored_theme == 'dark' else 'dark'
-
-    icon = "☀️" if theme == 'light' else "🌙"
-    class_name = 'light-theme' if theme == 'light' else ''
-    return class_name, icon, theme
-
-
-# Clientside callback to sync theme to body class for portals (like dropdown menus)
+# Clientside callback: detect system color scheme and apply theme class
 app.clientside_callback(
     """
-    function(theme) {
-        if (theme === 'light') {
-            document.body.classList.add('light-theme');
-        } else {
-            document.body.classList.remove('light-theme');
+    function(themeStoreData) {
+        function applyTheme(theme) {
+            var container = document.getElementById('theme-main-container');
+            if (theme === 'light') {
+                document.body.classList.add('light-theme');
+                if (container) container.className = 'light-theme';
+            } else {
+                document.body.classList.remove('light-theme');
+                if (container) container.className = '';
+            }
         }
-        return window.dash_clientside.no_update;
+
+        // Detect system preference
+        var mq = window.matchMedia('(prefers-color-scheme: light)');
+        var theme = mq.matches ? 'light' : 'dark';
+        applyTheme(theme);
+
+        // Listen for future changes
+        if (!window._themeListenerAttached) {
+            window._themeListenerAttached = true;
+            mq.addEventListener('change', function(e) {
+                var t = e.matches ? 'light' : 'dark';
+                applyTheme(t);
+            });
+        }
+
+        return theme;
     }
     """,
-    Output('theme-switch-button', 'id'), # Dummy output
+    Output('theme-store', 'data'),
     Input('theme-store', 'data'),
 )
 

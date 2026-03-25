@@ -559,39 +559,6 @@ p  { margin: 0; color: var(--text-2); }
     width: 100%;
 }
 
-/* ═══════════════════════════════════════════
-   Theme Toggle — positioned inside sidebar
-   ═══════════════════════════════════════════ */
-.theme-switch-btn {
-    position: fixed;
-    bottom: 120px;
-    left: 16px;
-    z-index: 101;
-    width: calc(var(--sidebar-w) - 32px);
-    height: 38px;
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    color: var(--text-2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    cursor: pointer;
-    transition: all var(--dur) var(--ease);
-    font-size: 0.9rem;
-    outline: none;
-}
-.theme-switch-btn:hover {
-    background: var(--bg-overlay-hover);
-    color: var(--text-1);
-    border-color: var(--accent);
-}
-/* When sidebar is collapsed, shrink to icon-only */
-.sidebar-collapsed .theme-switch-btn {
-    width: calc(var(--sidebar-w-collapsed) - 16px);
-    left: 8px;
-}
 
 /* ═══════════════════════════════════════════
    Sidebar
@@ -1561,7 +1528,6 @@ p  { margin: 0; color: var(--text-2); }
         padding: 20px 16px;
     }
     .sidebar-toggle { display: none !important; }
-    .theme-switch-btn { display: none !important; }
 }
 
 @media (max-width: 768px) {
@@ -1635,7 +1601,7 @@ p  { margin: 0; color: var(--text-2); }
 }
 
 @media print {
-    .theme-switch-btn, .sidebar, .sidebar-toggle { display: none; }
+    .sidebar, .sidebar-toggle { display: none; }
     .content-area { margin-left: 0 !important; }
 }
 
@@ -2704,11 +2670,6 @@ p  { margin: 0; color: var(--text-2); }
 /* Nav link active indicator — GPU composited */
 .nav-link-custom {
     will-change: background, color;
-}
-
-/* Theme switch button */
-.theme-switch-btn {
-    will-change: background, border-color;
 }
 
 /* Login card glass entrance */

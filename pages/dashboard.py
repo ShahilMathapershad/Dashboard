@@ -187,7 +187,7 @@ def data_tab_content(existing_data=None):
                 # Compare mode checkboxes (max 3 variables)
                 html.Div(id='compare-checkboxes-container', className='predictor-chips', style={'display': 'none'}),
                 html.Div(id='compare-hint', className='compare-hint', style={'display': 'none'}, children=[
-                    html.Span('Select 2 variables to compare as lines, or 3 for a 3D surface.', className='compare-hint-text'),
+                    html.Span('Select 2 variables for a line plot (X vs Y), or 3 for a 3D surface.', className='compare-hint-text'),
                 ]),
             ]),
 
@@ -1193,34 +1193,19 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             )
             return fig
 
-        # ── 2D: overlay both variables as lines over time ──
-        from plotly.subplots import make_subplots
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-        x_color = color_palette[0]
-        y_color = color_palette[2]
-
-        # Correlation annotation
-        pair = df[[compare_x, compare_y]].dropna()
+        # ── 2D: line plot — X = predictor 1, Y = predictor 2 ──
+        pair = df[[compare_x, compare_y]].dropna().sort_values(compare_x)
         corr_val = pair[compare_x].corr(pair[compare_y]) if len(pair) >= 2 else None
 
+        fig = go.Figure()
         fig.add_trace(
             go.Scatter(
-                x=df['Date'], y=df[compare_x],
-                name=x_label,
-                line=dict(color=x_color, width=2.5, shape='spline'),
+                x=pair[compare_x], y=pair[compare_y],
                 mode='lines',
-                hovertemplate=f'<b>{x_label}</b>: %{{y:.4f}}<extra></extra>',
-            ), secondary_y=False,
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df['Date'], y=df[compare_y],
-                name=y_label,
-                line=dict(color=y_color, width=2.5, shape='spline'),
-                mode='lines',
-                hovertemplate=f'<b>{y_label}</b>: %{{y:.4f}}<extra></extra>',
-            ), secondary_y=True,
+                line=dict(color=color_palette[0], width=2.5, shape='spline'),
+                hovertemplate=(f'<b>{x_label}</b>: %{{x:.4f}}<br>'
+                               f'<b>{y_label}</b>: %{{y:.4f}}<extra></extra>'),
+            )
         )
 
         if corr_val is not None:
@@ -1234,57 +1219,27 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
 
         fig.update_layout(
             **base_layout,
-            margin=dict(l=50, r=50, t=30, b=80),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-                font=dict(size=11, weight=500, color=text_muted),
-                bgcolor='rgba(0,0,0,0)', borderwidth=0,
-                itemsizing='constant', itemwidth=30,
-            ),
-            hovermode="x unified",
+            margin=dict(l=60, r=30, t=30, b=60),
+            showlegend=False,
+            hovermode="closest",
             hoverlabel=dict(
                 bgcolor='rgba(16,16,16,0.96)' if is_dark else 'rgba(255,255,255,0.96)',
                 font_size=12, font_family="Inter", font_color=text_color,
                 bordercolor=line_color, namelength=-1,
             ),
             xaxis=dict(
-                showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor=line_color,
-                tickfont=dict(size=10, color=text_muted), title=None,
-                showspikes=True, spikemode='across', spikesnap='cursor',
-                spikedash='dot', spikethickness=1, spikecolor=spike_color,
+                title=dict(text=x_label, font=dict(size=11, color=text_muted)),
+                showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+                zeroline=False, showline=True, linewidth=1, linecolor=line_color,
+                tickfont=dict(size=10, color=text_muted),
+            ),
+            yaxis=dict(
+                title=dict(text=y_label, font=dict(size=11, color=text_muted)),
+                showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+                zeroline=False, showline=True, linewidth=1, linecolor=line_color,
+                tickfont=dict(size=10, color=text_muted),
             ),
             dragmode='zoom',
-        )
-        fig.update_yaxes(
-            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
-            zeroline=False, showline=False,
-            tickfont=dict(size=10, color=text_muted),
-            title=dict(text=x_label, font=dict(size=11, color=x_color, weight=500)),
-            showspikes=False, secondary_y=False,
-        )
-        fig.update_yaxes(
-            showgrid=False, zeroline=False, showline=False,
-            tickfont=dict(size=10, color=text_muted),
-            title=dict(text=y_label, font=dict(size=11, color=y_color, weight=500)),
-            showspikes=False, secondary_y=True,
-        )
-
-        # Range selector
-        fig.update_xaxes(
-            rangeselector=dict(
-                buttons=[
-                    dict(count=3, label="3M", step="month", stepmode="backward"),
-                    dict(count=6, label="6M", step="month", stepmode="backward"),
-                    dict(count=1, label="1Y", step="year", stepmode="backward"),
-                    dict(count=2, label="2Y", step="year", stepmode="backward"),
-                    dict(step="all", label="All"),
-                ],
-                bgcolor='rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.03)',
-                activecolor='#5b8def' if is_dark else '#4f7df3',
-                font=dict(color=text_muted, size=10),
-                x=1, y=1.12, xanchor='right', yanchor='top',
-            ),
-            rangeslider=dict(visible=False),
         )
         return fig
 
@@ -2712,7 +2667,7 @@ def _build_plot_context(data, selected_predictors, options, plot_mode=None, comp
     if plot_mode == 'compare' and compare_vars:
         cmp_names = [label_map.get(v, v) for v in compare_vars]
         if len(compare_vars) == 2:
-            lines.append(f"Compare mode: 2D line comparison of {cmp_names[0]} vs {cmp_names[1]} over time")
+            lines.append(f"Compare mode: 2D line plot — X={cmp_names[0]}, Y={cmp_names[1]}")
         elif len(compare_vars) >= 3:
             lines.append(f"Compare mode: 3D surface — X={cmp_names[0]}, Y={cmp_names[1]}, Z(surface)={cmp_names[2]}")
     if selected_predictors:
@@ -2806,7 +2761,7 @@ def _build_plot_context(data, selected_predictors, options, plot_mode=None, comp
         if len(pair) >= 2:
             r = pair[cx].corr(pair[cy])
             lines.append(f"Correlation: r={r:.3f}, R²={r**2:.3f}")
-            lines.append(f"These are plotted as overlaid time series lines with dual Y-axes.")
+            lines.append(f"These are plotted as a line plot with {cx_l} on X-axis and {cy_l} on Y-axis.")
 
     return "\n".join(lines)
 
