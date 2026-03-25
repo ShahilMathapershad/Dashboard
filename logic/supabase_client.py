@@ -16,8 +16,8 @@ def get_supabase():
 
     load_dotenv()
     
-    url: str = os.environ.get("SUPABASE_URL", "https://nugwzktxrbpaynkwussb.supabase.co")
-    key: str = os.environ.get("SUPABASE_KEY", os.environ.get("KEY", "sb_secret_8swIxMG-TASuT3XT4i3zGA_kIpOuiHk"))
+    url: str = os.environ.get("SUPABASE_URL")
+    key: str = os.environ.get("SUPABASE_KEY")
 
     if not url or not key:
         print("--- Warning: SUPABASE_URL or SUPABASE_KEY not found ---")

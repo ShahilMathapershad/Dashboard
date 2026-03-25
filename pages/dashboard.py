@@ -1,3 +1,4 @@
+import os
 import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -164,10 +165,16 @@ def data_tab_content(existing_data=None):
 
         # Visualisation Section
         html.Div(id='visualization-container', className='viz-container', style=viz_style, children=[
-            # Predictor Selector Bar
+            # Variable Selector Bar
             html.Div(className='predictor-bar', children=[
                 html.Div(className='predictor-bar-header', children=[
-                    html.Span('Predictors', className='predictor-bar-title'),
+                    html.Span('Variables', className='predictor-bar-title'),
+                    # Plot mode segmented control
+                    html.Div(className='plot-mode-toggle', children=[
+                        html.Button('Time Series', id='mode-timeseries', className='plot-mode-btn plot-mode-active', n_clicks=0),
+                        html.Button('Compare', id='mode-compare', className='plot-mode-btn', n_clicks=0),
+                        html.Button('Correlation', id='mode-correlation', className='plot-mode-btn', n_clicks=0),
+                    ]),
                     html.Button(
                         id='toggle-table-btn',
                         className='btn-ghost',
@@ -175,7 +182,13 @@ def data_tab_content(existing_data=None):
                         n_clicks=0
                     )
                 ]),
+                # Variable checkboxes (Time Series mode)
                 html.Div(id='predictor-checkboxes-container', className='predictor-chips'),
+                # Compare mode checkboxes (max 3 variables)
+                html.Div(id='compare-checkboxes-container', className='predictor-chips', style={'display': 'none'}),
+                html.Div(id='compare-hint', className='compare-hint', style={'display': 'none'}, children=[
+                    html.Span('Select 2 variables to compare as lines, or 3 for a 3D surface.', className='compare-hint-text'),
+                ]),
             ]),
 
             # Hero Chart
@@ -215,7 +228,7 @@ def data_tab_content(existing_data=None):
             ]),
             html.Div(id='chat-messages', className='chat-messages', children=[
                 html.Div(className='chat-message chat-message-ai', children=[
-                    html.Div("Ask me about the data on the chart — trends, predictors, ZAR/USD dynamics, or economics.",
+                    html.Div("Ask me about the data on the chart — trends, variables, ZAR/USD dynamics, or economics.",
                              className='chat-bubble chat-bubble-ai')
                 ])
             ]),
@@ -239,6 +252,8 @@ def data_tab_content(existing_data=None):
             className='chat-fab',
             n_clicks=0,
         ),
+        # Hidden dummy for clientside loading callback
+        html.Div(id='chat-loading-trigger', style={'display': 'none'}),
     ])
 
 
@@ -654,16 +669,19 @@ def _generate_data_table(df_all):
     df_pct = pd.DataFrame(pct_change_data)
     df_pct = df_pct.sort_values('Date', ascending=False).head(10)
 
-    # Build table
-    predictors = [c for c in df_pct.columns if c not in ['Date', 'ZAR_USD']]
+    # Build table — all variables treated equally, ZAR/USD first
+    all_vars = [c for c in df_pct.columns if c != 'Date']
+    if 'ZAR_USD' in all_vars:
+        all_vars.remove('ZAR_USD')
+        all_vars.insert(0, 'ZAR_USD')
+
     user_friendly_columns = ['Date']
-    for pred in predictors:
-        friendly_name = SERIES_CONFIG.get(pred, {}).get('label', pred)
+    for v in all_vars:
+        friendly_name = 'ZAR/USD' if v == 'ZAR_USD' else SERIES_CONFIG.get(v, {}).get('label', v)
         if len(friendly_name) > 25:
             friendly_name = friendly_name.replace('(', '\n(').replace(' for ', '\n')
             friendly_name = '\n'.join([line.strip() for line in friendly_name.split('\n') if line.strip()])
         user_friendly_columns.append(friendly_name)
-    user_friendly_columns.append('ZAR/USD Effect')
 
     header = html.Thead(html.Tr(
         [html.Th(col, style={'textAlign': 'center', 'whiteSpace': 'pre-line', 'fontSize': '0.75rem'}) for col in
@@ -671,21 +689,18 @@ def _generate_data_table(df_all):
     body_rows = []
     for _, row in df_pct.iterrows():
         tds = [html.Td(row['Date'], style={'fontWeight': '500'})]
-        for col in predictors:
-            val = row[col]
+        for col in all_vars:
+            val = row.get(col)
             if pd.isna(val):
                 tds.append(html.Td('-', style={'textAlign': 'center'}))
             else:
-                color = '#10B981' if val > 0 else '#EF4444' if val < 0 else '#6b6b6b'
-                tds.append(html.Td(f"{val:+.2f}%", style={'color': color, 'fontWeight': '600', 'textAlign': 'center'}))
-
-        zar_val = row.get('ZAR_USD')
-        if pd.isna(zar_val):
-            tds.append(html.Td('-', style={'textAlign': 'center'}))
-        else:
-            color = '#EF4444' if zar_val > 0 else '#10B981' if zar_val < 0 else '#6b6b6b'
-            tds.append(html.Td(f"{zar_val:+.2f}%", style={'color': color, 'fontWeight': '700', 'textAlign': 'center',
-                                                          'fontSize': '1.05em'}))
+                if col == 'ZAR_USD':
+                    color = '#EF4444' if val > 0 else '#10B981' if val < 0 else '#6b6b6b'
+                    tds.append(html.Td(f"{val:+.2f}%", style={'color': color, 'fontWeight': '700', 'textAlign': 'center',
+                                                              'fontSize': '1.05em'}))
+                else:
+                    color = '#10B981' if val > 0 else '#EF4444' if val < 0 else '#6b6b6b'
+                    tds.append(html.Td(f"{val:+.2f}%", style={'color': color, 'fontWeight': '600', 'textAlign': 'center'}))
         body_rows.append(html.Tr(tds))
 
     return html.Table(className='custom-table', children=[header, html.Tbody(body_rows)])
@@ -799,16 +814,20 @@ def fetch_data(trigger_value, existing_data, existing_options, existing_selected
             numeric_cols = df_all.select_dtypes(include='number').columns
             df_all[numeric_cols] = df_all[numeric_cols].round(6)
 
-            # Get predictors (all columns except Date and ZAR_USD)
-            predictors = [c for c in df_all.columns if c not in ['Date', 'ZAR_USD']]
+            # Get all variables (all columns except Date), ZAR/USD first
+            all_vars = [c for c in df_all.columns if c != 'Date']
+            # Put ZAR_USD first if present
+            if 'ZAR_USD' in all_vars:
+                all_vars.remove('ZAR_USD')
+                all_vars.insert(0, 'ZAR_USD')
 
             # Use labels from SERIES_CONFIG for the options
             dropdown_options = [
-                {'label': SERIES_CONFIG.get(p, {}).get('label', p), 'value': p}
-                for p in predictors
+                {'label': SERIES_CONFIG.get(p, {}).get('label', p) if p != 'ZAR_USD' else 'ZAR/USD Exchange Rate', 'value': p}
+                for p in all_vars
             ]
-            # Default to first 1 predictor selected
-            default_predictors = predictors[:1] if len(predictors) >= 1 else predictors
+            # Default: ZAR_USD + first predictor selected
+            default_predictors = ['ZAR_USD'] + all_vars[1:2] if len(all_vars) >= 2 else all_vars[:1]
 
             return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data
         except Exception as e:
@@ -828,7 +847,7 @@ def render_predictor_checkboxes(options, selected_predictors, active_tab):
         return dash.no_update
 
     if not options:
-        return html.Div('No predictors available', style={'color': 'var(--text-secondary)'})
+        return html.Div('No variables available', style={'color': 'var(--text-secondary)'})
 
     selected_set = set(selected_predictors or [])
     checkboxes = []
@@ -891,175 +910,506 @@ def toggle_data_table(n_clicks, current_style):
         return {'display': 'none'}, 'Show Table'
 
 
+# ── Plot mode switching ──
+@callback(
+    Output('plot-mode', 'data'),
+    Output('mode-timeseries', 'className'),
+    Output('mode-compare', 'className'),
+    Output('mode-correlation', 'className'),
+    Output('predictor-checkboxes-container', 'style'),
+    Output('compare-checkboxes-container', 'style'),
+    Output('compare-hint', 'style'),
+    Input('mode-timeseries', 'n_clicks'),
+    Input('mode-compare', 'n_clicks'),
+    Input('mode-correlation', 'n_clicks'),
+    prevent_initial_call=True
+)
+def switch_plot_mode(ts_clicks, cmp_clicks, co_clicks):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return (dash.no_update,) * 7
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    base = 'plot-mode-btn'
+    active = 'plot-mode-btn plot-mode-active'
+    hide = {'display': 'none'}
+
+    if trigger == 'mode-compare':
+        return 'compare', base, active, base, hide, {}, {}
+    elif trigger == 'mode-correlation':
+        return 'correlation', base, base, active, hide, hide, hide
+    else:
+        return 'timeseries', active, base, base, {}, hide, hide
+
+
+# Render compare checkboxes (same chip style, max 3, grey out when full)
+@callback(
+    Output('compare-checkboxes-container', 'children'),
+    Input('predictor-dropdown-options-store', 'data'),
+    Input('selected-compare-vars', 'data'),
+    Input('dashboard-tab', 'data'),
+)
+def render_compare_checkboxes(options, selected_compare, active_tab):
+    if active_tab != 'data' or not options:
+        return dash.no_update
+
+    selected_compare = selected_compare or []
+    selected_set = set(selected_compare)
+    at_max = len(selected_set) >= 3
+    checkboxes = []
+
+    for option in options:
+        is_checked = option['value'] in selected_set
+        disabled = at_max and not is_checked
+        item_class = 'predictor-checkbox-item'
+        if disabled:
+            item_class += ' chip-disabled'
+
+        checkboxes.append(
+            html.Div(
+                className=item_class,
+                children=[
+                    dcc.Checklist(
+                        id={'type': 'compare-checkbox', 'index': option['value']},
+                        options=[{'label': option['label'], 'value': option['value'],
+                                  'disabled': disabled}],
+                        value=[option['value']] if is_checked else [],
+                        className='custom-checklist',
+                        labelStyle={'display': 'flex', 'alignItems': 'center', 'cursor': 'pointer' if not disabled else 'not-allowed'}
+                    )
+                ]
+            )
+        )
+
+    return checkboxes
+
+
+# Update selected-compare-vars from compare checkboxes
+@callback(
+    Output('selected-compare-vars', 'data'),
+    Input({'type': 'compare-checkbox', 'index': dash.ALL}, 'value'),
+    prevent_initial_call=True
+)
+def update_selected_compare(checkbox_values):
+    if not checkbox_values:
+        return dash.no_update
+
+    selected = []
+    ctx = dash.callback_context
+    for i, values in enumerate(checkbox_values):
+        if values:
+            trigger_id = ctx.inputs_list[0][i]['id']
+            selected.append(trigger_id['index'])
+
+    return selected[:3]
+
+
+# Set default compare selection when data first loads
+@callback(
+    Output('selected-compare-vars', 'data', allow_duplicate=True),
+    Input('predictor-dropdown-options-store', 'data'),
+    State('selected-compare-vars', 'data'),
+    prevent_initial_call='initial_duplicate'
+)
+def init_compare_defaults(options, existing):
+    if existing:
+        return dash.no_update
+    if not options:
+        return []
+    # Default: ZAR_USD + first other variable
+    defaults = ['ZAR_USD']
+    for o in options:
+        if o['value'] != 'ZAR_USD':
+            defaults.append(o['value'])
+            break
+    return defaults
+
+
 @callback(
     Output('zar-graph', 'figure'),
     Input('selected-predictors', 'data'),
     Input('fetched-data', 'data'),
     Input('dashboard-tab', 'data'),
+    Input('plot-mode', 'data'),
+    Input('selected-compare-vars', 'data'),
     State('theme-store', 'data'),
     State('predictor-dropdown-options-store', 'data')
 )
-def update_graph(selected_predictors, data, active_tab, theme, options):
-    if active_tab != 'data' or not data or not selected_predictors:
+def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars, theme, options):
+    if active_tab != 'data' or not data:
         return go.Figure()
+
+    plot_mode = plot_mode or 'timeseries'
 
     df = pd.DataFrame(data)
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values('Date')
 
-    # Create a single-axis figure (no secondary y-axis)
-    fig = go.Figure()
-
-    # Premium color palette for predictors - all distinct from ZAR/USD neutral
-    # Carefully selected warm and saturated tones, no blues/grays that clash with ZAR/USD
-    color_palette = [
-        '#F59E0B',  # Amber
-        '#EC4899',  # Pink
-        '#10B981',  # Emerald
-        '#8B5CF6',  # Violet
-        '#F97316',  # Orange
-        '#EF4444',  # Red
-        '#22C55E',  # Green
-        '#D946EF',  # Fuchsia
-        '#EAB308',  # Yellow
-        '#14B8A6',  # Teal
-        '#A855F7',  # Purple
-        '#84CC16',  # Lime
-        '#F43F5E',  # Rose
-        '#FB923C',  # Light Orange
-        '#4ADE80',  # Light Green
-        '#C084FC',  # Light Purple
-        '#06B6D4',  # Cyan
-        '#0EA5E9',  # Sky Blue
-        '#FACC15',  # Golden Yellow
-        '#FB7185',  # Coral
-    ]
-
-    # Create a mapping from predictor value to label
-    label_map = {opt['value']: opt['label'] for opt in (options or [])}
-
-    # Normalize function: scale to 0-100 range
-    def normalize(series):
-        min_val = series.min()
-        max_val = series.max()
-        if max_val == min_val:
-            return series * 0 + 50  # If constant, return middle value
-        return ((series - min_val) / (max_val - min_val)) * 100
-
-    # ZAR/USD gets a distinctive neutral color - clearly different from all predictors
-    zar_color = '#E8E8E8' if theme == 'dark' else '#1A1A1A'
-    zar_normalized = normalize(df['ZAR_USD'])
-    fig.add_trace(
-        go.Scatter(
-            x=df['Date'],
-            y=zar_normalized,
-            name='ZAR/USD',
-            line=dict(color=zar_color, width=3, shape='spline'),
-            mode='lines',
-            customdata=df['ZAR_USD'],
-            hovertemplate='<b>ZAR/USD</b>: %{customdata:.4f}<br>Normalized: %{y:.1f}<extra></extra>'
-        )
-    )
-
-    # Plot each selected predictor (normalized)
-    for i, predictor in enumerate(selected_predictors):
-        if predictor in df.columns:
-            color = color_palette[i % len(color_palette)]
-            predictor_label = label_map.get(predictor, predictor)
-
-            # Normalize the predictor data
-            predictor_normalized = normalize(df[predictor])
-
-            fig.add_trace(
-                go.Scatter(
-                    x=df['Date'],
-                    y=predictor_normalized,
-                    name=predictor_label,
-                    line=dict(color=color, width=2, shape='spline'),
-                    mode='lines',
-                    customdata=df[predictor],
-                    hovertemplate=f'<b>{predictor_label}</b>: %{{customdata:.4f}}<br>Normalized: %{{y:.1f}}<extra></extra>'
-                )
-            )
-
+    # Shared theme colors
     is_dark = theme == 'dark'
-
     grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
     line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
     text_color = '#ffffff' if is_dark else '#0a0a0a'
     text_muted = '#6b6b6b' if is_dark else '#737373'
     spike_color = 'rgba(255,255,255,0.2)' if is_dark else 'rgba(0,0,0,0.15)'
+    label_map = {opt['value']: opt['label'] for opt in (options or [])}
 
-    fig.update_layout(
+    # Premium color palette
+    color_palette = [
+        '#F59E0B', '#EC4899', '#10B981', '#8B5CF6', '#F97316',
+        '#EF4444', '#22C55E', '#D946EF', '#EAB308', '#14B8A6',
+        '#A855F7', '#84CC16', '#F43F5E', '#FB923C', '#4ADE80',
+        '#C084FC', '#06B6D4', '#0EA5E9', '#FACC15', '#FB7185',
+    ]
+
+    font_family = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    base_layout = dict(
         template=None,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=40, r=20, t=30, b=80),
         autosize=True,
-        font=dict(
-            family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            size=12,
-            color=text_color
-        ),
+        font=dict(family=font_family, size=12, color=text_color),
+        modebar=dict(bgcolor='rgba(0,0,0,0)', color=text_muted,
+                     activecolor='#5b8def' if is_dark else '#4f7df3', orientation='v'),
+    )
+
+    # ═══ CORRELATION MATRIX ═══
+    if plot_mode == 'correlation':
+        import numpy as np
+        numeric_cols = [c for c in df.columns if c != 'Date' and df[c].dtype in ['float64', 'int64', 'float32']]
+        if 'ZAR_USD' in numeric_cols:
+            numeric_cols.remove('ZAR_USD')
+            numeric_cols.insert(0, 'ZAR_USD')
+
+        friendly_names = [label_map.get(c, c) for c in numeric_cols]
+        # Truncate long labels
+        friendly_names = [n[:20] + '…' if len(n) > 20 else n for n in friendly_names]
+
+        corr = df[numeric_cols].corr()
+        z = corr.values
+
+        fig = go.Figure(data=go.Heatmap(
+            z=z,
+            x=friendly_names,
+            y=friendly_names,
+            colorscale=[[0, '#EF4444'], [0.5, '#1a1a2e' if is_dark else '#f8f8fc'], [1, '#10B981']],
+            zmin=-1, zmax=1,
+            text=np.round(z, 2),
+            texttemplate='%{text}',
+            textfont=dict(size=10, color=text_color),
+            hovertemplate='%{x} vs %{y}<br>r = %{z:.3f}<extra></extra>',
+            colorbar=dict(
+                title=dict(text='r', font=dict(color=text_muted, size=11)),
+                tickfont=dict(color=text_muted, size=10),
+                outlinewidth=0,
+            ),
+        ))
+
+        fig.update_layout(
+            **base_layout,
+            margin=dict(l=120, r=40, t=30, b=120),
+            xaxis=dict(tickfont=dict(size=9, color=text_muted), tickangle=-45, showgrid=False),
+            yaxis=dict(tickfont=dict(size=9, color=text_muted), showgrid=False, autorange='reversed'),
+        )
+        return fig
+
+    # ═══ COMPARE MODE — 2D lines or 3D surface ═══
+    if plot_mode == 'compare':
+        import numpy as np
+
+        compare_vars = compare_vars or []
+        # Filter to valid columns
+        cmp = [v for v in compare_vars if v in df.columns]
+        if len(cmp) < 2:
+            return go.Figure()
+
+        compare_x = cmp[0]
+        compare_y = cmp[1]
+        compare_z = cmp[2] if len(cmp) >= 3 else None
+
+        x_label = label_map.get(compare_x, compare_x)
+        y_label = label_map.get(compare_y, compare_y)
+        use_3d = compare_z is not None
+
+        if use_3d:
+            # ── 3D Surface: Z as a function of X and Y ──
+            z_label = label_map.get(compare_z, compare_z)
+            sub = df[[compare_x, compare_y, compare_z]].dropna()
+
+            if len(sub) < 4:
+                return go.Figure()
+
+            from scipy.interpolate import griddata
+            xi = np.linspace(sub[compare_x].min(), sub[compare_x].max(), 40)
+            yi = np.linspace(sub[compare_y].min(), sub[compare_y].max(), 40)
+            xi_grid, yi_grid = np.meshgrid(xi, yi)
+            zi_grid = griddata(
+                (sub[compare_x].values, sub[compare_y].values),
+                sub[compare_z].values,
+                (xi_grid, yi_grid),
+                method='cubic',
+            )
+            # Fill NaN edges with nearest-neighbor
+            zi_nearest = griddata(
+                (sub[compare_x].values, sub[compare_y].values),
+                sub[compare_z].values,
+                (xi_grid, yi_grid),
+                method='nearest',
+            )
+            mask = np.isnan(zi_grid)
+            zi_grid[mask] = zi_nearest[mask]
+
+            fig = go.Figure(data=go.Surface(
+                x=xi_grid, y=yi_grid, z=zi_grid,
+                colorscale='Viridis' if is_dark else 'RdYlBu_r',
+                colorbar=dict(
+                    title=dict(text=z_label, font=dict(size=10, color=text_muted)),
+                    tickfont=dict(size=9, color=text_muted), outlinewidth=0,
+                ),
+                hovertemplate=(f'<b>{x_label}</b>: %{{x:.4f}}<br>'
+                               f'<b>{y_label}</b>: %{{y:.4f}}<br>'
+                               f'<b>{z_label}</b>: %{{z:.4f}}<extra></extra>'),
+                opacity=0.92,
+                contours=dict(
+                    z=dict(show=True, usecolormap=True, highlightcolor='white', project_z=True),
+                ),
+            ))
+
+            scene_axis = lambda title: dict(
+                title=dict(text=title, font=dict(size=10, color=text_muted)),
+                backgroundcolor='rgba(0,0,0,0.02)' if is_dark else 'rgba(0,0,0,0.01)',
+                gridcolor=grid_color, showbackground=True,
+                tickfont=dict(size=9, color=text_muted),
+            )
+            fig.update_layout(
+                **base_layout,
+                margin=dict(l=0, r=0, t=30, b=0),
+                scene=dict(
+                    xaxis=scene_axis(x_label),
+                    yaxis=scene_axis(y_label),
+                    zaxis=scene_axis(z_label),
+                    bgcolor='rgba(0,0,0,0)',
+                ),
+            )
+            return fig
+
+        # ── 2D: overlay both variables as lines over time ──
+        from plotly.subplots import make_subplots
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        x_color = color_palette[0]
+        y_color = color_palette[2]
+
+        # Correlation annotation
+        pair = df[[compare_x, compare_y]].dropna()
+        corr_val = pair[compare_x].corr(pair[compare_y]) if len(pair) >= 2 else None
+
+        fig.add_trace(
+            go.Scatter(
+                x=df['Date'], y=df[compare_x],
+                name=x_label,
+                line=dict(color=x_color, width=2.5, shape='spline'),
+                mode='lines',
+                hovertemplate=f'<b>{x_label}</b>: %{{y:.4f}}<extra></extra>',
+            ), secondary_y=False,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=df['Date'], y=df[compare_y],
+                name=y_label,
+                line=dict(color=y_color, width=2.5, shape='spline'),
+                mode='lines',
+                hovertemplate=f'<b>{y_label}</b>: %{{y:.4f}}<extra></extra>',
+            ), secondary_y=True,
+        )
+
+        if corr_val is not None:
+            fig.add_annotation(
+                text=f"r = {corr_val:.3f}",
+                xref="paper", yref="paper", x=0.02, y=0.98,
+                showarrow=False, font=dict(size=11, color=text_muted),
+                bgcolor='rgba(0,0,0,0.3)' if is_dark else 'rgba(255,255,255,0.8)',
+                borderpad=6, bordercolor=line_color, borderwidth=1,
+            )
+
+        fig.update_layout(
+            **base_layout,
+            margin=dict(l=50, r=50, t=30, b=80),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                font=dict(size=11, weight=500, color=text_muted),
+                bgcolor='rgba(0,0,0,0)', borderwidth=0,
+                itemsizing='constant', itemwidth=30,
+            ),
+            hovermode="x unified",
+            hoverlabel=dict(
+                bgcolor='rgba(16,16,16,0.96)' if is_dark else 'rgba(255,255,255,0.96)',
+                font_size=12, font_family="Inter", font_color=text_color,
+                bordercolor=line_color, namelength=-1,
+            ),
+            xaxis=dict(
+                showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor=line_color,
+                tickfont=dict(size=10, color=text_muted), title=None,
+                showspikes=True, spikemode='across', spikesnap='cursor',
+                spikedash='dot', spikethickness=1, spikecolor=spike_color,
+            ),
+            dragmode='zoom',
+        )
+        fig.update_yaxes(
+            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+            zeroline=False, showline=False,
+            tickfont=dict(size=10, color=text_muted),
+            title=dict(text=x_label, font=dict(size=11, color=x_color, weight=500)),
+            showspikes=False, secondary_y=False,
+        )
+        fig.update_yaxes(
+            showgrid=False, zeroline=False, showline=False,
+            tickfont=dict(size=10, color=text_muted),
+            title=dict(text=y_label, font=dict(size=11, color=y_color, weight=500)),
+            showspikes=False, secondary_y=True,
+        )
+
+        # Range selector
+        fig.update_xaxes(
+            rangeselector=dict(
+                buttons=[
+                    dict(count=3, label="3M", step="month", stepmode="backward"),
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1Y", step="year", stepmode="backward"),
+                    dict(count=2, label="2Y", step="year", stepmode="backward"),
+                    dict(step="all", label="All"),
+                ],
+                bgcolor='rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.03)',
+                activecolor='#5b8def' if is_dark else '#4f7df3',
+                font=dict(color=text_muted, size=10),
+                x=1, y=1.12, xanchor='right', yanchor='top',
+            ),
+            rangeslider=dict(visible=False),
+        )
+        return fig
+
+    # ═══ TIME SERIES MODE (default) — dual Y-axis ═══
+    if not selected_predictors:
+        return go.Figure()
+
+    from plotly.subplots import make_subplots
+
+    # Determine axis assignment: ZAR_USD on left (y1), everything else on right (y2)
+    left_vars = [v for v in selected_predictors if v == 'ZAR_USD' and v in df.columns]
+    right_vars = [v for v in selected_predictors if v != 'ZAR_USD' and v in df.columns]
+
+    use_dual = bool(left_vars) and bool(right_vars)
+
+    if use_dual:
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+    else:
+        fig = go.Figure()
+
+    zar_color = '#E8E8E8' if is_dark else '#1A1A1A'
+    color_idx = 0
+
+    def normalize(series):
+        min_val = series.min()
+        max_val = series.max()
+        if max_val == min_val:
+            return series * 0 + 50
+        return ((series - min_val) / (max_val - min_val)) * 100
+
+    for var in selected_predictors:
+        if var not in df.columns:
+            continue
+
+        is_zar = var == 'ZAR_USD'
+        if is_zar:
+            color = zar_color
+            width = 3
+            var_label = label_map.get(var, 'ZAR/USD')
+        else:
+            color = color_palette[color_idx % len(color_palette)]
+            width = 2
+            var_label = label_map.get(var, var)
+            color_idx += 1
+
+        if use_dual:
+            # Plot on raw scale with dual axes
+            secondary = not is_zar
+            fig.add_trace(
+                go.Scatter(
+                    x=df['Date'], y=df[var],
+                    name=var_label,
+                    line=dict(color=color, width=width, shape='spline'),
+                    mode='lines',
+                    hovertemplate=f'<b>{var_label}</b>: %{{y:.4f}}<extra></extra>',
+                ),
+                secondary_y=secondary,
+            )
+        else:
+            # Single-axis: normalize all to 0-100
+            var_normalized = normalize(df[var])
+            fig.add_trace(
+                go.Scatter(
+                    x=df['Date'], y=var_normalized,
+                    name=var_label,
+                    line=dict(color=color, width=width, shape='spline'),
+                    mode='lines',
+                    customdata=df[var],
+                    hovertemplate=f'<b>{var_label}</b>: %{{customdata:.4f}}<br>Normalized: %{{y:.1f}}<extra></extra>',
+                )
+            )
+
+    fig.update_layout(
+        **base_layout,
+        margin=dict(l=50, r=50 if use_dual else 20, t=30, b=80),
         legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="left",
-            x=0,
+            orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11, weight=500, color=text_muted),
-            bgcolor='rgba(0,0,0,0)',
-            borderwidth=0,
-            itemsizing='constant',
-            itemwidth=30,
-            tracegroupgap=8
+            bgcolor='rgba(0,0,0,0)', borderwidth=0,
+            itemsizing='constant', itemwidth=30, tracegroupgap=8,
         ),
         hovermode="x unified",
         hoverlabel=dict(
             bgcolor='rgba(16,16,16,0.96)' if is_dark else 'rgba(255,255,255,0.96)',
-            font_size=12,
-            font_family="Inter",
-            font_color=text_color,
-            bordercolor=line_color,
-            namelength=-1
+            font_size=12, font_family="Inter", font_color=text_color,
+            bordercolor=line_color, namelength=-1,
         ),
         xaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            showline=True,
-            linewidth=1,
-            linecolor=line_color,
-            tickfont=dict(size=10, color=text_muted),
-            title=None,
-            showspikes=True,
-            spikemode='across',
-            spikesnap='cursor',
-            spikedash='dot',
-            spikethickness=1,
-            spikecolor=spike_color
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridwidth=1,
-            gridcolor=grid_color,
-            griddash='dot',
-            zeroline=False,
-            showline=False,
-            tickfont=dict(size=10, color=text_muted),
-            title=dict(text="Normalized (0–100)", font=dict(size=11, color=text_muted, weight=500)),
-            tickformat=".0f",
-            showspikes=False
+            showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor=line_color,
+            tickfont=dict(size=10, color=text_muted), title=None,
+            showspikes=True, spikemode='across', spikesnap='cursor',
+            spikedash='dot', spikethickness=1, spikecolor=spike_color,
         ),
         dragmode='zoom',
-        modebar=dict(
-            bgcolor='rgba(0,0,0,0)',
-            color=text_muted,
-            activecolor='#5b8def' if is_dark else '#4f7df3',
-            orientation='v'
-        )
     )
 
-    # Enhanced range selector buttons - no rangeslider to avoid zoom conflicts
+    if use_dual:
+        fig.update_yaxes(
+            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+            zeroline=False, showline=False,
+            tickfont=dict(size=10, color=text_muted),
+            title=dict(text="ZAR/USD", font=dict(size=11, color=zar_color, weight=500)),
+            showspikes=False, secondary_y=False,
+        )
+        # Right axis label: first right-side variable or generic
+        right_label = label_map.get(right_vars[0], right_vars[0]) if len(right_vars) == 1 else "Other Variables"
+        right_color = color_palette[0]
+        fig.update_yaxes(
+            showgrid=False, zeroline=False, showline=False,
+            tickfont=dict(size=10, color=text_muted),
+            title=dict(text=right_label, font=dict(size=11, color=right_color, weight=500)),
+            showspikes=False, secondary_y=True,
+        )
+    else:
+        y_title = "Normalized (0–100)" if len(selected_predictors) > 1 else label_map.get(selected_predictors[0], selected_predictors[0])
+        fig.update_yaxes(
+            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+            zeroline=False, showline=False,
+            tickfont=dict(size=10, color=text_muted),
+            title=dict(text=y_title, font=dict(size=11, color=text_muted, weight=500)),
+            tickformat=".0f" if len(selected_predictors) > 1 else "",
+            showspikes=False,
+        )
+
+    # Range selector buttons
     fig.update_xaxes(
         rangeselector=dict(
             buttons=[
@@ -1067,15 +1417,14 @@ def update_graph(selected_predictors, data, active_tab, theme, options):
                 dict(count=6, label="6M", step="month", stepmode="backward"),
                 dict(count=1, label="1Y", step="year", stepmode="backward"),
                 dict(count=2, label="2Y", step="year", stepmode="backward"),
-                dict(step="all", label="All")
+                dict(step="all", label="All"),
             ],
             bgcolor='rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.03)',
             activecolor='#5b8def' if is_dark else '#4f7df3',
             font=dict(color=text_muted, size=10),
-            x=1, y=1.12,
-            xanchor='right', yanchor='top'
+            x=1, y=1.12, xanchor='right', yanchor='top',
         ),
-        rangeslider=dict(visible=False)  # Disabled to prevent zoom conflicts during resize
+        rangeslider=dict(visible=False),
     )
 
     return fig
@@ -2224,7 +2573,7 @@ def render_scenario_comparison(saved_scenarios, baseline, theme):
 #   AI Chatbot (Data Explorer)
 # ═══════════════════════════════════════════
 
-GOOGLE_API_KEY = 'AIzaSyCACUAIY96FjGsx5jWuJvZYCf9c67Z9GQw'
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 
 # Toggle chat panel open/closed
 dash.clientside_callback(
@@ -2256,14 +2605,38 @@ dash.clientside_callback(
     prevent_initial_call=True
 )
 
-# Auto-scroll chat to bottom on new messages
+# Auto-scroll + typewriter animation on new messages
 dash.clientside_callback(
     """
     function(children) {
         setTimeout(() => {
             const el = document.getElementById('chat-messages');
-            if (el) el.scrollTop = el.scrollHeight;
-        }, 50);
+            if (!el) return;
+            el.scrollTop = el.scrollHeight;
+
+            // Find any new typewriter bubbles that haven't been animated yet
+            const bubbles = el.querySelectorAll('.chat-typewriter:not(.chat-tw-started)');
+            bubbles.forEach(bubble => {
+                bubble.classList.add('chat-tw-started');
+                const fullText = bubble.getAttribute('data-fulltext');
+                if (!fullText) return;
+
+                const words = fullText.split(/( +)/);  // preserve spaces
+                let idx = 0;
+                bubble.textContent = '';
+
+                const interval = setInterval(() => {
+                    if (idx < words.length) {
+                        bubble.textContent += words[idx];
+                        idx++;
+                        el.scrollTop = el.scrollHeight;
+                    } else {
+                        clearInterval(interval);
+                        bubble.classList.add('chat-tw-done');
+                    }
+                }, 30);
+            });
+        }, 60);
         return window.dash_clientside.no_update;
     }
     """,
@@ -2272,45 +2645,168 @@ dash.clientside_callback(
     prevent_initial_call=True
 )
 
+# Instant loading state — shows user bubble + typing dots before server responds
+dash.clientside_callback(
+    """
+    function(sendClicks, nSubmit, inputValue) {
+        if (!inputValue || !inputValue.trim()) return window.dash_clientside.no_update;
 
-def _build_plot_context(data, selected_predictors, options):
-    """Build a text summary of what the user sees on the chart."""
-    if not data or not selected_predictors:
-        return "The chart is currently empty — no data has been loaded yet."
+        const messages = document.getElementById('chat-messages');
+        if (!messages) return window.dash_clientside.no_update;
+
+        // Append user bubble
+        const userDiv = document.createElement('div');
+        userDiv.className = 'chat-message chat-message-user';
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble chat-bubble-user';
+        bubble.textContent = inputValue.trim();
+        userDiv.appendChild(bubble);
+        messages.appendChild(userDiv);
+
+        // Append loading dots
+        const loadDiv = document.createElement('div');
+        loadDiv.className = 'chat-message chat-message-ai';
+        loadDiv.id = 'chat-loading-indicator';
+        loadDiv.innerHTML = '<div class="chat-bubble chat-bubble-ai"><div class="chat-loading-dots"><span></span><span></span><span></span></div></div>';
+        messages.appendChild(loadDiv);
+
+        // Scroll to bottom
+        messages.scrollTop = messages.scrollHeight;
+
+        // Clear input immediately for snappy feel
+        const input = document.getElementById('chat-input');
+        if (input) input.value = '';
+
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('chat-loading-trigger', 'children'),
+    Input('chat-send-btn', 'n_clicks'),
+    Input('chat-input', 'n_submit'),
+    State('chat-input', 'value'),
+    prevent_initial_call=True
+)
+
+
+def _build_plot_context(data, selected_predictors, options, plot_mode=None, compare_vars=None):
+    """Build a comprehensive text summary of all data available in the Data section."""
+    if not data:
+        return "No data has been loaded yet."
+
+    import numpy as np
 
     df = pd.DataFrame(data)
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values('Date')
 
     label_map = {opt['value']: opt['label'] for opt in (options or [])}
+    numeric_cols = [c for c in df.columns if c != 'Date' and df[c].dtype in ['float64', 'int64', 'float32']]
 
     lines = []
-    # Date range
+
+    # Dataset overview
+    lines.append(f"=== DATASET OVERVIEW ===")
     lines.append(f"Date range: {df['Date'].min().strftime('%Y-%m')} to {df['Date'].max().strftime('%Y-%m')}")
-    lines.append(f"Data points: {len(df)}")
+    lines.append(f"Data points: {len(df)} monthly observations")
+    lines.append(f"Active plot mode: {plot_mode or 'timeseries'}")
+    if plot_mode == 'compare' and compare_vars:
+        cmp_names = [label_map.get(v, v) for v in compare_vars]
+        if len(compare_vars) == 2:
+            lines.append(f"Compare mode: 2D line comparison of {cmp_names[0]} vs {cmp_names[1]} over time")
+        elif len(compare_vars) >= 3:
+            lines.append(f"Compare mode: 3D surface — X={cmp_names[0]}, Y={cmp_names[1]}, Z(surface)={cmp_names[2]}")
+    if selected_predictors:
+        sel_names = [label_map.get(v, v) for v in selected_predictors]
+        lines.append(f"Variables on time series chart: {', '.join(sel_names)}")
 
-    # ZAR/USD summary
-    zar = df['ZAR_USD'].dropna()
-    if not zar.empty:
-        lines.append(f"ZAR/USD — latest: {zar.iloc[-1]:.4f}, min: {zar.min():.4f}, max: {zar.max():.4f}")
-        if len(zar) >= 2:
-            pct = ((zar.iloc[-1] - zar.iloc[-2]) / zar.iloc[-2]) * 100
-            lines.append(f"  Last month change: {pct:+.2f}%")
-        if len(zar) >= 12:
-            yoy = ((zar.iloc[-1] - zar.iloc[-12]) / zar.iloc[-12]) * 100
-            lines.append(f"  Year-over-year change: {yoy:+.2f}%")
+    # All variable summaries
+    lines.append(f"\n=== ALL VARIABLES (summary stats) ===")
+    for col in numeric_cols:
+        s = df[col].dropna()
+        if s.empty:
+            continue
+        friendly = label_map.get(col, col)
+        latest = s.iloc[-1]
+        lines.append(f"• {friendly}: latest={latest:.4f}, min={s.min():.4f}, max={s.max():.4f}, mean={s.mean():.4f}")
+        if len(s) >= 2:
+            pct_m = ((s.iloc[-1] - s.iloc[-2]) / abs(s.iloc[-2])) * 100 if s.iloc[-2] != 0 else 0
+            lines.append(f"    MoM: {pct_m:+.2f}%")
+        if len(s) >= 12:
+            yoy = ((s.iloc[-1] - s.iloc[-12]) / abs(s.iloc[-12])) * 100 if s.iloc[-12] != 0 else 0
+            lines.append(f"    YoY: {yoy:+.2f}%")
 
-    # Selected predictors
-    lines.append(f"\nPredictors currently shown on chart (normalized 0–100):")
-    for pred in selected_predictors:
-        if pred in df.columns:
-            s = df[pred].dropna()
-            friendly = label_map.get(pred, pred)
-            if not s.empty:
-                lines.append(f"  • {friendly}: latest={s.iloc[-1]:.4f}, min={s.min():.4f}, max={s.max():.4f}")
-                if len(s) >= 2:
-                    pct_m = ((s.iloc[-1] - s.iloc[-2]) / abs(s.iloc[-2])) * 100 if s.iloc[-2] != 0 else 0
-                    lines.append(f"    Last month: {pct_m:+.2f}%")
+    # Correlation matrix — top correlations with ZAR/USD and between variables
+    lines.append(f"\n=== KEY CORRELATIONS ===")
+    if 'ZAR_USD' in numeric_cols and len(numeric_cols) > 1:
+        corr = df[numeric_cols].corr()
+
+        # ZAR/USD correlations ranked
+        zar_corr = corr['ZAR_USD'].drop('ZAR_USD').sort_values(key=abs, ascending=False)
+        lines.append("Correlations with ZAR/USD (ranked by strength):")
+        for var, r in zar_corr.items():
+            friendly = label_map.get(var, var)
+            direction = "positive" if r > 0 else "negative"
+            strength = "strong" if abs(r) > 0.7 else "moderate" if abs(r) > 0.4 else "weak"
+            lines.append(f"  • {friendly}: r={r:.3f} ({strength} {direction})")
+
+        # Strongest inter-variable correlations (top 5 pairs, excluding self)
+        lines.append("\nStrongest inter-variable correlations:")
+        pair_list = []
+        for i, c1 in enumerate(numeric_cols):
+            for c2 in numeric_cols[i+1:]:
+                r = corr.loc[c1, c2]
+                pair_list.append((c1, c2, r))
+        pair_list.sort(key=lambda x: abs(x[2]), reverse=True)
+        for c1, c2, r in pair_list[:5]:
+            f1 = label_map.get(c1, c1)
+            f2 = label_map.get(c2, c2)
+            lines.append(f"  • {f1} vs {f2}: r={r:.3f}")
+
+    # Compare mode — 3D surface analysis
+    compare_vars = compare_vars or []
+    cmp = [v for v in compare_vars if v in df.columns]
+    if plot_mode == 'compare' and len(cmp) >= 3:
+        cx, cy, cz = cmp[0], cmp[1], cmp[2]
+        cx_l = label_map.get(cx, cx)
+        cy_l = label_map.get(cy, cy)
+        cz_l = label_map.get(cz, cz)
+        lines.append(f"\n=== 3D SURFACE ANALYSIS ({cx_l} × {cy_l} → {cz_l}) ===")
+        sub = df[[cx, cy, cz]].dropna()
+        if len(sub) >= 4:
+            # Pairwise correlations among the 3 vars
+            lines.append(f"Pairwise correlations:")
+            lines.append(f"  {cx_l} vs {cy_l}: r={sub[cx].corr(sub[cy]):.3f}")
+            lines.append(f"  {cx_l} vs {cz_l}: r={sub[cx].corr(sub[cz]):.3f}")
+            lines.append(f"  {cy_l} vs {cz_l}: r={sub[cy].corr(sub[cz]):.3f}")
+
+            # Surface shape — check where Z is highest/lowest
+            z_vals = sub[cz]
+            max_row = sub.loc[z_vals.idxmax()]
+            min_row = sub.loc[z_vals.idxmin()]
+            lines.append(f"Surface peak ({cz_l} max={max_row[cz]:.4f}): "
+                         f"at {cx_l}={max_row[cx]:.4f}, {cy_l}={max_row[cy]:.4f}")
+            lines.append(f"Surface trough ({cz_l} min={min_row[cz]:.4f}): "
+                         f"at {cx_l}={min_row[cx]:.4f}, {cy_l}={min_row[cy]:.4f}")
+
+            # Partial correlation direction — how does Z change with X holding Y roughly constant?
+            from numpy.polynomial import polynomial as P
+            try:
+                coeffs = np.polyfit(sub[[cx, cy]].values.T[0], sub[cz].values, 1)
+                slope_x = coeffs[0]
+                lines.append(f"Marginal slope: {cz_l} changes ~{slope_x:.4f} per unit of {cx_l}")
+            except Exception:
+                pass
+
+    elif plot_mode == 'compare' and len(cmp) == 2:
+        cx, cy = cmp[0], cmp[1]
+        cx_l = label_map.get(cx, cx)
+        cy_l = label_map.get(cy, cy)
+        lines.append(f"\n=== 2D COMPARE ({cx_l} vs {cy_l}) ===")
+        pair = df[[cx, cy]].dropna()
+        if len(pair) >= 2:
+            r = pair[cx].corr(pair[cy])
+            lines.append(f"Correlation: r={r:.3f}, R²={r**2:.3f}")
+            lines.append(f"These are plotted as overlaid time series lines with dual Y-axes.")
 
     return "\n".join(lines)
 
@@ -2327,10 +2823,12 @@ def _build_plot_context(data, selected_predictors, options):
     State('fetched-data', 'data'),
     State('selected-predictors', 'data'),
     State('predictor-dropdown-options-store', 'data'),
+    State('plot-mode', 'data'),
+    State('selected-compare-vars', 'data'),
     prevent_initial_call=True
 )
 def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_history,
-                     fetched_data, selected_predictors, predictor_options):
+                     fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars):
     if not user_msg or not user_msg.strip():
         return dash.no_update, dash.no_update, dash.no_update
 
@@ -2345,8 +2843,8 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
         ])
     )
 
-    # Build context from what's on the chart
-    plot_context = _build_plot_context(fetched_data, selected_predictors, predictor_options)
+    # Build comprehensive context from all data
+    plot_context = _build_plot_context(fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars)
 
     # Add to conversation history for Gemini
     chat_history.append({'role': 'user', 'parts': [user_msg]})
@@ -2360,13 +2858,17 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
 
         system_instruction = (
             "You are an economics assistant embedded in a ZAR/USD exchange rate dashboard. "
-            "You ONLY answer questions about: the data shown on the chart, ZAR/USD exchange rate dynamics, "
+            "You have full access to the dataset context below, including all variables, their latest values, "
+            "month-over-month and year-over-year changes, and the full correlation matrix between all variables. "
+            "You ONLY answer questions about: the data in the dashboard, ZAR/USD exchange rate dynamics, "
             "macroeconomic indicators (interest rates, inflation, oil prices, gold, VIX, economic policy uncertainty), "
-            "South African and US economics, and how these factors relate to the Rand. "
-            "If the user asks about anything unrelated, politely decline and redirect them to chart or economics questions. "
+            "South African and US economics, correlations between variables, and how these factors relate to the Rand. "
+            "If the user asks about anything unrelated, politely decline and redirect them to data or economics questions. "
+            "When discussing correlations, cite the actual r values from the data. "
             "Keep answers concise (2-4 sentences) unless the user asks for detail. "
-            "Use the CHART CONTEXT below to ground your answers in what the user can actually see.\n\n"
-            f"CHART CONTEXT:\n{plot_context}"
+            "The dashboard has three plot modes: Time Series (dual Y-axis), Compare (2D scatter or 3D), "
+            "and Correlation (heatmap). Reference these when relevant.\n\n"
+            f"DASHBOARD DATA CONTEXT:\n{plot_context}"
         )
 
         # Build contents list for the API
@@ -2396,10 +2898,12 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
     # Save AI response to history
     chat_history.append({'role': 'model', 'parts': [ai_text]})
 
-    # Add AI message bubble
+    # Add AI message bubble with typewriter data attribute
+    # The clientside callback will animate word-by-word reveal
     current_messages.append(
         html.Div(className='chat-message chat-message-ai', children=[
-            html.Div(ai_text, className='chat-bubble chat-bubble-ai')
+            html.Div('', className='chat-bubble chat-bubble-ai chat-typewriter',
+                     **{'data-fulltext': ai_text})
         ])
     )
 

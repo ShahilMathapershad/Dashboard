@@ -560,32 +560,37 @@ p  { margin: 0; color: var(--text-2); }
 }
 
 /* ═══════════════════════════════════════════
-   Theme Toggle
+   Theme Toggle — positioned inside sidebar
    ═══════════════════════════════════════════ */
 .theme-switch-btn {
     position: fixed;
-    bottom: 24px;
-    left: 24px;
-    z-index: 9999;
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-full);
-    background: var(--bg-raised);
+    bottom: 120px;
+    left: 16px;
+    z-index: 101;
+    width: calc(var(--sidebar-w) - 32px);
+    height: 38px;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
-    color: var(--text-1);
+    color: var(--text-2);
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     cursor: pointer;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
     transition: all var(--dur) var(--ease);
-    font-size: 1rem;
+    font-size: 0.9rem;
     outline: none;
 }
 .theme-switch-btn:hover {
-    transform: translateY(-2px);
+    background: var(--bg-overlay-hover);
+    color: var(--text-1);
     border-color: var(--accent);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.15), 0 0 0 3px var(--accent-glow);
+}
+/* When sidebar is collapsed, shrink to icon-only */
+.sidebar-collapsed .theme-switch-btn {
+    width: calc(var(--sidebar-w-collapsed) - 16px);
+    left: 8px;
 }
 
 /* ═══════════════════════════════════════════
@@ -950,7 +955,42 @@ p  { margin: 0; color: var(--text-2); }
     color: var(--text-3);
 }
 
-/* Predictor Chips - Compact */
+/* Plot mode segmented control */
+.plot-mode-toggle {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+}
+.plot-mode-btn {
+    padding: 4px 12px;
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
+    background: transparent;
+    color: var(--text-3);
+    font-size: 0.7rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s var(--ease);
+    outline: none;
+    white-space: nowrap;
+}
+.plot-mode-btn:hover {
+    color: var(--text-1);
+    background: var(--bg-overlay-hover);
+}
+.plot-mode-active {
+    background: var(--accent) !important;
+    color: #fff !important;
+    font-weight: 600;
+    box-shadow: 0 1px 4px rgba(91, 141, 239, 0.25);
+}
+
+
+/* Variable Chips - Compact */
 .predictor-chips {
     display: flex;
     flex-wrap: wrap;
@@ -968,6 +1008,27 @@ p  { margin: 0; color: var(--text-2); }
 .predictor-checkbox-item:hover {
     border-color: var(--border-hover);
     background: var(--bg-overlay-hover);
+}
+
+/* Disabled chip (max selections reached) */
+.chip-disabled {
+    opacity: 0.35;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+.chip-disabled:hover {
+    border-color: var(--border);
+    background: var(--bg-overlay);
+}
+
+/* Compare mode hint */
+.compare-hint {
+    padding-top: 6px;
+}
+.compare-hint-text {
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    font-style: italic;
 }
 
 .custom-checklist { margin: 0 !important; }
@@ -1500,6 +1561,7 @@ p  { margin: 0; color: var(--text-2); }
         padding: 20px 16px;
     }
     .sidebar-toggle { display: none !important; }
+    .theme-switch-btn { display: none !important; }
 }
 
 @media (max-width: 768px) {
@@ -2646,7 +2708,7 @@ p  { margin: 0; color: var(--text-2); }
 
 /* Theme switch button */
 .theme-switch-btn {
-    will-change: transform, box-shadow;
+    will-change: background, border-color;
 }
 
 /* Login card glass entrance */
@@ -2935,6 +2997,72 @@ p  { margin: 0; color: var(--text-2); }
 }
 .chat-send-btn:active {
     transform: scale(0.95);
+}
+
+/* ── Chat loading dots ── */
+.chat-loading-dots {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 0;
+}
+.chat-loading-dots span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-3);
+    animation: chatDotPulse 1.4s ease-in-out infinite;
+}
+.chat-loading-dots span:nth-child(2) { animation-delay: 0.16s; }
+.chat-loading-dots span:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes chatDotPulse {
+    0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1.15); }
+}
+
+/* ── AI message entrance animation ── */
+.chat-message-ai {
+    animation: chatBubbleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes chatBubbleIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Typewriter cursor blink while typing */
+.chat-typewriter.chat-tw-started:not(.chat-tw-done)::after {
+    content: '▍';
+    color: var(--accent);
+    animation: twCursor 0.6s steps(2) infinite;
+    margin-left: 1px;
+}
+@keyframes twCursor {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* User messages slide in from right */
+.chat-message-user {
+    animation: chatUserIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes chatUserIn {
+    from {
+        opacity: 0;
+        transform: translateX(12px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
 }
 
 /* Light theme overrides */

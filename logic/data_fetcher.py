@@ -36,32 +36,7 @@ SERIES_CONFIG = {
 from dotenv import load_dotenv
 load_dotenv()
 
-def get_api_keys():
-    """Reads API keys from api_keys.txt."""
-    keys = {'FRED': None}
-    try:
-        # Try different paths to find api_keys.txt
-        possible_paths = [
-            'api_keys.txt',
-            os.path.join(os.getcwd(), 'api_keys.txt'),
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api_keys.txt')
-        ]
-        
-        for path in possible_paths:
-            if os.path.exists(path):
-                with open(path, 'r') as f:
-                    for line in f:
-                        if '=' in line:
-                            key, val = line.split('=', 1)
-                            keys[key.strip()] = val.strip()
-                break
-    except Exception as e:
-        logger.error(f"Error reading api_keys.txt: {e}")
-    return keys
-
-API_KEYS = get_api_keys()
-# Prioritize environment variables, then fallback to api_keys.txt or hardcoded defaults
-FRED_API_KEY = os.environ.get('FRED_API_KEY', os.environ.get('FRED_API', API_KEYS.get('FRED') or 'e9e60c2ca97eac250d9bdb7d22511d58'))
+FRED_API_KEY = os.environ.get('FRED_API_KEY')
 
 
 def _to_monthly(series):

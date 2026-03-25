@@ -67,8 +67,11 @@ app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='scenario-current-values', storage_type='session'),
     dcc.Store(id='saved-scenarios', data=[], storage_type='session'),
     dcc.Store(id='chat-history', data=[], storage_type='session'),
+    dcc.Store(id='plot-mode', data='timeseries', storage_type='session'),
+    dcc.Store(id='selected-compare-vars', data=[], storage_type='session'),
 
     dash.page_container,
+    # Theme button — rendered here for global scope, positioned by sidebar via CSS
     html.Button(
         "🌙",
         id='theme-switch-button',
