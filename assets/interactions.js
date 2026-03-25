@@ -271,6 +271,41 @@ document.addEventListener('DOMContentLoaded', () => {
         new MutationObserver(attach).observe(document.body, { childList: true, subtree: true });
     };
 
+    /* ── Chart mode crossfade — smooth transition between plot modes ────── */
+    const setupModeCrossfade = () => {
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.plot-mode-btn');
+            if (!btn || btn.classList.contains('plot-mode-active')) return;
+
+            const chart = document.querySelector('.hero-chart');
+            if (!chart) return;
+
+            // Phase 1: fade out
+            chart.classList.remove('chart-fading-in');
+            chart.classList.add('chart-fading');
+
+            // Phase 2: after Dash updates the figure, fade back in
+            // Listen for the next plotly_afterplot on the graph
+            const plot = chart.querySelector('.js-plotly-plot');
+            let revealed = false;
+
+            const reveal = () => {
+                if (revealed) return;
+                revealed = true;
+                chart.classList.remove('chart-fading');
+                chart.classList.add('chart-fading-in');
+                setTimeout(() => chart.classList.remove('chart-fading-in'), 600);
+            };
+
+            if (plot) {
+                try { plot.once('plotly_afterplot', reveal); } catch (_) {}
+            }
+
+            // Fallback: if figure update takes too long or event doesn't fire
+            setTimeout(reveal, 900);
+        });
+    };
+
     /* ── Init ────────────────────────────────────────────────────────────── */
     handleLoginEnterKey();
     managePlotFadeIn();
@@ -279,6 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
     observeTrendline();
     hideSliderMarks();
     observeScrollAnimations();
+    setupModeCrossfade();
     // Deferred — let Dash render the landing stage first
     setTimeout(initStageEntrance, 50);
 });

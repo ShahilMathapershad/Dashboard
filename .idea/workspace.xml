@@ -4,11 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with UI">
+    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with UIv2">
+      <change beforePath="$PROJECT_DIR$/.cache/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/cache.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.cache/data/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/data/cache.db" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/assets/interactions.js" beforeDir="false" afterPath="$PROJECT_DIR$/assets/interactions.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/assets/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/assets/style.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pages/dashboard.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/dashboard.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -179,15 +180,7 @@
       <workItem from="1774372350928" duration="2686000" />
       <workItem from="1774377748462" duration="2020000" />
       <workItem from="1774393742139" duration="8298000" />
-      <workItem from="1774458354034" duration="628000" />
-    </task>
-    <task id="LOCAL-00010" summary="h">
-      <option name="closed" value="true" />
-      <created>1772107010433</created>
-      <option name="number" value="00010" />
-      <option name="presentableId" value="LOCAL-00010" />
-      <option name="project" value="LOCAL" />
-      <updated>1772107010433</updated>
+      <workItem from="1774458354034" duration="1594000" />
     </task>
     <task id="LOCAL-00011" summary="h">
       <option name="closed" value="true" />
@@ -573,7 +566,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774397826272</updated>
     </task>
-    <option name="localTasksCounter" value="59" />
+    <task id="LOCAL-00059" summary="lastest with UIv2">
+      <option name="closed" value="true" />
+      <created>1774459264605</created>
+      <option name="number" value="00059" />
+      <option name="presentableId" value="LOCAL-00059" />
+      <option name="project" value="LOCAL" />
+      <updated>1774459264605</updated>
+    </task>
+    <option name="localTasksCounter" value="60" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -614,13 +615,14 @@
     <MESSAGE value="lastest with req" />
     <MESSAGE value="lastest with requirements.txt" />
     <MESSAGE value="lastest with UI" />
-    <option name="LAST_COMMIT_MESSAGE" value="lastest with UI" />
+    <MESSAGE value="lastest with UIv2" />
+    <option name="LAST_COMMIT_MESSAGE" value="lastest with UIv2" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Dash$app.coverage" NAME="app Coverage Results" MODIFIED="1772054274074" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Dash$model.coverage" NAME="model Coverage Results" MODIFIED="1773921359384" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
     <SUITE FILE_PATH="coverage/Dash$data_fetcher.coverage" NAME="data_fetcher Coverage Results" MODIFIED="1772707608345" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
-    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1774397697874" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
+    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1774459735387" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
     <SUITE FILE_PATH="coverage/Dash$dashboard.coverage" NAME="dashboard Coverage Results" MODIFIED="1774026661116" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/pages" />
   </component>
 </project>
