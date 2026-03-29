@@ -1,0 +1,18 @@
+{
+  "private": true,
+  "name": "dash-3d-scenes",
+  "description": "Three.js 3D renders for the ZAR/USD Dashboard",
+  "scripts": {
+    "build": "esbuild src/three/index.ts --bundle --outfile=assets/three-scenes.js --format=iife --global-name=DashScenes --target=es2020 --minify",
+    "build:dev": "esbuild src/three/index.ts --bundle --outfile=assets/three-scenes.js --format=iife --global-name=DashScenes --target=es2020 --sourcemap",
+    "watch": "esbuild src/three/index.ts --bundle --outfile=assets/three-scenes.js --format=iife --global-name=DashScenes --target=es2020 --sourcemap --watch"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  }
+}
