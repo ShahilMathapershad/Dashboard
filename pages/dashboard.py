@@ -191,10 +191,10 @@ def data_tab_content(existing_data=None):
                 ]),
             ]),
 
-            # Hero Chart
+            # Hero Chart — 3D tilt-enabled
             dcc.Graph(
                 id='zar-graph',
-                className='hero-chart',
+                className='hero-chart chart-3d',
                 style={'height': '68vh', 'minHeight': '560px', 'maxHeight': '760px', 'width': '100%'},
                 config={
                     'displayModeBar': 'hover',
@@ -294,8 +294,8 @@ def model_tab_content(existing_model_data=None):
                 html.Div(id='feature-contributions'),
             ]),
 
-            # Historical Fit Chart
-            html.Div(id='model-visualization-container', className='model-card', children=[
+            # Historical Fit Chart — 3D tilt
+            html.Div(id='model-visualization-container', className='model-card chart-3d', children=[
                 html.H4('Historical Fit', className='card-title'),
                 html.P('Model predictions vs actual ZAR/USD (level space)',
                        className='card-subtitle'),
@@ -408,8 +408,8 @@ def scenario_tab_content():
                     html.Div(id='scenario-sliders-container'),
                 ]),
 
-                # Waterfall chart
-                html.Div(className='model-card scenario-waterfall-panel', children=[
+                # Waterfall chart — 3D tilt
+                html.Div(className='model-card scenario-waterfall-panel chart-3d', children=[
                     html.H4('Impact Waterfall', className='card-title'),
                     html.P('Contribution change per feature from base to scenario (scaled space)',
                            className='card-subtitle'),
@@ -1045,16 +1045,16 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values('Date')
 
-    # Shared theme colors
+    # Shared theme colors — Apple-inspired palette
     is_dark = theme == 'dark'
-    grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
-    line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
-    text_color = '#ffffff' if is_dark else '#0a0a0a'
-    text_muted = '#6b6b6b' if is_dark else '#737373'
-    spike_color = 'rgba(255,255,255,0.2)' if is_dark else 'rgba(0,0,0,0.15)'
+    grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
+    line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
+    text_color = '#f5f5f7' if is_dark else '#1d1d1f'
+    text_muted = '#86868b' if is_dark else '#6e6e73'
+    spike_color = 'rgba(255,255,255,0.15)' if is_dark else 'rgba(0,0,0,0.1)'
     label_map = {opt['value']: opt['label'] for opt in (options or [])}
 
-    # Premium color palette
+    # Premium color palette — refined for depth
     color_palette = [
         '#F59E0B', '#EC4899', '#10B981', '#8B5CF6', '#F97316',
         '#EF4444', '#22C55E', '#D946EF', '#EAB308', '#14B8A6',
@@ -1062,7 +1062,7 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         '#C084FC', '#06B6D4', '#0EA5E9', '#FACC15', '#FB7185',
     ]
 
-    font_family = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font_family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif"
     base_layout = dict(
         template=None,
         paper_bgcolor='rgba(0,0,0,0)',
@@ -1223,7 +1223,7 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             showlegend=False,
             hovermode="closest",
             hoverlabel=dict(
-                bgcolor='rgba(16,16,16,0.96)' if is_dark else 'rgba(255,255,255,0.96)',
+                bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
                 font_size=12, font_family="Inter", font_color=text_color,
                 bordercolor=line_color, namelength=-1,
             ),
@@ -1243,22 +1243,11 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         )
         return fig
 
-    # ═══ TIME SERIES MODE (default) — dual Y-axis ═══
+    # ═══ TIME SERIES MODE (default) — always normalized 0–100 ═══
     if not selected_predictors:
         return go.Figure()
 
-    from plotly.subplots import make_subplots
-
-    # Determine axis assignment: ZAR_USD on left (y1), everything else on right (y2)
-    left_vars = [v for v in selected_predictors if v == 'ZAR_USD' and v in df.columns]
-    right_vars = [v for v in selected_predictors if v != 'ZAR_USD' and v in df.columns]
-
-    use_dual = bool(left_vars) and bool(right_vars)
-
-    if use_dual:
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-    else:
-        fig = go.Figure()
+    fig = go.Figure()
 
     zar_color = '#E8E8E8' if is_dark else '#1A1A1A'
     color_idx = 0
@@ -1285,36 +1274,21 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             var_label = label_map.get(var, var)
             color_idx += 1
 
-        if use_dual:
-            # Plot on raw scale with dual axes
-            secondary = not is_zar
-            fig.add_trace(
-                go.Scatter(
-                    x=df['Date'], y=df[var],
-                    name=var_label,
-                    line=dict(color=color, width=width, shape='spline'),
-                    mode='lines',
-                    hovertemplate=f'<b>{var_label}</b>: %{{y:.4f}}<extra></extra>',
-                ),
-                secondary_y=secondary,
+        var_normalized = normalize(df[var])
+        fig.add_trace(
+            go.Scatter(
+                x=df['Date'], y=var_normalized,
+                name=var_label,
+                line=dict(color=color, width=width, shape='spline'),
+                mode='lines',
+                customdata=df[var],
+                hovertemplate=f'<b>{var_label}</b>: %{{customdata:.4f}}<br><span style="color:#86868b">Normalized: %{{y:.1f}}</span><extra></extra>',
             )
-        else:
-            # Single-axis: normalize all to 0-100
-            var_normalized = normalize(df[var])
-            fig.add_trace(
-                go.Scatter(
-                    x=df['Date'], y=var_normalized,
-                    name=var_label,
-                    line=dict(color=color, width=width, shape='spline'),
-                    mode='lines',
-                    customdata=df[var],
-                    hovertemplate=f'<b>{var_label}</b>: %{{customdata:.4f}}<br>Normalized: %{{y:.1f}}<extra></extra>',
-                )
-            )
+        )
 
     fig.update_layout(
         **base_layout,
-        margin=dict(l=50, r=50 if use_dual else 20, t=30, b=80),
+        margin=dict(l=50, r=20, t=30, b=80),
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11, weight=500, color=text_muted),
@@ -1323,7 +1297,7 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         ),
         hovermode="x unified",
         hoverlabel=dict(
-            bgcolor='rgba(16,16,16,0.96)' if is_dark else 'rgba(255,255,255,0.96)',
+            bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
             font_size=12, font_family="Inter", font_color=text_color,
             bordercolor=line_color, namelength=-1,
         ),
@@ -1336,33 +1310,15 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         dragmode='zoom',
     )
 
-    if use_dual:
-        fig.update_yaxes(
-            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
-            zeroline=False, showline=False,
-            tickfont=dict(size=10, color=text_muted),
-            title=dict(text="ZAR/USD", font=dict(size=11, color=zar_color, weight=500)),
-            showspikes=False, secondary_y=False,
-        )
-        # Right axis label: first right-side variable or generic
-        right_label = label_map.get(right_vars[0], right_vars[0]) if len(right_vars) == 1 else "Other Variables"
-        right_color = color_palette[0]
-        fig.update_yaxes(
-            showgrid=False, zeroline=False, showline=False,
-            tickfont=dict(size=10, color=text_muted),
-            title=dict(text=right_label, font=dict(size=11, color=right_color, weight=500)),
-            showspikes=False, secondary_y=True,
-        )
-    else:
-        y_title = "Normalized (0–100)" if len(selected_predictors) > 1 else label_map.get(selected_predictors[0], selected_predictors[0])
-        fig.update_yaxes(
-            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
-            zeroline=False, showline=False,
-            tickfont=dict(size=10, color=text_muted),
-            title=dict(text=y_title, font=dict(size=11, color=text_muted, weight=500)),
-            tickformat=".0f" if len(selected_predictors) > 1 else "",
-            showspikes=False,
-        )
+    y_title = "Normalized (0–100)"
+    fig.update_yaxes(
+        showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+        zeroline=False, showline=False,
+        tickfont=dict(size=10, color=text_muted),
+        title=dict(text=y_title, font=dict(size=11, color=text_muted, weight=500)),
+        tickformat=".0f",
+        showspikes=False,
+    )
 
     # Range selector buttons
     fig.update_xaxes(
@@ -1579,12 +1535,12 @@ def render_model_ui(active_tab, prediction_data, theme):
 
     # ── Historical fit chart ──
     history = result.get('history', {})
-    # Fallback to dark theme if theme is None
+    # Fallback to dark theme if theme is None — Apple palette
     is_dark = (theme == 'dark') if theme else True
-    text_color = '#ffffff' if is_dark else '#0a0a0a'
-    text_muted = '#6b6b6b' if is_dark else '#737373'
-    grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
-    line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
+    text_color = '#f5f5f7' if is_dark else '#1d1d1f'
+    text_muted = '#86868b' if is_dark else '#6e6e73'
+    grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
+    line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
 
     fig = go.Figure()
 
@@ -1643,13 +1599,14 @@ def render_model_ui(active_tab, prediction_data, theme):
             font=dict(color=text_muted, size=14)
         )
 
+    font_family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif"
     layout = {
         'template': None,
         'paper_bgcolor': 'rgba(0,0,0,0)',
         'plot_bgcolor': 'rgba(0,0,0,0)',
-        'margin': dict(l=56, r=24, t=32, b=48),
+        'margin': dict(l=48, r=24, t=24, b=48),
         'autosize': True,
-        'font': dict(family="Inter, sans-serif", size=12, color=text_color),
+        'font': dict(family=font_family, size=12, color=text_color),
         'legend': dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
@@ -1657,8 +1614,8 @@ def render_model_ui(active_tab, prediction_data, theme):
         ),
         'hovermode': "x unified",
         'hoverlabel': dict(
-            bgcolor='rgba(16,16,16,0.96)' if is_dark else 'rgba(255,255,255,0.96)',
-            font_size=12, font_family="Inter", font_color=text_color,
+            bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
+            font_size=12, font_family=font_family, font_color=text_color,
             bordercolor=line_color,
         ),
         'xaxis': dict(
@@ -1777,10 +1734,10 @@ def _build_diagnostic_plots(diagnostics_data, theme):
                       style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
 
     is_dark = (theme == 'dark') if theme else True
-    text_color = '#ffffff' if is_dark else '#0a0a0a'
-    text_muted = '#6b6b6b' if is_dark else '#737373'
-    grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
-    line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
+    text_color = '#f5f5f7' if is_dark else '#1d1d1f'
+    text_muted = '#86868b' if is_dark else '#6e6e73'
+    grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
+    line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
 
     # Actual vs Predicted Plot (Replaces QQ Plot)
     avp_data = diagnostics_data.get('actual_vs_predicted', {})
@@ -2262,10 +2219,11 @@ def run_scenario_prediction(current_values, baseline, theme):
 
 def _apply_scenario_chart_layout(fig, theme):
     is_dark = (theme == 'dark') if theme else True
-    text_color = '#ffffff' if is_dark else '#0a0a0a'
-    text_muted = '#6b6b6b' if is_dark else '#737373'
-    grid_color = 'rgba(255,255,255,0.04)' if is_dark else 'rgba(0,0,0,0.04)'
-    line_color = 'rgba(255,255,255,0.08)' if is_dark else 'rgba(0,0,0,0.08)'
+    text_color = '#f5f5f7' if is_dark else '#1d1d1f'
+    text_muted = '#86868b' if is_dark else '#6e6e73'
+    grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
+    line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
+    font_family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif"
 
     fig.update_layout(
         template=None,
@@ -2273,7 +2231,7 @@ def _apply_scenario_chart_layout(fig, theme):
         plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=180, r=24, t=16, b=48),
         autosize=True,
-        font=dict(family="Inter, sans-serif", size=12, color=text_color),
+        font=dict(family=font_family, size=12, color=text_color),
         showlegend=False,
         hovermode="closest",
         xaxis=dict(
@@ -2473,10 +2431,10 @@ def render_scenario_comparison(saved_scenarios, baseline, theme):
             ])
         )
 
-    # Comparison chart
+    # Comparison chart — Apple palette
     is_dark = (theme == 'dark') if theme else True
-    text_color = '#ffffff' if is_dark else '#0a0a0a'
-    text_muted = '#6b6b6b' if is_dark else '#737373'
+    text_color = '#f5f5f7' if is_dark else '#1d1d1f'
+    text_muted = '#86868b' if is_dark else '#6e6e73'
 
     fig = go.Figure()
 

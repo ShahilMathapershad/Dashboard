@@ -41,7 +41,8 @@ app = Dash(
     use_pages=True,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     external_scripts=[
-        {'src': '/assets/interactions.js', 'type': 'module'}
+        {'src': '/assets/interactions.js', 'type': 'module'},
+        {'src': '/assets/three-scenes.js'},
     ],
     suppress_callback_exceptions=True,
     background_callback_manager=background_callback_manager,

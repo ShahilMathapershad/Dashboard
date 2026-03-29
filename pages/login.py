@@ -8,11 +8,14 @@ dash.register_page(__name__, path='/')
 def layout():
     return html.Div(className='login-container', children=[
         dcc.Store(id='login-stage-store', data=1),
-        
-        # Background Trendline Container (SVG injected via JS due to dash.html limitations)
+
+        # 3D Three.js Canvas — renders particle globe + flowing mesh
+        html.Div(id='three-canvas-landing'),
+
+        # Background Trendline Container (SVG injected via JS — subtle fallback behind 3D)
         html.Div(id='bg-trendline-container', className='bg-trendline-svg'),
 
-        # Particles
+        # Particles — subtle floating labels behind the 3D scene
         html.Div(className='particles-container', children=[
             html.Div('GDP', className='particle-node', style={'top': '25%', 'left': '15%', 'animationDelay': '0s'}),
             html.Div('VIX', className='particle-node', style={'top': '65%', 'left': '80%', 'animationDelay': '-5s'}),

@@ -1,44 +1,51 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 /* ═══════════════════════════════════════════
-   Design Tokens
+   Design Tokens — Apple-Inspired
    ═══════════════════════════════════════════ */
 :root {
-    --bg: #0a0a0a;
-    --bg-raised: #111111;
-    --bg-surface: #161616;
+    --bg: #000000;
+    --bg-raised: #0d0d0d;
+    --bg-surface: #141414;
     --bg-overlay: rgba(255, 255, 255, 0.03);
     --bg-overlay-hover: rgba(255, 255, 255, 0.06);
 
-    --text-1: #f2f2f7;
-    --text-2: #98989f;
-    --text-3: #545458;
+    --text-1: #f5f5f7;
+    --text-2: #86868b;
+    --text-3: #48484a;
 
     --accent: #5b8def;
     --accent-2: #7c3aed;
-    --accent-glow: rgba(91, 141, 239, 0.2);
+    --accent-glow: rgba(91, 141, 239, 0.15);
     --accent-gradient: linear-gradient(135deg, #5b8def 0%, #7c3aed 100%);
 
     --nwu-purple: #3A1A5E;
     --nwu-purple-glow: rgba(58, 26, 94, 0.4);
 
-    --border: rgba(255, 255, 255, 0.08);
-    --border-hover: rgba(255, 255, 255, 0.14);
+    --border: rgba(255, 255, 255, 0.06);
+    --border-hover: rgba(255, 255, 255, 0.12);
 
-    --error: #ef4444;
-    --success: #22c55e;
+    --error: #ff453a;
+    --success: #30d158;
 
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+    --radius-xl: 24px;
     --radius-full: 9999px;
 
-    /* Apple-style diffused shadows */
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
-    --shadow-md: 0 4px 24px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
-    --shadow-lg: 0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
-    --shadow-xl: 0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.10);
+    /* Apple-style layered shadows — creates floating depth */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.1);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06);
+    --shadow-lg: 0 12px 48px rgba(0,0,0,0.2), 0 2px 8px rgba(0,0,0,0.08);
+    --shadow-xl: 0 24px 80px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.12);
+
+    /* 3D depth shadow — multi-layer for floating card effect */
+    --shadow-3d:
+        0 1px 1px rgba(0,0,0,0.08),
+        0 4px 8px rgba(0,0,0,0.06),
+        0 12px 36px rgba(0,0,0,0.12),
+        0 24px 80px rgba(0,0,0,0.16);
 
     /* Standard easing */
     --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -55,11 +62,11 @@
 }
 
 .light-theme {
-    --bg: #f5f5f7;
+    --bg: #fbfbfd;
     --bg-raised: #ffffff;
-    --bg-surface: #ffffff;
+    --bg-surface: #f5f5f7;
     --bg-overlay: rgba(0, 0, 0, 0.02);
-    --bg-overlay-hover: rgba(0, 0, 0, 0.05);
+    --bg-overlay-hover: rgba(0, 0, 0, 0.04);
 
     --text-1: #1d1d1f;
     --text-2: #6e6e73;
@@ -67,16 +74,21 @@
 
     --accent: #4f7df3;
     --accent-2: #8b5cf6;
-    --accent-glow: rgba(79, 125, 243, 0.12);
+    --accent-glow: rgba(79, 125, 243, 0.1);
     --accent-gradient: linear-gradient(135deg, #4f7df3 0%, #8b5cf6 100%);
 
-    --border: rgba(0, 0, 0, 0.08);
-    --border-hover: rgba(0, 0, 0, 0.12);
+    --border: rgba(0, 0, 0, 0.06);
+    --border-hover: rgba(0, 0, 0, 0.1);
 
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-    --shadow-md: 0 4px 24px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03);
-    --shadow-lg: 0 8px 40px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04);
-    --shadow-xl: 0 20px 60px rgba(0,0,0,0.10), 0 4px 16px rgba(0,0,0,0.06);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.03);
+    --shadow-lg: 0 12px 48px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
+    --shadow-xl: 0 24px 80px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06);
+    --shadow-3d:
+        0 1px 1px rgba(0,0,0,0.03),
+        0 4px 8px rgba(0,0,0,0.04),
+        0 12px 36px rgba(0,0,0,0.06),
+        0 24px 80px rgba(0,0,0,0.08);
 }
 
 /* Logo toggle */
@@ -1067,21 +1079,32 @@ p  { margin: 0; color: var(--text-2); }
 }
 
 /* ═══════════════════════════════════════════
-   Hero Chart - Fill available space
+   Hero Chart - 3D Floating Panel
    ═══════════════════════════════════════════ */
 .hero-chart {
     background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    transition: border-color var(--dur) var(--ease), height 0.3s var(--ease);
+    transition: border-color 0.3s var(--spring), box-shadow 0.3s var(--spring), transform 0.6s var(--spring);
     width: 100%;
     display: flex;
     flex-direction: column;
     position: relative;
+    box-shadow: var(--shadow-3d);
+}
+.hero-chart::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 30%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.06) 70%, transparent 100%);
+    z-index: 2;
+    pointer-events: none;
 }
 .hero-chart:hover {
     border-color: var(--border-hover);
+    box-shadow: var(--shadow-3d), 0 0 0 1px rgba(91, 141, 239, 0.04);
 }
 
 /* Keep Plotly responsive and maintain aspect ratio */
@@ -1164,8 +1187,19 @@ p  { margin: 0; color: var(--text-2); }
 .model-card {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 24px;
+    border-radius: var(--radius-xl);
+    padding: 28px;
+    box-shadow: var(--shadow-3d);
+    position: relative;
+}
+.model-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.05) 70%, transparent 100%);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    pointer-events: none;
 }
 
 .card-title {
@@ -2408,15 +2442,16 @@ p  { margin: 0; color: var(--text-2); }
 }
 
 /* ─────────────────────────────────────────
-   Enhanced Card Hover
+   Enhanced Card Hover — 3D Lift
 ───────────────────────────────────────── */
 .model-card {
-    transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
+    transition: border-color 0.35s var(--spring), box-shadow 0.35s var(--spring), transform 0.35s var(--spring);
 }
 
 .model-card:hover {
     border-color: var(--border-hover);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-3d), 0 0 0 1px rgba(91, 141, 239, 0.03);
+    transform: translateY(-2px);
 }
 
 /* ─────────────────────────────────────────
@@ -3065,5 +3100,242 @@ p  { margin: 0; color: var(--text-2); }
     .chat-fab {
         right: 16px;
         bottom: 16px;
+    }
+}
+
+
+/* ═══════════════════════════════════════════
+   3D RENDER SYSTEM
+   Three.js canvas + interactive tilt + glass depth
+   ═══════════════════════════════════════════ */
+
+/* ── Three.js Canvas Container (Landing) ── */
+#three-canvas-landing {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;          /* above .bg-trendline-svg (z:0), below landing/login stages */
+    pointer-events: none;
+    overflow: hidden;
+}
+#three-canvas-landing canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+/* Ensure landing-stage and login-stage sit above the 3D canvas */
+.landing-stage { z-index: 10; }
+.login-stage   { z-index: 10; }
+.particles-container { z-index: 2; }
+
+/* ── Chart 3D Tilt System ── */
+.chart-3d {
+    transform-style: preserve-3d;
+    will-change: transform;
+    /* Spring-back on leave handled by ChartTilt.ts */
+}
+
+/* Glass-shine highlight that follows cursor on chart-3d */
+.chart-3d-shine {
+    position: absolute;
+    width: 280px;
+    height: 280px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 3;
+    opacity: 0;
+    transition: opacity 0.4s var(--spring);
+    mix-blend-mode: screen;
+}
+.light-theme .chart-3d-shine {
+    background: radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%);
+}
+
+/* ── 3D Chart Background — Spotlight gradient ── */
+.hero-chart .js-plotly-plot,
+.model-chart .js-plotly-plot,
+.scenario-chart .js-plotly-plot {
+    background: radial-gradient(ellipse at 50% 30%, rgba(91, 141, 239, 0.02) 0%, transparent 70%);
+}
+.light-theme .hero-chart .js-plotly-plot,
+.light-theme .model-chart .js-plotly-plot,
+.light-theme .scenario-chart .js-plotly-plot {
+    background: radial-gradient(ellipse at 50% 30%, rgba(79, 125, 243, 0.02) 0%, transparent 70%);
+}
+
+/* ── Card Glass Edge Highlight ── */
+.model-card::after,
+.hero-chart::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.02) 50%, transparent 100%);
+    pointer-events: none;
+}
+
+/* ── Scenario Cards — 3D Depth ── */
+.scenario-card {
+    box-shadow: var(--shadow-3d);
+    transition: transform 0.35s var(--spring), box-shadow 0.35s var(--spring), border-color 0.35s var(--spring);
+}
+.scenario-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-3d), 0 0 0 1px rgba(91, 141, 239, 0.04);
+}
+
+/* ── Sidebar — Glass Panel ── */
+.sidebar {
+    background: rgba(13, 13, 13, 0.8);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    border-right: 1px solid rgba(255,255,255,0.04);
+}
+.light-theme .sidebar {
+    background: rgba(255, 255, 255, 0.8);
+    border-right: 1px solid rgba(0,0,0,0.06);
+}
+
+/* ── Topbar — Enhanced Glass ── */
+.topbar {
+    background: rgba(0, 0, 0, 0.6) !important;
+    backdrop-filter: saturate(200%) blur(28px) !important;
+    -webkit-backdrop-filter: saturate(200%) blur(28px) !important;
+    border-bottom-color: rgba(255,255,255,0.04) !important;
+}
+.light-theme .topbar {
+    background: rgba(251, 251, 253, 0.72) !important;
+    border-bottom-color: rgba(0,0,0,0.06) !important;
+}
+
+/* ── Landing Page — Apple Hero Typography ── */
+.landing-headline {
+    font-size: clamp(2.8rem, 6vw, 5rem) !important;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    background: linear-gradient(160deg, #ffffff 0%, #a1a1a6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.05 !important;
+}
+.light-theme .landing-headline {
+    background: linear-gradient(160deg, #1d1d1f 0%, #6e6e73 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+/* ── Feature Cards — Glass 3D ── */
+.feature-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-3d);
+    backdrop-filter: saturate(160%) blur(20px);
+    -webkit-backdrop-filter: saturate(160%) blur(20px);
+    padding: 32px;
+    position: relative;  /* needed for ::before */
+}
+.feature-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    pointer-events: none;
+}
+.feature-card:hover {
+    border-color: rgba(91, 141, 239, 0.25);
+    transform: translateY(-8px);
+    box-shadow: var(--shadow-3d), 0 8px 32px rgba(91, 141, 239, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+}
+/* Light theme — use solid white cards so titles stay readable */
+.light-theme .feature-card {
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(0, 0, 0, 0.06);
+}
+.light-theme .feature-card:hover {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(79, 125, 243, 0.2);
+}
+.light-theme .feature-title { color: var(--text-1); }
+.light-theme .feature-desc  { color: var(--text-2); }
+.light-theme .landing-headline {
+    background: linear-gradient(160deg, #1d1d1f 0%, #6e6e73 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.light-theme .landing-subheadline { color: var(--text-2); }
+
+/* ── Stat Pills — 3D Capsules ── */
+.stat-pill {
+    box-shadow: var(--shadow-md);
+    border-radius: var(--radius-xl) !important;
+}
+.stat-pill:hover {
+    box-shadow: var(--shadow-lg), 0 8px 32px rgba(91, 141, 239, 0.1);
+}
+
+/* ── Predictor Bar — Refined ── */
+.predictor-bar {
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-sm);
+}
+
+/* ── Login Card Glass — Enhanced ── */
+.login-card-glass {
+    box-shadow: var(--shadow-xl), inset 0 1px 0 rgba(255,255,255,0.04) !important;
+    border-radius: var(--radius-xl) !important;
+}
+
+/* ── Page Title — Apple Display ── */
+.page-title {
+    font-size: 1.75rem !important;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+}
+
+/* ── Forecast Table — Glass Rows ── */
+.forecast-table-wrapper table {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+/* ── Loading Spinner — 3D Rings ── */
+.futuristic-loader .ring {
+    border-width: 1.5px;
+    box-shadow: 0 0 12px rgba(91, 141, 239, 0.08);
+}
+
+/* ── Plotly Hover Label — frosted glass blur ── */
+/*
+   Plotly renders hover boxes as SVG <g class="hovertext"> containing a <rect>.
+   backdrop-filter on SVG elements is supported in Chrome/Safari (WebKit).
+   The bgcolor is set to ~75% opacity in Python so the blur shows through.
+*/
+.js-plotly-plot .plotly .hovertext rect,
+.js-plotly-plot .plotly .hoverlayer .hovertext rect {
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(160%);
+}
+
+/* Unified hover box (hovermode="x unified") uses a different class */
+.js-plotly-plot .plotly .hoverlayer .spikeline,
+.js-plotly-plot .plotly .hoverlayer g.hovertext rect {
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(160%);
+}
+
+/* ── Disable 3D tilt on touch / small screens ── */
+@media (pointer: coarse), (max-width: 768px) {
+    .chart-3d {
+        transform: none !important;
+    }
+    .chart-3d-shine {
+        display: none !important;
     }
 }
