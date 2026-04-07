@@ -153,6 +153,13 @@ def data_tab_content(existing_data=None):
             ]),
             html.Div(className='page-actions', children=[
                 html.Div(id='fetch-status-display', className='status-badge'),
+                html.Button(
+                    '↻ Refresh Data',
+                    id='refresh-data-btn',
+                    className='btn-ghost',
+                    n_clicks=0,
+                    title='Force re-fetch from FRED, World Bank & Stats SA APIs (SA CPI is hardcoded)',
+                ),
             ])
         ]),
 
@@ -214,46 +221,19 @@ def data_tab_content(existing_data=None):
             ),
 
             # Data Table (hidden by default)
-            html.Div(id='data-table-container', className='table-card', style={'display': 'none'})
-        ]),
-
-        # ── AI Chat Panel ──
-        html.Div(id='chat-panel', className='chat-panel', children=[
-            html.Div(className='chat-header', children=[
-                html.Div(className='chat-header-left', children=[
-                    html.Span('✦', className='chat-header-icon'),
-                    html.Span('AI Assistant', className='chat-header-title'),
+            html.Div(id='data-table-container', className='table-card', style={'display': 'none'}, children=[
+                html.Div(className='table-controls', children=[
+                    html.Div(className='plot-mode-toggle', children=[
+                        html.Button('Raw', id='table-mode-raw', className='plot-mode-btn plot-mode-active', n_clicks=0),
+                        html.Button('% Change', id='table-mode-pct', className='plot-mode-btn', n_clicks=0),
+                    ]),
+                    html.Button('↓ Download CSV', id='download-csv-btn', className='btn-ghost', n_clicks=0),
                 ]),
-                html.Button('✕', id='chat-close-btn', className='chat-close-btn', n_clicks=0),
-            ]),
-            html.Div(id='chat-messages', className='chat-messages', children=[
-                html.Div(className='chat-message chat-message-ai', children=[
-                    html.Div("Ask me about the data on the chart — trends, variables, ZAR/USD dynamics, or economics.",
-                             className='chat-bubble chat-bubble-ai')
-                ])
-            ]),
-            html.Div(className='chat-input-area', children=[
-                dcc.Input(
-                    id='chat-input',
-                    type='text',
-                    placeholder='Ask about the chart or economics...',
-                    className='chat-input',
-                    debounce=False,
-                    n_submit=0,
-                ),
-                html.Button('→', id='chat-send-btn', className='chat-send-btn', n_clicks=0),
+                html.Div(id='data-table-body'),
+                dcc.Download(id='download-csv'),
             ]),
         ]),
 
-        # Chat toggle FAB
-        html.Button(
-            html.Span('✦', className='chat-fab-icon'),
-            id='chat-toggle-btn',
-            className='chat-fab',
-            n_clicks=0,
-        ),
-        # Hidden dummy for clientside loading callback
-        html.Div(id='chat-loading-trigger', style={'display': 'none'}),
     ])
 
 
@@ -640,67 +620,78 @@ def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trig
     return fetch_trigger, model_trigger, scenario_trigger
 
 
-def _generate_data_table(df_all):
+def _prepare_table_df(df_all):
+    """Convert raw data list/df to a sorted DataFrame with proper Date column."""
     if df_all is None or (isinstance(df_all, pd.DataFrame) and df_all.empty) or (
             isinstance(df_all, list) and not df_all):
-        return html.Div("No data available for table.")
-
+        return None
     if isinstance(df_all, list):
         df_all = pd.DataFrame(df_all)
-
     df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
-    df_sorted = df_all.sort_values('Date', ascending=True)
+    return df_all.sort_values('Date', ascending=True)
 
-    # Calculate percentage changes for all columns except Date
-    pct_change_data = []
-    for i in range(1, len(df_sorted)):
-        row_data = {'Date': df_sorted.iloc[i]['Date']}
-        for col in df_sorted.columns:
-            if col != 'Date':
-                prev_val = df_sorted.iloc[i - 1][col]
-                curr_val = df_sorted.iloc[i][col]
-                if pd.notna(prev_val) and pd.notna(curr_val) and prev_val != 0:
-                    pct_change = ((curr_val - prev_val) / prev_val) * 100
-                    row_data[col] = pct_change
-                else:
-                    row_data[col] = None
-        pct_change_data.append(row_data)
 
-    df_pct = pd.DataFrame(pct_change_data)
-    df_pct = df_pct.sort_values('Date', ascending=False).head(10)
+def _generate_data_table(df_all, mode='raw'):
+    """Build an HTML table in either 'raw' or 'pct' (MoM % change) mode."""
+    df_sorted = _prepare_table_df(df_all)
+    if df_sorted is None:
+        return html.Div("No data available for table.")
 
-    # Build table — all variables treated equally, ZAR/USD first
-    all_vars = [c for c in df_pct.columns if c != 'Date']
+    all_vars = [c for c in df_sorted.columns if c != 'Date']
     if 'ZAR_USD' in all_vars:
         all_vars.remove('ZAR_USD')
         all_vars.insert(0, 'ZAR_USD')
 
-    user_friendly_columns = ['Date']
-    for v in all_vars:
-        friendly_name = 'ZAR/USD' if v == 'ZAR_USD' else SERIES_CONFIG.get(v, {}).get('label', v)
-        if len(friendly_name) > 25:
-            friendly_name = friendly_name.replace('(', '\n(').replace(' for ', '\n')
-            friendly_name = '\n'.join([line.strip() for line in friendly_name.split('\n') if line.strip()])
-        user_friendly_columns.append(friendly_name)
+    # Build the display DataFrame
+    if mode == 'pct':
+        rows = []
+        for i in range(1, len(df_sorted)):
+            row = {'Date': df_sorted.iloc[i]['Date']}
+            for col in all_vars:
+                prev = df_sorted.iloc[i - 1][col]
+                curr = df_sorted.iloc[i][col]
+                if pd.notna(prev) and pd.notna(curr) and prev != 0:
+                    row[col] = ((curr - prev) / prev) * 100
+                else:
+                    row[col] = None
+            rows.append(row)
+        df_display = pd.DataFrame(rows).sort_values('Date', ascending=False)
+    else:
+        df_display = df_sorted.sort_values('Date', ascending=False)
 
+    # Friendly column names
+    friendly = {}
+    for v in all_vars:
+        name = 'ZAR/USD' if v == 'ZAR_USD' else SERIES_CONFIG.get(v, {}).get('label', v)
+        if len(name) > 25:
+            name = name.replace('(', '\n(').replace(' for ', '\n')
+            name = '\n'.join([l.strip() for l in name.split('\n') if l.strip()])
+        friendly[v] = name
+
+    col_headers = ['Date'] + [friendly[v] for v in all_vars]
     header = html.Thead(html.Tr(
-        [html.Th(col, style={'textAlign': 'center', 'whiteSpace': 'pre-line', 'fontSize': '0.75rem'}) for col in
-         user_friendly_columns]))
+        [html.Th(c, style={'textAlign': 'center', 'whiteSpace': 'pre-line', 'fontSize': '0.75rem'})
+         for c in col_headers]))
+
     body_rows = []
-    for _, row in df_pct.iterrows():
+    for _, row in df_display.iterrows():
         tds = [html.Td(row['Date'], style={'fontWeight': '500'})]
         for col in all_vars:
             val = row.get(col)
             if pd.isna(val):
                 tds.append(html.Td('-', style={'textAlign': 'center'}))
-            else:
+            elif mode == 'pct':
                 if col == 'ZAR_USD':
                     color = '#EF4444' if val > 0 else '#10B981' if val < 0 else '#6b6b6b'
-                    tds.append(html.Td(f"{val:+.2f}%", style={'color': color, 'fontWeight': '700', 'textAlign': 'center',
-                                                              'fontSize': '1.05em'}))
+                    tds.append(html.Td(f"{val:+.2f}%", style={
+                        'color': color, 'fontWeight': '700', 'textAlign': 'center', 'fontSize': '1.05em'}))
                 else:
                     color = '#10B981' if val > 0 else '#EF4444' if val < 0 else '#6b6b6b'
-                    tds.append(html.Td(f"{val:+.2f}%", style={'color': color, 'fontWeight': '600', 'textAlign': 'center'}))
+                    tds.append(html.Td(f"{val:+.2f}%", style={
+                        'color': color, 'fontWeight': '600', 'textAlign': 'center'}))
+            else:
+                fmt = f"{val:.4f}" if abs(val) < 1000 else f"{val:.2f}"
+                tds.append(html.Td(fmt, style={'textAlign': 'center', 'fontVariantNumeric': 'tabular-nums'}))
         body_rows.append(html.Tr(tds))
 
     return html.Table(className='custom-table', children=[header, html.Tbody(body_rows)])
@@ -709,29 +700,43 @@ def _generate_data_table(df_all):
 @callback(
     Output('fetch-status-display', 'children'),
     Output('visualization-container', 'style', allow_duplicate=True),
-    Output('data-table-container', 'children'),
+    Output('data-table-body', 'children'),
     Output('data-loading', 'style'),
     Input('dashboard-tab', 'data'),
     Input('fetched-data', 'data'),
     Input('fetched-data-status', 'data'),
+    Input('table-view-mode', 'data'),
     prevent_initial_call='initial_duplicate'
 )
-def sync_data_tab_ui(active_tab, data, status_info):
+def sync_data_tab_ui(active_tab, data, status_info, table_mode):
     if active_tab != 'data':
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     status_msg = ""
     if status_info:
-        # Reconstruct the status badge
         status_msg = html.Span(status_info.get('text', ''), style={'color': status_info.get('color', '#6b6b6b')})
 
     viz_style = {'display': 'block', 'marginTop': '2rem'} if data else {'display': 'none'}
     loading_style = {'display': 'none'} if data else {'display': 'flex'}
 
-    # Use the helper to rebuild the table from persisted data
-    table = _generate_data_table(data) if data else ""
+    table = _generate_data_table(data, mode=table_mode or 'raw') if data else ""
 
     return status_msg, viz_style, table, loading_style
+
+
+# Refresh button → force a full API re-fetch
+@callback(
+    Output('fetched-data', 'data', allow_duplicate=True),
+    Output('fetched-data-status', 'data', allow_duplicate=True),
+    Output('force-refresh-trigger', 'data'),
+    Input('refresh-data-btn', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def handle_refresh_click(n_clicks):
+    if not n_clicks:
+        return dash.no_update, dash.no_update, dash.no_update
+    # Clear existing data so the fetch callback runs the full API path
+    return None, None, n_clicks
 
 
 # Fetch data using hardcoded API keys
@@ -742,6 +747,7 @@ def sync_data_tab_ui(active_tab, data, status_info):
     Output('selected-predictors', 'data'),
     Output('fetched-data-status', 'data'),
     Input('fetch-trigger', 'data'),
+    Input('force-refresh-trigger', 'data'),
     State('fetched-data', 'data'),
     State('predictor-dropdown-options-store', 'data'),
     State('selected-predictors', 'data'),
@@ -751,20 +757,25 @@ def sync_data_tab_ui(active_tab, data, status_info):
     running=[
         (Output('data-error', 'children'), "", ""),
         (Output('data-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
+        (Output('refresh-data-btn', 'disabled'), True, False),
     ],
 )
-def fetch_data(trigger_value, existing_data, existing_options, existing_selected, existing_status):
+def fetch_data(trigger_value, force_refresh, existing_data, existing_options, existing_selected, existing_status):
     import pandas as pd
     import time
 
-    if trigger_value:
-        # If we already have data in session, just return it to re-populate UI
-        if existing_data:
+    ctx = dash.callback_context
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else ''
+    is_forced = triggered_id == 'force-refresh-trigger' and (force_refresh or 0) > 0
+
+    if trigger_value or is_forced:
+        # If we already have data and this is NOT a forced refresh, reuse it
+        if existing_data and not is_forced:
             return existing_data, "", existing_options, existing_selected, existing_status
 
         try:
-            # Check if we should update from API or Supabase
-            use_api = should_update_from_api()
+            # Force refresh always hits APIs; normal load checks should_update_from_api
+            use_api = True if is_forced else should_update_from_api()
 
             if not use_api:
                 processed = fetch_data_from_supabase()
@@ -908,6 +919,60 @@ def toggle_data_table(n_clicks, current_style):
         return {'display': 'block'}, 'Hide Table'
     else:
         return {'display': 'none'}, 'Show Table'
+
+
+# Table view mode toggle (Raw / % Change)
+@callback(
+    Output('table-view-mode', 'data'),
+    Output('table-mode-raw', 'className'),
+    Output('table-mode-pct', 'className'),
+    Input('table-mode-raw', 'n_clicks'),
+    Input('table-mode-pct', 'n_clicks'),
+    State('table-view-mode', 'data'),
+    prevent_initial_call=True,
+)
+def toggle_table_mode(raw_clicks, pct_clicks, current_mode):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return current_mode, dash.no_update, dash.no_update
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    if trigger == 'table-mode-raw':
+        return 'raw', 'plot-mode-btn plot-mode-active', 'plot-mode-btn'
+    return 'pct', 'plot-mode-btn', 'plot-mode-btn plot-mode-active'
+
+
+# Download CSV — pulls fresh from Supabase
+@callback(
+    Output('download-csv', 'data'),
+    Input('download-csv-btn', 'n_clicks'),
+    State('table-view-mode', 'data'),
+    prevent_initial_call=True,
+)
+def download_csv(n_clicks, table_mode):
+    if not n_clicks:
+        return dash.no_update
+
+    # Always pull latest from Supabase for the download
+    try:
+        df = fetch_data_from_supabase()
+        if df is None or df.empty:
+            return dash.no_update
+    except Exception:
+        return dash.no_update
+
+    df = df.reset_index()
+    df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+    df = df.sort_values('Date')
+
+    if table_mode == 'pct':
+        numeric_cols = [c for c in df.columns if c != 'Date']
+        pct_df = df[['Date']].iloc[1:].copy()
+        for col in numeric_cols:
+            pct_df[col] = df[col].pct_change().iloc[1:] * 100
+        pct_df = pct_df.round(4)
+        return dcc.send_data_frame(pct_df.to_csv, 'zar_usd_pct_changes.csv', index=False)
+    else:
+        return dcc.send_data_frame(df.to_csv, 'zar_usd_raw_data.csv', index=False)
 
 
 # ── Plot mode switching ──
@@ -2482,342 +2547,3 @@ def render_scenario_comparison(saved_scenarios, baseline, theme):
     return scenario_cards, fig.to_dict()
 
 
-# ═══════════════════════════════════════════
-#   AI Chatbot (Data Explorer)
-# ═══════════════════════════════════════════
-
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-
-# Toggle chat panel open/closed
-dash.clientside_callback(
-    """
-    function(toggleClicks, closeClicks) {
-        const panel = document.getElementById('chat-panel');
-        const fab = document.getElementById('chat-toggle-btn');
-        if (!panel) return window.dash_clientside.no_update;
-
-        const isOpen = panel.classList.contains('chat-panel-open');
-        if (isOpen) {
-            panel.classList.remove('chat-panel-open');
-            if (fab) fab.classList.remove('chat-fab-hidden');
-        } else {
-            panel.classList.add('chat-panel-open');
-            if (fab) fab.classList.add('chat-fab-hidden');
-            // Focus input
-            setTimeout(() => {
-                const input = document.getElementById('chat-input');
-                if (input) input.focus();
-            }, 300);
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('chat-panel', 'id'),
-    Input('chat-toggle-btn', 'n_clicks'),
-    Input('chat-close-btn', 'n_clicks'),
-    prevent_initial_call=True
-)
-
-# Auto-scroll + typewriter animation on new messages
-dash.clientside_callback(
-    """
-    function(children) {
-        setTimeout(() => {
-            const el = document.getElementById('chat-messages');
-            if (!el) return;
-            el.scrollTop = el.scrollHeight;
-
-            // Find any new typewriter bubbles that haven't been animated yet
-            const bubbles = el.querySelectorAll('.chat-typewriter:not(.chat-tw-started)');
-            bubbles.forEach(bubble => {
-                bubble.classList.add('chat-tw-started');
-                const fullText = bubble.getAttribute('data-fulltext');
-                if (!fullText) return;
-
-                const words = fullText.split(/( +)/);  // preserve spaces
-                let idx = 0;
-                bubble.textContent = '';
-
-                const interval = setInterval(() => {
-                    if (idx < words.length) {
-                        bubble.textContent += words[idx];
-                        idx++;
-                        el.scrollTop = el.scrollHeight;
-                    } else {
-                        clearInterval(interval);
-                        bubble.classList.add('chat-tw-done');
-                    }
-                }, 30);
-            });
-        }, 60);
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('chat-send-btn', 'id'),
-    Input('chat-messages', 'children'),
-    prevent_initial_call=True
-)
-
-# Instant loading state — shows user bubble + typing dots before server responds
-dash.clientside_callback(
-    """
-    function(sendClicks, nSubmit, inputValue) {
-        if (!inputValue || !inputValue.trim()) return window.dash_clientside.no_update;
-
-        const messages = document.getElementById('chat-messages');
-        if (!messages) return window.dash_clientside.no_update;
-
-        // Append user bubble
-        const userDiv = document.createElement('div');
-        userDiv.className = 'chat-message chat-message-user';
-        const bubble = document.createElement('div');
-        bubble.className = 'chat-bubble chat-bubble-user';
-        bubble.textContent = inputValue.trim();
-        userDiv.appendChild(bubble);
-        messages.appendChild(userDiv);
-
-        // Append loading dots
-        const loadDiv = document.createElement('div');
-        loadDiv.className = 'chat-message chat-message-ai';
-        loadDiv.id = 'chat-loading-indicator';
-        loadDiv.innerHTML = '<div class="chat-bubble chat-bubble-ai"><div class="chat-loading-dots"><span></span><span></span><span></span></div></div>';
-        messages.appendChild(loadDiv);
-
-        // Scroll to bottom
-        messages.scrollTop = messages.scrollHeight;
-
-        // Clear input immediately for snappy feel
-        const input = document.getElementById('chat-input');
-        if (input) input.value = '';
-
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('chat-loading-trigger', 'children'),
-    Input('chat-send-btn', 'n_clicks'),
-    Input('chat-input', 'n_submit'),
-    State('chat-input', 'value'),
-    prevent_initial_call=True
-)
-
-
-def _build_plot_context(data, selected_predictors, options, plot_mode=None, compare_vars=None):
-    """Build a comprehensive text summary of all data available in the Data section."""
-    if not data:
-        return "No data has been loaded yet."
-
-    import numpy as np
-
-    df = pd.DataFrame(data)
-    df['Date'] = pd.to_datetime(df['Date'])
-    df = df.sort_values('Date')
-
-    label_map = {opt['value']: opt['label'] for opt in (options or [])}
-    numeric_cols = [c for c in df.columns if c != 'Date' and df[c].dtype in ['float64', 'int64', 'float32']]
-
-    lines = []
-
-    # Dataset overview
-    lines.append(f"=== DATASET OVERVIEW ===")
-    lines.append(f"Date range: {df['Date'].min().strftime('%Y-%m')} to {df['Date'].max().strftime('%Y-%m')}")
-    lines.append(f"Data points: {len(df)} monthly observations")
-    lines.append(f"Active plot mode: {plot_mode or 'timeseries'}")
-    if plot_mode == 'compare' and compare_vars:
-        cmp_names = [label_map.get(v, v) for v in compare_vars]
-        if len(compare_vars) == 2:
-            lines.append(f"Compare mode: 2D line plot — X={cmp_names[0]}, Y={cmp_names[1]}")
-        elif len(compare_vars) >= 3:
-            lines.append(f"Compare mode: 3D surface — X={cmp_names[0]}, Y={cmp_names[1]}, Z(surface)={cmp_names[2]}")
-    if selected_predictors:
-        sel_names = [label_map.get(v, v) for v in selected_predictors]
-        lines.append(f"Variables on time series chart: {', '.join(sel_names)}")
-
-    # All variable summaries
-    lines.append(f"\n=== ALL VARIABLES (summary stats) ===")
-    for col in numeric_cols:
-        s = df[col].dropna()
-        if s.empty:
-            continue
-        friendly = label_map.get(col, col)
-        latest = s.iloc[-1]
-        lines.append(f"• {friendly}: latest={latest:.4f}, min={s.min():.4f}, max={s.max():.4f}, mean={s.mean():.4f}")
-        if len(s) >= 2:
-            pct_m = ((s.iloc[-1] - s.iloc[-2]) / abs(s.iloc[-2])) * 100 if s.iloc[-2] != 0 else 0
-            lines.append(f"    MoM: {pct_m:+.2f}%")
-        if len(s) >= 12:
-            yoy = ((s.iloc[-1] - s.iloc[-12]) / abs(s.iloc[-12])) * 100 if s.iloc[-12] != 0 else 0
-            lines.append(f"    YoY: {yoy:+.2f}%")
-
-    # Correlation matrix — top correlations with ZAR/USD and between variables
-    lines.append(f"\n=== KEY CORRELATIONS ===")
-    if 'ZAR_USD' in numeric_cols and len(numeric_cols) > 1:
-        corr = df[numeric_cols].corr()
-
-        # ZAR/USD correlations ranked
-        zar_corr = corr['ZAR_USD'].drop('ZAR_USD').sort_values(key=abs, ascending=False)
-        lines.append("Correlations with ZAR/USD (ranked by strength):")
-        for var, r in zar_corr.items():
-            friendly = label_map.get(var, var)
-            direction = "positive" if r > 0 else "negative"
-            strength = "strong" if abs(r) > 0.7 else "moderate" if abs(r) > 0.4 else "weak"
-            lines.append(f"  • {friendly}: r={r:.3f} ({strength} {direction})")
-
-        # Strongest inter-variable correlations (top 5 pairs, excluding self)
-        lines.append("\nStrongest inter-variable correlations:")
-        pair_list = []
-        for i, c1 in enumerate(numeric_cols):
-            for c2 in numeric_cols[i+1:]:
-                r = corr.loc[c1, c2]
-                pair_list.append((c1, c2, r))
-        pair_list.sort(key=lambda x: abs(x[2]), reverse=True)
-        for c1, c2, r in pair_list[:5]:
-            f1 = label_map.get(c1, c1)
-            f2 = label_map.get(c2, c2)
-            lines.append(f"  • {f1} vs {f2}: r={r:.3f}")
-
-    # Compare mode — 3D surface analysis
-    compare_vars = compare_vars or []
-    cmp = [v for v in compare_vars if v in df.columns]
-    if plot_mode == 'compare' and len(cmp) >= 3:
-        cx, cy, cz = cmp[0], cmp[1], cmp[2]
-        cx_l = label_map.get(cx, cx)
-        cy_l = label_map.get(cy, cy)
-        cz_l = label_map.get(cz, cz)
-        lines.append(f"\n=== 3D SURFACE ANALYSIS ({cx_l} × {cy_l} → {cz_l}) ===")
-        sub = df[[cx, cy, cz]].dropna()
-        if len(sub) >= 4:
-            # Pairwise correlations among the 3 vars
-            lines.append(f"Pairwise correlations:")
-            lines.append(f"  {cx_l} vs {cy_l}: r={sub[cx].corr(sub[cy]):.3f}")
-            lines.append(f"  {cx_l} vs {cz_l}: r={sub[cx].corr(sub[cz]):.3f}")
-            lines.append(f"  {cy_l} vs {cz_l}: r={sub[cy].corr(sub[cz]):.3f}")
-
-            # Surface shape — check where Z is highest/lowest
-            z_vals = sub[cz]
-            max_row = sub.loc[z_vals.idxmax()]
-            min_row = sub.loc[z_vals.idxmin()]
-            lines.append(f"Surface peak ({cz_l} max={max_row[cz]:.4f}): "
-                         f"at {cx_l}={max_row[cx]:.4f}, {cy_l}={max_row[cy]:.4f}")
-            lines.append(f"Surface trough ({cz_l} min={min_row[cz]:.4f}): "
-                         f"at {cx_l}={min_row[cx]:.4f}, {cy_l}={min_row[cy]:.4f}")
-
-            # Partial correlation direction — how does Z change with X holding Y roughly constant?
-            from numpy.polynomial import polynomial as P
-            try:
-                coeffs = np.polyfit(sub[[cx, cy]].values.T[0], sub[cz].values, 1)
-                slope_x = coeffs[0]
-                lines.append(f"Marginal slope: {cz_l} changes ~{slope_x:.4f} per unit of {cx_l}")
-            except Exception:
-                pass
-
-    elif plot_mode == 'compare' and len(cmp) == 2:
-        cx, cy = cmp[0], cmp[1]
-        cx_l = label_map.get(cx, cx)
-        cy_l = label_map.get(cy, cy)
-        lines.append(f"\n=== 2D COMPARE ({cx_l} vs {cy_l}) ===")
-        pair = df[[cx, cy]].dropna()
-        if len(pair) >= 2:
-            r = pair[cx].corr(pair[cy])
-            lines.append(f"Correlation: r={r:.3f}, R²={r**2:.3f}")
-            lines.append(f"These are plotted as a line plot with {cx_l} on X-axis and {cy_l} on Y-axis.")
-
-    return "\n".join(lines)
-
-
-@callback(
-    Output('chat-messages', 'children'),
-    Output('chat-input', 'value'),
-    Output('chat-history', 'data'),
-    Input('chat-send-btn', 'n_clicks'),
-    Input('chat-input', 'n_submit'),
-    State('chat-input', 'value'),
-    State('chat-messages', 'children'),
-    State('chat-history', 'data'),
-    State('fetched-data', 'data'),
-    State('selected-predictors', 'data'),
-    State('predictor-dropdown-options-store', 'data'),
-    State('plot-mode', 'data'),
-    State('selected-compare-vars', 'data'),
-    prevent_initial_call=True
-)
-def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_history,
-                     fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars):
-    if not user_msg or not user_msg.strip():
-        return dash.no_update, dash.no_update, dash.no_update
-
-    user_msg = user_msg.strip()
-    current_messages = current_messages or []
-    chat_history = chat_history or []
-
-    # Add user message bubble
-    current_messages.append(
-        html.Div(className='chat-message chat-message-user', children=[
-            html.Div(user_msg, className='chat-bubble chat-bubble-user')
-        ])
-    )
-
-    # Build comprehensive context from all data
-    plot_context = _build_plot_context(fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars)
-
-    # Add to conversation history for Gemini
-    chat_history.append({'role': 'user', 'parts': [user_msg]})
-
-    # Call Gemini
-    try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=GOOGLE_API_KEY)
-
-        system_instruction = (
-            "You are an economics assistant embedded in a ZAR/USD exchange rate dashboard. "
-            "You have full access to the dataset context below, including all variables, their latest values, "
-            "month-over-month and year-over-year changes, and the full correlation matrix between all variables. "
-            "You ONLY answer questions about: the data in the dashboard, ZAR/USD exchange rate dynamics, "
-            "macroeconomic indicators (interest rates, inflation, oil prices, gold, VIX, economic policy uncertainty), "
-            "South African and US economics, correlations between variables, and how these factors relate to the Rand. "
-            "If the user asks about anything unrelated, politely decline and redirect them to data or economics questions. "
-            "When discussing correlations, cite the actual r values from the data. "
-            "Keep answers concise (2-4 sentences) unless the user asks for detail. "
-            "The dashboard has three plot modes: Time Series (dual Y-axis), Compare (2D scatter or 3D), "
-            "and Correlation (heatmap). Reference these when relevant.\n\n"
-            f"DASHBOARD DATA CONTEXT:\n{plot_context}"
-        )
-
-        # Build contents list for the API
-        contents = []
-        for msg in chat_history:
-            contents.append(types.Content(
-                role=msg['role'],
-                parts=[types.Part.from_text(text=msg['parts'][0])]
-            ))
-
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                max_output_tokens=2048,
-                temperature=0.7,
-            )
-        )
-
-        ai_text = (response.text or "I couldn't generate a response. Please try again.").strip()
-    except Exception as e:
-        print(f"[Chatbot Error] {type(e).__name__}: {e}")
-        traceback.print_exc()
-        ai_text = f"Sorry, I couldn't process that request. ({type(e).__name__}: {e})"
-
-    # Save AI response to history
-    chat_history.append({'role': 'model', 'parts': [ai_text]})
-
-    # Add AI message bubble with typewriter data attribute
-    # The clientside callback will animate word-by-word reveal
-    current_messages.append(
-        html.Div(className='chat-message chat-message-ai', children=[
-            html.Div('', className='chat-bubble chat-bubble-ai chat-typewriter',
-                     **{'data-fulltext': ai_text})
-        ])
-    )
-
-    return current_messages, '', chat_history

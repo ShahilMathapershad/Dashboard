@@ -198,6 +198,9 @@ def fetch_sa_inflation_hardcoded():
     import numpy as np
     
     # Official StatsSA Headline CPI (Base: Dec 2024 = 100)
+    # 2009-2024 are published index values. 2025-2026 are derived from
+    # StatsSA YoY % changes applied to the 2024 index
+    # (YoY source: StatsSA P0141 — see SA_CPI_YOY_RATES below).
     cpi_values = [
         48.0,  # 2009 Dec
         48.1, 48.4, 48.8, 48.8, 48.9, 48.9, 49.3, 49.3, 49.4, 49.4, 49.5, 49.6,  # 2010
@@ -214,14 +217,19 @@ def fetch_sa_inflation_hardcoded():
         81.7, 82.2, 82.8, 83.3, 83.4, 83.5, 84.5, 84.8, 85.0, 85.3, 85.6, 86.1,  # 2021
         86.3, 86.8, 87.7, 88.2, 88.8, 89.8, 91.1, 91.3, 91.4, 91.7, 92.0, 92.3,  # 2022
         92.2, 92.9, 93.9, 94.2, 94.4, 94.6, 95.4, 95.7, 96.3, 97.2, 97.1, 97.1,  # 2023
-        97.2, 98.1, 98.9, 99.1, 99.3, 99.4, 99.8, 99.9, 100.0, 99.9, 99.9, 100.0  # 2024
+        97.2, 98.1, 98.9, 99.1, 99.3, 99.4, 99.8, 99.9, 100.0, 99.9, 99.9, 100.0,  # 2024
+        # 2025: derived from 2024 index × (1 + YoY/100)
+        # YoY rates: 5.3, 5.6, 5.3, 5.2, 4.6, 5.1, 4.8, 4.4, 3.8, 3.4, 3.5, 3.6
+        102.4, 103.6, 104.1, 104.3, 103.9, 104.5, 104.6, 104.3, 103.8, 103.3, 103.4, 103.6,
+        # 2026 Jan-Feb: YoY 3.5, 3.0
+        106.0, 106.7,
     ]
-    
-    # Generate monthly end-of-month dates from Dec 2009 to Dec 2024
+
+    # Generate monthly end-of-month dates from Dec 2009 to Feb 2026
     try:
-        dates = pd.date_range(start="2009-12-31", end="2024-12-31", freq="ME")
+        dates = pd.date_range(start="2009-12-31", end="2026-02-28", freq="ME")
     except ValueError:
-        dates = pd.date_range(start="2009-12-31", end="2024-12-31", freq="M")
+        dates = pd.date_range(start="2009-12-31", end="2026-02-28", freq="M")
     
     # Create the DataFrame with only SA_INFLATION (CPI index)
     df_cpi = pd.DataFrame({'SA_INFLATION': cpi_values}, index=dates)

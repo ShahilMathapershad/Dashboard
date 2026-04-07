@@ -5,26 +5,42 @@ dash.register_page(__name__, path='/registration')
 
 
 def layout():
-    return html.Div([
-        html.Div([
-            html.Div([
+    return html.Div(className='login-container', children=[
+        # 3D Three.js Canvas background (shared with login)
+        html.Div(id='three-canvas-landing'),
+
+        html.Div(className='bg-trendline-svg'),
+
+        # Registration card (stage-active so it's visible immediately)
+        html.Div(className='login-stage stage-active', children=[
+            html.Div(className='login-card-glass', children=[
                 html.Div([
                     html.Img(src=dash.get_asset_url('logo_light.svg'), className='logo-img logo-light'),
                     html.Img(src=dash.get_asset_url('logo_dark.svg'), className='logo-img logo-dark'),
                 ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
+
                 html.H2("Create Account", className='login-title'),
+
                 dcc.Input(id='reg-username', type='text', placeholder='Username', className='form-input',
                           autoComplete='off'),
                 dcc.Input(id='reg-password', type='password', placeholder='Password', className='form-input'),
+
                 html.Button('Register', id='register-button', n_clicks=0, className='login-button'),
+
                 html.Div(id='register-output', className='login-error'),
+
                 html.Div([
-                    html.A("Back to Sign In", href="/",
+                    html.Span("Already have an account? ",
+                              style={'color': 'var(--text-2)', 'fontSize': '0.9rem'}),
+                    html.A("Sign in", href="/",
                            style={'color': 'var(--accent)', 'fontSize': '0.9rem', 'textDecoration': 'none'})
-                ], style={'textAlign': 'center', 'marginTop': '1.5rem'})
-            ], className='login-card')
-        ], className='page-transition')
-    ], className='login-container')
+                ], style={'textAlign': 'center', 'marginTop': '1.5rem'}),
+
+                html.Div("Authorized access for economicsweekly.co.za stakeholders.",
+                         className='login-card-footer'),
+            ])
+        ])
+    ])
 
 
 from logic.supabase_client import get_supabase

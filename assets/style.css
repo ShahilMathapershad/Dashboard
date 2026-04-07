@@ -780,7 +780,8 @@ p  { margin: 0; color: var(--text-2); }
 }
 .page-actions {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    gap: 12px;
     flex-shrink: 0;
 }
 
@@ -828,6 +829,11 @@ p  { margin: 0; color: var(--text-2); }
     border-color: var(--accent);
     color: var(--accent);
     background: var(--bg-overlay);
+}
+.btn-ghost:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 /* ═══════════════════════════════════════════
@@ -1133,6 +1139,15 @@ p  { margin: 0; color: var(--text-2); }
     width: 100%;
     margin-top: 1.5vh;
 }
+.table-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+    flex-wrap: wrap;
+}
 
 .custom-table {
     width: 100%;
@@ -1315,6 +1330,33 @@ p  { margin: 0; color: var(--text-2); }
     font-weight: 700;
     text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+/* Status Badge */
+.status-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    letter-spacing: -0.01em;
+}
+.status-badge:empty { display: none; }
+
+/* Model Results — vertical spacing */
+#model-results-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Scenario Content — vertical spacing */
+#scenario-content {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Model info card — auto height */
+.model-info-card {
+    min-height: auto !important;
 }
 
 /* Model Chart */
@@ -1585,9 +1627,13 @@ p  { margin: 0; color: var(--text-2); }
 
 @media (max-width: 768px) {
     .page-header { flex-direction: column; gap: 16px; }
+    .page-actions { width: 100%; justify-content: flex-start; }
     .login-card { padding: 32px 24px; }
     .content-area { padding: 16px; }
     .hero-chart { min-height: 300px; }
+    .scenario-comparison-row { flex-direction: column; }
+    .scenario-arrow { transform: rotate(90deg); width: auto; padding: 4px 0; }
+    .scenario-main-row { grid-template-columns: 1fr; }
 
     /* Landing page mobile fixes */
     .landing-stage {
@@ -2688,6 +2734,31 @@ p  { margin: 0; color: var(--text-2); }
 .profile-msg.success { color: var(--success); }
 .profile-msg.error   { color: var(--error); }
 
+.profile-signout-card {
+    text-align: center;
+    padding: 18px 32px;
+}
+.profile-signout-link {
+    color: var(--error);
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: opacity var(--dur) var(--ease);
+}
+.profile-signout-link:hover {
+    opacity: 0.7;
+}
+
+/* Light theme profile overrides */
+.light-theme .profile-container { background: #f5f5f7; }
+.light-theme .profile-topbar { background: rgba(255,255,255,0.85); }
+.light-theme .profile-hero-card,
+.light-theme .profile-section-card {
+    background: rgba(255,255,255,0.9);
+    border-color: rgba(0,0,0,0.06);
+}
+.light-theme .profile-info-row { border-bottom-color: rgba(0,0,0,0.06); }
+
 
 /* ═══════════════════════════════════════════
    Plotly: Transparent defaults & smooth fade-in
@@ -3270,6 +3341,31 @@ p  { margin: 0; color: var(--text-2); }
     -webkit-text-fill-color: transparent;
 }
 .light-theme .landing-subheadline { color: var(--text-2); }
+
+/* ── Light theme — Dashboard Cards ── */
+.light-theme .model-card,
+.light-theme .scenario-card {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.06);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.03);
+}
+.light-theme .model-card::before,
+.light-theme .feature-card::before {
+    background: linear-gradient(90deg, transparent, rgba(0,0,0,0.03), transparent);
+}
+.light-theme .predictor-bar {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.06);
+}
+.light-theme .btn-ghost {
+    border-color: rgba(0, 0, 0, 0.1);
+    color: var(--text-2);
+}
+.light-theme .btn-ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(91, 141, 239, 0.06);
+}
 
 /* ── Stat Pills — 3D Capsules ── */
 .stat-pill {

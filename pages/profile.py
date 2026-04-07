@@ -57,7 +57,7 @@ def layout():
             ]),
 
             # Change password
-            html.Div(className='profile-section-card', children=[
+            html.Div(className='profile-section-card', style={'animationDelay': '0.2s'}, children=[
                 html.Div('Change Password', className='profile-section-label'),
                 html.Div(className='profile-password-fields', children=[
                     dcc.Input(
@@ -92,6 +92,12 @@ def layout():
                         style={'width': 'auto', 'padding': '0 28px', 'minWidth': '160px', 'height': '44px'},
                     ),
                 ]),
+            ]),
+
+            # Sign out
+            html.Div(className='profile-section-card profile-signout-card',
+                     style={'animationDelay': '0.3s'}, children=[
+                html.A('Sign Out', href='/', className='profile-signout-link'),
             ]),
         ]),
     ])
