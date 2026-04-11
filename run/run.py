@@ -36,7 +36,7 @@ def open_browser():
             with urllib.request.urlopen(url, timeout=1):
                 print(f"Automatically opening {url} in your browser...")
                 webbrowser.open_new(url)
-                return
+                returnremo
         except (urllib.error.URLError, ConnectionError, TimeoutError):
             time.sleep(0.5)
 
