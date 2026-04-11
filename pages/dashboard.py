@@ -1519,7 +1519,7 @@ def render_model_ui(active_tab, prediction_data, theme):
         dir_arrow = '—'
         dir_label = 'Stable'
 
-    # ── Valuation Summary ──
+    # ── Fair Value & Point Estimates ──
     fair_value = result.get('fair_value', pred_level)
     fv_misalign = result.get('fair_value_misalignment', 0)
     fv_misalign_pct = result.get('fair_value_misalignment_pct', 0)
@@ -1528,92 +1528,100 @@ def render_model_ui(active_tab, prediction_data, theme):
     if fv_signal == 'undervalued':
         signal_color = '#EF4444'
         signal_label = 'ZAR Undervalued'
-        signal_desc = 'Current spot is below model fair value — ZAR is stronger than fundamentals suggest.'
     elif fv_signal == 'overvalued':
         signal_color = '#10B981'
         signal_label = 'ZAR Overvalued'
-        signal_desc = 'Current spot is above model fair value — ZAR is weaker than fundamentals suggest.'
     else:
         signal_color = '#6b6b6b'
         signal_label = 'Fairly Valued'
-        signal_desc = 'Current spot is aligned with model fair value — macro drivers are largely priced in.'
 
-    valuation_summary = html.Div(className='valuation-summary', children=[
-        # Row 1: Three key estimates
-        html.Div(className='valuation-cards-row', children=[
-            # Current Spot
-            html.Div(className='valuation-card', children=[
-                html.Div('Current Spot Rate', className='valuation-card-label'),
-                html.Div(f'R {last_zar:.2f}', className='valuation-card-value'),
-                html.Div(result['last_date'], className='valuation-card-sub'),
-            ]),
-            # Point Estimate (1M)
-            html.Div(className='valuation-card valuation-card-accent', children=[
-                html.Div('Point Estimate (1M Ahead)', className='valuation-card-label'),
-                html.Div(f'R {pred_level:.2f}', className='valuation-card-value'),
-                html.Div(className='valuation-card-delta', style={'color': dir_color}, children=[
-                    html.Span(f'{dir_arrow} {pred_change:+.2f} ({change_pct:+.1f}%) — {dir_label}')
-                ]),
-                html.Div(f'Direct 1-step-ahead model prediction for {date_text}',
-                         className='valuation-card-sub'),
-            ]),
-            # Fair Value (Equilibrium)
-            html.Div(className='valuation-card valuation-card-fv', children=[
-                html.Div('Fair Value (Equilibrium)', className='valuation-card-label'),
-                html.Div(f'R {fair_value:.2f}', className='valuation-card-value'),
-                html.Div(className='valuation-card-delta', style={'color': signal_color}, children=[
-                    html.Span(f'{fv_misalign:+.2f} ({fv_misalign_pct:+.1f}%) vs spot')
-                ]),
-                html.Div(signal_desc, className='valuation-card-sub'),
-            ]),
-        ]),
-        # Signal badge
-        html.Div(className='valuation-signal-row', children=[
-            html.Div(className='valuation-signal-badge', style={'borderColor': signal_color}, children=[
-                html.Span('●', style={'color': signal_color, 'marginRight': '6px', 'fontSize': '0.75rem'}),
-                html.Span(signal_label, style={'fontWeight': '600', 'color': signal_color}),
-                html.Span(
-                    f'  Misalignment: {abs(fv_misalign_pct):.1f}%' if fv_signal != 'fairly_valued' else '  Spot ≈ Fair Value',
-                    style={'color': 'var(--text-3)', 'marginLeft': '8px', 'fontSize': '0.8125rem'}
-                ),
-            ]),
+    forecasts = result.get('forecasts', {})
+
+    # Build rows: Horizon | Point Estimate | Fair Value | Gap
+    # Current row: spot vs today's fair value
+    # Horizon rows: that horizon's point estimate vs that horizon's own fair value
+    horizon_rows_data = [
+        ('Current', result['last_date'], last_zar, fair_value),
+    ]
+    for key, label in [('1m', '1 Month'), ('3m', '3 Months'), ('6m', '6 Months')]:
+        if key in forecasts:
+            f = forecasts[key]
+            horizon_rows_data.append((label, f['date'], f['point_estimate'], f['fair_value']))
+
+    table_rows = []
+    for label, date_str, spot_val, fv_val in horizon_rows_data:
+        gap = spot_val - fv_val
+        gap_pct = (gap / fv_val) * 100 if fv_val else 0
+        gap_color = '#EF4444' if gap > 0.01 else '#10B981' if gap < -0.01 else '#6b6b6b'
+
+        is_current = (label == 'Current')
+
+        table_rows.append(
+            html.Tr(className='ev-row ev-row-current' if is_current else 'ev-row', children=[
+                html.Td(children=[
+                    html.Div(label, className='ev-horizon-label'),
+                    html.Div(date_str, className='ev-horizon-date'),
+                ], className='ev-cell-horizon'),
+                html.Td(f'R {spot_val:.2f}', className='ev-cell-spot'),
+                html.Td(f'R {fv_val:.2f}', className='ev-cell-fv'),
+                html.Td(children=[
+                    html.Span(f'{gap:+.2f}', style={'color': gap_color}),
+                    html.Span(f' ({gap_pct:+.1f}%)', className='ev-gap-pct', style={'color': gap_color}),
+                ], className='ev-cell-gap'),
+            ])
+        )
+
+    # Interpretation — reference horizon-specific fair values
+    fv_1m = forecasts.get('1m', {}).get('fair_value', fair_value)
+    fv_6m = forecasts.get('6m', {}).get('fair_value', fair_value)
+    pt_1m = forecasts.get('1m', {}).get('point_estimate', pred_level)
+
+    if fv_signal == 'undervalued':
+        interp_text = (
+            f'The ZAR is currently stronger than fundamentals suggest — spot (R {last_zar:.2f}) sits below '
+            f'fair value (R {fair_value:.2f}), a {abs(fv_misalign_pct):.1f}% undervaluation. '
+            f'Fair value itself shifts across horizons as ZAR-derived momentum and mean-reversion signals evolve: '
+            f'from R {fair_value:.2f} today to R {fv_6m:.2f} at 6 months.'
+        )
+    elif fv_signal == 'overvalued':
+        interp_text = (
+            f'The ZAR is weaker than fundamentals suggest — spot (R {last_zar:.2f}) sits above '
+            f'fair value (R {fair_value:.2f}), a {abs(fv_misalign_pct):.1f}% overvaluation. '
+            f'As the model iterates forward, fair value adjusts from R {fair_value:.2f} today to R {fv_6m:.2f} at 6 months, '
+            f'reflecting evolving ZAR momentum and mean-reversion dynamics.'
+        )
+    else:
+        interp_text = (
+            f'Spot (R {last_zar:.2f}) is closely aligned with today\'s fair value (R {fair_value:.2f}) — '
+            f'only a {abs(fv_misalign_pct):.1f}% gap. Fair value shifts across horizons as ZAR-derived features evolve: '
+            f'R {fv_1m:.2f} at 1 month, R {fv_6m:.2f} at 6 months. The gap column shows whether each point estimate '
+            f'overshoots or undershoots its horizon\'s own equilibrium.'
+        )
+
+    # Signal badge
+    signal_badge = html.Div(className='valuation-signal-row', children=[
+        html.Div(className='valuation-signal-badge', style={'borderColor': signal_color}, children=[
+            html.Span('●', style={'color': signal_color, 'marginRight': '6px', 'fontSize': '0.75rem'}),
+            html.Span(signal_label, style={'fontWeight': '600', 'color': signal_color}),
+            html.Span(
+                f'  Gap: {abs(fv_misalign_pct):.1f}%' if fv_signal != 'fairly_valued' else '  Spot ≈ Fair Value',
+                style={'color': 'var(--text-3)', 'marginLeft': '8px', 'fontSize': '0.8125rem'}
+            ),
         ]),
     ])
 
-    # ── Multi-Horizon Point Estimates ──
-    forecasts = result.get('forecasts', {})
-
-    forecast_cards = []
-    horizon_labels = {'1m': '1 Month', '3m': '3 Months', '6m': '6 Months'}
-
-    for key, label in horizon_labels.items():
-        if key in forecasts:
-            f = forecasts[key]
-            diff = f['fair_value'] - f['actual_estimate']
-            diff_pct = (diff / f['actual_estimate']) * 100
-            card_color = '#EF4444' if diff > 0.01 else '#10B981' if diff < -0.01 else '#6b6b6b'
-            card_arrow = '▲' if diff > 0.01 else '▼' if diff < -0.01 else '—'
-
-            forecast_cards.append(
-                html.Div(className='forecast-horizon-card', children=[
-                    html.Div(f'{label} Point Estimate', className='forecast-horizon-label'),
-                    html.Div(f"R {f['fair_value']:.2f}", className='forecast-horizon-value'),
-                    html.Div(className='forecast-horizon-delta', style={'color': card_color}, children=[
-                        html.Span(f"{card_arrow} {diff:+.2f} ({diff_pct:+.1f}%) vs spot")
-                    ]),
-                    html.Div(f['reason'], className='forecast-horizon-reason'),
-                ])
-            )
-
-    forecast_table = html.Div(children=[
-        valuation_summary,
-        html.Div(className='forecast-section-header', children=[
-            html.H5('Multi-Horizon Point Estimates',
-                    style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'margin': '0'}),
-            html.Span('Iterated forecasts assuming macro conditions persist',
-                      style={'fontSize': '0.75rem', 'color': 'var(--text-3)'}),
+    forecast_table = html.Div(className='estimates-panel', children=[
+        signal_badge,
+        html.Table(className='ev-table', children=[
+            html.Thead(html.Tr([
+                html.Th('Horizon', className='ev-th ev-th-horizon'),
+                html.Th('Point Estimate', className='ev-th ev-th-spot'),
+                html.Th('Fair Value', className='ev-th ev-th-fv'),
+                html.Th('Gap', className='ev-th ev-th-gap'),
+            ])),
+            html.Tbody(table_rows),
         ]),
-        html.Div(className='forecast-cards-row', children=forecast_cards),
+        html.Div(interp_text, className='ev-interpretation'),
     ])
 
     # ── Feature contributions ──
@@ -1848,14 +1856,16 @@ def render_model_ui(active_tab, prediction_data, theme):
                 style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px',
                        'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('Point Estimate (1M)', f"R {result.get('predicted_level', 0):.4f}",
-                       f"Direct 1-step-ahead prediction for {result.get('next_month_date', 'next month')}. Single-pass pipeline output."),
-            _info_pill('Fair Value (Equilibrium)', f"R {result.get('fair_value', 0):.4f}",
-                       f"Long-run equilibrium where error-correction fully resolves. Misalignment vs spot: {result.get('fair_value_misalignment_pct', 0):+.1f}%."),
-            _info_pill('3M Forward', f"R {result.get('forecasts', {}).get('3m', {}).get('fair_value', 0):.4f}",
-                       f"Iterative 3-month point estimate for {result.get('forecasts', {}).get('3m', {}).get('date', 'in 3 months')}."),
-            _info_pill('6M Forward', f"R {result.get('forecasts', {}).get('6m', {}).get('fair_value', 0):.4f}",
-                       f"Iterative 6-month point estimate for {result.get('forecasts', {}).get('6m', {}).get('date', 'in 6 months')}. Assuming macro conditions persist."),
+            _info_pill('Spot', f"R {result.get('last_zar_usd', 0):.4f}",
+                       f"Latest ZAR/USD as of {result.get('last_date', 'N/A')}."),
+            _info_pill('Fair Value (Now)', f"R {result.get('fair_value', 0):.4f}",
+                       f"Equilibrium from current macro state. Gap vs spot: {result.get('fair_value_misalignment_pct', 0):+.1f}%."),
+            _info_pill('1M Pt / FV', f"R {result.get('predicted_level', 0):.4f} / {result.get('forecasts', {}).get('1m', {}).get('fair_value', 0):.4f}",
+                       f"Point estimate vs fair value at 1-month horizon."),
+            _info_pill('3M Pt / FV', f"R {result.get('forecasts', {}).get('3m', {}).get('point_estimate', 0):.4f} / {result.get('forecasts', {}).get('3m', {}).get('fair_value', 0):.4f}",
+                       f"Point estimate vs fair value at 3-month horizon."),
+            _info_pill('6M Pt / FV', f"R {result.get('forecasts', {}).get('6m', {}).get('point_estimate', 0):.4f} / {result.get('forecasts', {}).get('6m', {}).get('fair_value', 0):.4f}",
+                       f"Point estimate vs fair value at 6-month horizon."),
         ]),
     ])
 

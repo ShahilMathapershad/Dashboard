@@ -465,16 +465,48 @@ def predict_next_month():
     horizons = {'1m': 1, '3m': 3, '6m': 6}
     max_h = max(horizons.values())
 
-    # Iterative multi-horizon prediction + fair value convergence
+    # Iterative multi-horizon prediction + per-horizon fair value
     iterative_df = raw_df.tail(30).copy()
     h_levels = {}
-    fair_value_level = None
+    h_fair_values = {}
 
-    # Iterate up to 24 months — capture horizon forecasts and find convergence
-    max_iter = 24
-    prev_level = last_zar_usd
-    for i in range(1, max_iter + 1):
+    def _converge_from(fork_df, feature_names, pipeline, lookahead=3):
+        """
+        Fair value at a given horizon = where the model projects the rate will be
+        after `lookahead` additional months from that horizon's state.
+
+        This captures the transitional equilibrium — where ZAR-derived features
+        (momentum, z-score, trend) are still unwinding from the horizon's specific
+        dynamics. A 3-month lookahead balances responsiveness (different per horizon)
+        with stability (smoothed past the initial overshoot).
+        """
+        global _engineered_features_cache
+        fv_df = fork_df.copy()
+        fv_level = float(fv_df['ZAR_USD'].iloc[-1])
+        for _ in range(lookahead):
+            try:
+                _engineered_features_cache = {'df_features': None, 'df_raw': None, 'input_hash': None, 'time': 0}
+                fv_feat, _ = engineer_features(fv_df)
+                if fv_feat.empty:
+                    break
+                fv_level = float(pipeline.predict(fv_feat.iloc[[-1]][feature_names])[0])
+                fv_date = fv_df.index[-1] + pd.offsets.MonthEnd(1)
+                fv_row = fv_df.iloc[-1].copy()
+                fv_row.name = fv_date
+                fv_row['ZAR_USD'] = fv_level
+                fv_df = pd.concat([fv_df, pd.DataFrame([fv_row])])
+            except Exception:
+                break
+        return fv_level
+
+    # Current fair value (converge from today's state)
+    fair_value_level = _converge_from(iterative_df, feature_names, pipeline)
+
+    # Iterate up to max horizon, forking at each checkpoint
+    max_h = max(horizons.values())
+    for i in range(1, max_h + 1):
         try:
+            _engineered_features_cache = {'df_features': None, 'df_raw': None, 'input_hash': None, 'time': 0}
             df_feat_iter, _ = engineer_features(iterative_df)
             if df_feat_iter.empty:
                 break
@@ -491,17 +523,10 @@ def predict_next_month():
             for label, h_val in horizons.items():
                 if i == h_val:
                     h_levels[label] = (next_level, next_date_iter)
-
-            # Check convergence (change < 0.001 ZAR)
-            if fair_value_level is None and abs(next_level - prev_level) < 0.001:
-                fair_value_level = next_level
-            prev_level = next_level
+                    # Fork: converge from THIS horizon's state
+                    h_fair_values[label] = _converge_from(iterative_df, feature_names, pipeline)
         except Exception:
             break
-
-    # If never converged within tolerance, use last iterated value
-    if fair_value_level is None:
-        fair_value_level = prev_level
 
     forecasts = {}
     for label, h_val in horizons.items():
@@ -521,8 +546,11 @@ def predict_next_month():
             driver = top_drivers[0] if top_drivers else "macro factors"
             reason = f"Error-correction model identifies overvaluation; {driver} suggest ZAR should be stronger than current spot."
 
+        horizon_fv = h_fair_values.get(label, fair_value_level)
+
         forecasts[label] = {
-            'fair_value': round(final_level, 4),
+            'point_estimate': round(final_level, 4),
+            'fair_value': round(horizon_fv, 4),
             'actual_estimate': round(last_zar_usd, 4),
             'date': final_date.strftime('%Y-%m-%d'),
             'reason': reason,

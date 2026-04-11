@@ -489,8 +489,10 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
                 for key in ['1m', '3m', '6m']:
                     if key in forecasts:
                         f = forecasts[key]
-                        diff = f['fair_value'] - f['actual_estimate']
-                        m.append(f"  {key}: R {f['fair_value']:.4f} ({diff:+.4f} vs spot) — {f['reason']}")
+                        pt = f.get('point_estimate', f.get('fair_value', 0))
+                        fv = f.get('fair_value', 0)
+                        gap = pt - fv
+                        m.append(f"  {key}: Point R {pt:.4f}, Fair Value R {fv:.4f} (gap {gap:+.4f}) — {f['reason']}")
 
             # Feature contributions
             contribs = result.get('contributions', [])

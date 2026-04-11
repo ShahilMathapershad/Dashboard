@@ -1291,62 +1291,14 @@ p  { margin: 0; color: var(--text-2); }
 .baseline-label { color: var(--text-3); }
 .baseline-value { color: var(--text-2); font-weight: 500; font-variant-numeric: tabular-nums; }
 
-/* Valuation Summary */
-.valuation-summary {
-    margin-bottom: 24px;
-}
-.valuation-cards-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-    margin-bottom: 12px;
-}
-.valuation-card {
-    padding: 20px;
-    border-radius: var(--radius-lg);
-    background: var(--bg-overlay);
-    border: 1px solid var(--border);
-}
-.valuation-card-accent {
-    border-color: #5b8def;
-    background: linear-gradient(135deg, rgba(91,141,239,0.06) 0%, var(--bg-overlay) 100%);
-}
-.valuation-card-fv {
-    border-color: #F59E0B;
-    background: linear-gradient(135deg, rgba(245,158,11,0.06) 0%, var(--bg-overlay) 100%);
-}
-.valuation-card-label {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-3);
+/* Estimates Panel */
+.estimates-panel {
     margin-bottom: 8px;
-}
-.valuation-card-value {
-    font-size: 1.75rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: var(--text-1);
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-}
-.valuation-card-delta {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    margin-top: 6px;
-}
-.valuation-card-sub {
-    font-size: 0.6875rem;
-    color: var(--text-3);
-    margin-top: 8px;
-    line-height: 1.4;
 }
 .valuation-signal-row {
     display: flex;
     justify-content: flex-start;
-    margin-bottom: 4px;
+    margin-bottom: 14px;
 }
 .valuation-signal-badge {
     display: inline-flex;
@@ -1358,56 +1310,81 @@ p  { margin: 0; color: var(--text-2); }
     font-size: 0.8125rem;
 }
 
-/* Forecast Section Header */
-.forecast-section-header {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    margin: 20px 0 12px 0;
-}
-
-/* Forecast Cards Row */
-.forecast-cards-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-}
-.forecast-horizon-card {
-    padding: 16px;
-    border-radius: var(--radius-lg);
-    background: var(--bg-overlay);
+/* Estimates Value Table */
+.ev-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
     border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    font-variant-numeric: tabular-nums;
 }
-.forecast-current-card {
-    border-color: var(--text-3);
-    opacity: 0.8;
-}
-.forecast-horizon-label {
-    font-size: 0.75rem;
+.ev-th {
+    padding: 10px 16px;
+    font-size: 0.6875rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     color: var(--text-3);
-    margin-bottom: 6px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-surface);
 }
-.forecast-horizon-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: var(--text-1);
-    letter-spacing: -0.02em;
+.ev-th-spot, .ev-th-fv, .ev-th-gap { text-align: right; }
+
+.ev-row td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-overlay);
+    transition: background 0.15s var(--ease);
 }
-.forecast-horizon-delta {
+.ev-row:last-child td { border-bottom: none; }
+.ev-row:hover td { background: var(--bg-overlay-hover); }
+.ev-row-current td { background: var(--bg-surface); }
+
+.ev-cell-horizon { white-space: nowrap; }
+.ev-horizon-label {
     font-size: 0.8125rem;
     font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    margin-top: 4px;
+    color: var(--text-1);
 }
-.forecast-horizon-reason {
-    font-size: 0.75rem;
+.ev-horizon-date {
+    font-size: 0.6875rem;
     color: var(--text-3);
-    margin-top: 8px;
-    line-height: 1.4;
+    margin-top: 1px;
+}
+.ev-cell-spot, .ev-cell-fv {
+    text-align: right;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-1);
+    letter-spacing: -0.01em;
+}
+.ev-cell-fv {
+    color: #F59E0B;
+}
+.ev-cell-gap {
+    text-align: right;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.ev-gap-pct {
+    font-size: 0.75rem;
+    margin-left: 4px;
+}
+
+/* Interpretation */
+.ev-interpretation {
+    margin-top: 12px;
+    padding: 12px 16px;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--text-2);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
 }
 
 /* Feature Contributions — Anchor Card */
@@ -1589,12 +1566,9 @@ p  { margin: 0; color: var(--text-2); }
     .contrib-row {
         grid-template-columns: 1fr 1fr 90px;
     }
-    .forecast-cards-row {
-        grid-template-columns: repeat(2, 1fr);
-    }
-    .valuation-cards-row {
-        grid-template-columns: 1fr;
-    }
+    .ev-table { font-size: 0.875rem; }
+    .ev-th, .ev-row td { padding: 10px 10px; }
+    .ev-gap-pct { display: none; }
 }
 
 /* ═══════════════════════════════════════════
