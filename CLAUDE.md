@@ -24,7 +24,7 @@ Dash (v4) multi-page web application for ZAR/USD exchange rate forecasting, depl
 3. **Logic (`logic/`):**
    - `supabase_client.py` — Lazy-initialized Supabase client singleton. Uses env vars `SUPABASE_URL` and `SUPABASE_KEY` (with hardcoded fallbacks).
    - `data_fetcher.py` — Fetches macroeconomic data from FRED API, World Bank (gold price Excel scrape), and hardcoded SA inflation. Processes to monthly frequency, saves to Supabase `data` table.
-   - `model.py` (~1,003 lines) — ML inference using frozen ElasticNet models in `frozen models/`. Feature engineering pipeline (YoY inflation, log-diff/first-diff transforms, lag-1, 3M trends → 24 features). Scenario analysis with slider-driven what-if predictions.
+   - `model.py` — ML inference using a frozen HuberRegressor pipeline in `frozen models/zar_usd_forecast_model.pkl`. Feature engineering pipeline (11 features: lag, momentum, mean-reversion, risk/volatility, uncertainty, interest rates, commodities). Scenario analysis with slider-driven what-if predictions.
 
 ### Key Architectural Patterns
 
@@ -34,18 +34,21 @@ Dash (v4) multi-page web application for ZAR/USD exchange rate forecasting, depl
 - **Conditional API Fetch**: `should_update_from_api()` in `data_fetcher.py` returns True only on the last day of the month when Supabase data is stale. Otherwise, data is read directly from Supabase.
 - **Clientside Callbacks**: Used for theme sync to DOM, chart resize on tab switch, and tab visibility — no server roundtrip.
 
-### Model Details (ElasticNet)
+### Model Details (HuberRegressor — Error-Correction Framework)
 
-- Frozen models: `frozen models/zar_usd_model_v1.pkl` (main) and `zar_usd_trainsetmodel.pkl` (validation)
-- Target: log-return of ZAR/USD (% month-over-month change)
-- Feature engineering in `engineer_features()`: raw series → YoY inflation calc → log-diff or first-diff transform → lag-1 + 3M rolling mean → 24 features total
-- Coefficient interpretation converts from model space (log-return % on scaled predictors) to user space (ZAR per unit change) via `convert_to_raw_space_coefficient()`
+- Frozen model: `frozen models/zar_usd_forecast_model.pkl` (sklearn Pipeline: ColumnTransformer + HuberRegressor)
+- Target: ZAR/USD level directly (not log-return). Equation: Ŝ_{t+1} = β₀ + β₁·S_{t-1} + Σ β_j·x̃_j(t)
+- Since β₁ ≈ 0.96, the model behaves as a random-walk anchor with small error-correction adjustments
+- 11 features: ZAR_USD_lag1 (passthrough/unscaled), ZAR_USD_logret1, ZAR_USD_change3, ZAR_USD_zscore12, VIX, VIX_change1, VIX_zscore12, EPU_USA, WUIZAF_SA, bond_spread_change1, GOLD_PRICE_logret1
+- Pipeline: ColumnTransformer (passthrough for lag1 + StandardScaler for remaining 10) → HuberRegressor (α=7.906, ε=1.1)
+- SA Inflation, US CPI, Brent Oil deliberately excluded (trending non-stationary series that cause train-test distribution shift)
+- Test R²=0.6157, Theil's U=0.9969, Directional Accuracy=67.65%
 - Multi-horizon forecasts (1M, 3M, 6M) iterate predictions assuming macro drivers persist
 
 ### Dashboard Tab Structure
 
 - **Data Tab**: Normalized (0–100) time series chart of selected predictors vs ZAR/USD. Background fetch with progress bar. Toggleable data table.
-- **Model Tab**: Multi-horizon forecast table, feature contribution bar chart, historical fit chart (60-month window), model specification card, performance metrics (MAE, RMSE, R², MAPE, directional accuracy), diagnostic plots.
+- **Model Tab**: Multi-horizon forecast table, feature contribution bar chart, historical fit chart (60-month window), model specification card (HuberRegressor details), performance metrics (MAE, RMSE, R², Theil's U, directional accuracy), diagnostic plots.
 - **Scenario Tab**: Slider-driven sensitivity analysis. Comparison cards (base vs scenario), impact waterfall chart, scenario summary table.
 
 ### Environment Variables

@@ -7,7 +7,9 @@ from logic.data_fetcher import (
     process_data, save_to_supabase, replace_gold_price_column_in_supabase,
     FRED_API_KEY, SERIES_CONFIG, should_update_from_api, fetch_and_save_data
 )
-from logic.model import predict_next_month, fetch_data_from_supabase, get_scenario_baseline, scenario_predict
+from logic.model import (predict_next_month, fetch_data_from_supabase, get_scenario_baseline,
+                         scenario_predict, get_friendly_feature_name as model_get_friendly_name,
+                         get_coefficient_unit as model_get_coef_unit, get_feature_category)
 import pandas as pd
 import plotly.graph_objects as go
 import traceback
@@ -243,7 +245,7 @@ def model_tab_content(existing_model_data=None):
         html.Div(className='page-header', children=[
             html.Div(children=[
                 html.H2('Model Forecasts', className='page-title'),
-                html.P("ZAR/USD estimates via frozen ElasticNet (Lasso) model.",
+                html.P("ZAR/USD estimates via HuberRegressor error-correction model.",
                        className='page-subtitle'),
             ]),
             html.Div(className='page-actions', children=[
@@ -259,17 +261,19 @@ def model_tab_content(existing_model_data=None):
                              visible=not existing_model_data),
 
         html.Div(id='model-results-container', style=model_style, children=[
-            # Multi-horizon Forecast Table (Replaces Prediction Card)
+            # Multi-horizon Forecast Cards
             html.Div(className='model-card', children=[
-                html.H4('Multi-Horizon ZAR/USD Estimates', className='card-title'),
-                html.P('Fair Value vs Spot-based Actual estimates for various horizons.', className='card-subtitle'),
+                html.H4('ZAR/USD Forecast', className='card-title'),
+                html.P('Error-correction model estimates across multiple horizons. The model starts from the current rate and applies small adjustments based on economic signals.',
+                       className='card-subtitle'),
                 html.Div(id='forecast-table-container', className='forecast-table-wrapper')
             ]),
 
             # Feature Contributions
             html.Div(className='model-card', children=[
-                html.H4('Key Macro Drivers', className='card-title'),
-                html.P('Non-zero model coefficients and their current contribution to the fair value.',
+                html.H4('What\'s Driving the Forecast', className='card-title'),
+                html.P('The model anchors on last month\'s rate (random walk), then adjusts based on 10 macro correction signals. '
+                       'Positive values push ZAR/USD higher (ZAR weakens), negative values push it lower (ZAR strengthens).',
                        className='card-subtitle'),
                 html.Div(id='feature-contributions'),
             ]),
@@ -321,7 +325,7 @@ def scenario_tab_content():
         html.Div(className='page-header', children=[
             html.Div(children=[
                 html.H2('Scenario Analysis', className='page-title'),
-                html.P("Adjust macroeconomic predictors to model hypothetical ZAR/USD outcomes.",
+                html.P("Adjust VIX, policy uncertainty, bond rates, and gold price to see how the HuberRegressor error-correction model responds.",
                        className='page-subtitle'),
             ]),
             html.Div(className='page-actions', children=[
@@ -1410,44 +1414,14 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
 #   Model Page Callbacks
 # ═══════════════════════════════════════════
 
-BASE_FEATURE_NAMES = {
-    '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate',
-    '10_YEAR_BOND_RATES(USA)': 'US 10-Year Bond Rate',
-    'VIX': 'VIX',
-    'BRENT_OIL_PRICE': 'Brent Crude Oil Price',
-    'GOLD_PRICE': 'Gold Price',
-    'EPU(USA)': 'US Economic Policy Uncertainty',
-    'INFLATION_DIFF': 'SA-US Inflation Differential',
-    'WUIZAF(SA)': 'SA World Uncertainty Index',
-    'ZAR_USD': 'ZAR per USD',
-    'SA_INFLATION_YOY': 'SA Inflation (YoY)',
-    'US_CPI_YOY': 'US CPI (YoY)',
-}
+def get_friendly_feature_name(feature_name, _transform_type=None):
+    """Return a human-readable name for a feature (delegates to model.py)."""
+    return model_get_friendly_name(feature_name)
 
 
-def get_friendly_feature_name(feature_name, transform_type):
-    """Dynamically build a friendly name reflecting the actual transform applied."""
-    is_lag = feature_name.endswith('_Lag1')
-    is_trend = feature_name.endswith('_3M_Trend')
-    base = feature_name.replace('_Lag1', '').replace('_3M_Trend', '')
-
-    display_name = BASE_FEATURE_NAMES.get(base, base)
-
-    # Simplified names - now interpretable per unit change in original rate
-    if is_lag:
-        return f"{display_name} (Prev. Month)"
-    elif is_trend:
-        return f"{display_name} (3M Trend)"
-    return display_name
-
-
-def get_coefficient_unit(transform_type):
-    """Return appropriate unit label for interpretable coefficients (MSc research standard)."""
-    if transform_type == 'log_diff':
-        return 'ZAR per USD per 1-unit change in level'
-    elif transform_type == 'first_diff':
-        return 'ZAR per USD per 1-unit change'
-    return 'ZAR per USD per unit'
+def get_coefficient_unit(feature_name):
+    """Return appropriate unit label for interpretable coefficients."""
+    return model_get_coef_unit(feature_name)
 
 
 # Background callbacks for Model and Scenario calculation (prerendering support)
@@ -1528,58 +1502,184 @@ def render_model_ui(active_tab, prediction_data, theme):
     direction = result['direction']
     change_pct = result['predicted_change_pct']
     date_text = result['next_month_date']
-    pred_value = f"R {pred_level:.4f}"
-    baseline_text = f"Current: R {result['last_zar_usd']:.4f} ({result['last_date']})"
+    last_zar = result['last_zar_usd']
+    pred_change = result.get('predicted_change', pred_level - last_zar)
 
-    # ── Multi-Horizon Forecast Table ──
+    # Direction styling
+    if direction == 'strengthen':
+        dir_color = '#10B981'
+        dir_arrow = '▼'
+        dir_label = 'ZAR Strengthens'
+    elif direction == 'weaken':
+        dir_color = '#EF4444'
+        dir_arrow = '▲'
+        dir_label = 'ZAR Weakens'
+    else:
+        dir_color = '#6b6b6b'
+        dir_arrow = '—'
+        dir_label = 'Stable'
+
+    # ── Valuation Summary ──
+    fair_value = result.get('fair_value', pred_level)
+    fv_misalign = result.get('fair_value_misalignment', 0)
+    fv_misalign_pct = result.get('fair_value_misalignment_pct', 0)
+    fv_signal = result.get('fair_value_signal', 'fairly_valued')
+
+    if fv_signal == 'undervalued':
+        signal_color = '#EF4444'
+        signal_label = 'ZAR Undervalued'
+        signal_desc = 'Current spot is below model fair value — ZAR is stronger than fundamentals suggest.'
+    elif fv_signal == 'overvalued':
+        signal_color = '#10B981'
+        signal_label = 'ZAR Overvalued'
+        signal_desc = 'Current spot is above model fair value — ZAR is weaker than fundamentals suggest.'
+    else:
+        signal_color = '#6b6b6b'
+        signal_label = 'Fairly Valued'
+        signal_desc = 'Current spot is aligned with model fair value — macro drivers are largely priced in.'
+
+    valuation_summary = html.Div(className='valuation-summary', children=[
+        # Row 1: Three key estimates
+        html.Div(className='valuation-cards-row', children=[
+            # Current Spot
+            html.Div(className='valuation-card', children=[
+                html.Div('Current Spot Rate', className='valuation-card-label'),
+                html.Div(f'R {last_zar:.2f}', className='valuation-card-value'),
+                html.Div(result['last_date'], className='valuation-card-sub'),
+            ]),
+            # Point Estimate (1M)
+            html.Div(className='valuation-card valuation-card-accent', children=[
+                html.Div('Point Estimate (1M Ahead)', className='valuation-card-label'),
+                html.Div(f'R {pred_level:.2f}', className='valuation-card-value'),
+                html.Div(className='valuation-card-delta', style={'color': dir_color}, children=[
+                    html.Span(f'{dir_arrow} {pred_change:+.2f} ({change_pct:+.1f}%) — {dir_label}')
+                ]),
+                html.Div(f'Direct 1-step-ahead model prediction for {date_text}',
+                         className='valuation-card-sub'),
+            ]),
+            # Fair Value (Equilibrium)
+            html.Div(className='valuation-card valuation-card-fv', children=[
+                html.Div('Fair Value (Equilibrium)', className='valuation-card-label'),
+                html.Div(f'R {fair_value:.2f}', className='valuation-card-value'),
+                html.Div(className='valuation-card-delta', style={'color': signal_color}, children=[
+                    html.Span(f'{fv_misalign:+.2f} ({fv_misalign_pct:+.1f}%) vs spot')
+                ]),
+                html.Div(signal_desc, className='valuation-card-sub'),
+            ]),
+        ]),
+        # Signal badge
+        html.Div(className='valuation-signal-row', children=[
+            html.Div(className='valuation-signal-badge', style={'borderColor': signal_color}, children=[
+                html.Span('●', style={'color': signal_color, 'marginRight': '6px', 'fontSize': '0.75rem'}),
+                html.Span(signal_label, style={'fontWeight': '600', 'color': signal_color}),
+                html.Span(
+                    f'  Misalignment: {abs(fv_misalign_pct):.1f}%' if fv_signal != 'fairly_valued' else '  Spot ≈ Fair Value',
+                    style={'color': 'var(--text-3)', 'marginLeft': '8px', 'fontSize': '0.8125rem'}
+                ),
+            ]),
+        ]),
+    ])
+
+    # ── Multi-Horizon Point Estimates ──
     forecasts = result.get('forecasts', {})
-    table_header = html.Thead(html.Tr([
-        html.Th('Horizon'),
-        html.Th('Actual Estimate (Spot)'),
-        html.Th('Fair Value Estimate'),
-        html.Th('Reasoning'),
-    ]))
-    
-    table_rows = []
+
+    forecast_cards = []
     horizon_labels = {'1m': '1 Month', '3m': '3 Months', '6m': '6 Months'}
-    
+
     for key, label in horizon_labels.items():
         if key in forecasts:
             f = forecasts[key]
-            table_rows.append(html.Tr([
-                html.Td(label, style={'fontWeight': '600'}),
-                html.Td(f"R {f['actual_estimate']:.4f}"),
-                html.Td(f"R {f['fair_value']:.4f}", style={'color': 'var(--accent)', 'fontWeight': '600'}),
-                html.Td(f['reason'], style={'fontSize': '0.8125rem', 'color': 'var(--text-2)'}),
-            ]))
-            
-    forecast_table = html.Table(className='forecast-table', children=[
-        table_header,
-        html.Tbody(table_rows)
+            diff = f['fair_value'] - f['actual_estimate']
+            diff_pct = (diff / f['actual_estimate']) * 100
+            card_color = '#EF4444' if diff > 0.01 else '#10B981' if diff < -0.01 else '#6b6b6b'
+            card_arrow = '▲' if diff > 0.01 else '▼' if diff < -0.01 else '—'
+
+            forecast_cards.append(
+                html.Div(className='forecast-horizon-card', children=[
+                    html.Div(f'{label} Point Estimate', className='forecast-horizon-label'),
+                    html.Div(f"R {f['fair_value']:.2f}", className='forecast-horizon-value'),
+                    html.Div(className='forecast-horizon-delta', style={'color': card_color}, children=[
+                        html.Span(f"{card_arrow} {diff:+.2f} ({diff_pct:+.1f}%) vs spot")
+                    ]),
+                    html.Div(f['reason'], className='forecast-horizon-reason'),
+                ])
+            )
+
+    forecast_table = html.Div(children=[
+        valuation_summary,
+        html.Div(className='forecast-section-header', children=[
+            html.H5('Multi-Horizon Point Estimates',
+                    style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'margin': '0'}),
+            html.Span('Iterated forecasts assuming macro conditions persist',
+                      style={'fontSize': '0.75rem', 'color': 'var(--text-3)'}),
+        ]),
+        html.Div(className='forecast-cards-row', children=forecast_cards),
     ])
 
     # ── Feature contributions ──
-    contrib_rows = []
+    # Separate the lag anchor from correction features
+    lag_contrib = None
+    correction_contribs = []
     for c in result['contributions']:
-        feat_name = get_friendly_feature_name(c['feature'], c['transform_type'])
-        coef = c['zar_level_coefficient']  # Use ZAR/USD level coefficient for user interpretation
+        if c['feature'] == 'ZAR_USD_lag1':
+            lag_contrib = c
+        else:
+            correction_contribs.append(c)
+
+    # Sort correction features by absolute contribution
+    correction_contribs.sort(key=lambda x: abs(x['contribution']), reverse=True)
+    max_correction = max((abs(x['contribution']) for x in correction_contribs), default=1)
+
+    # Anchor summary
+    anchor_value = lag_contrib['contribution'] if lag_contrib else 0
+    intercept = result['model_info'].get('intercept', 0)
+    total_correction = sum(c['contribution'] for c in correction_contribs) + (intercept or 0)
+
+    contrib_rows = []
+
+    # Anchor info card
+    contrib_rows.append(
+        html.Div(className='contrib-anchor-card', children=[
+            html.Div(className='contrib-anchor-row', children=[
+                html.Div(children=[
+                    html.Span('Random Walk Anchor', style={'fontWeight': '600', 'fontSize': '0.875rem'}),
+                    html.Span(
+                        f'  Previous month (R {last_zar:.2f}) x 0.96 + intercept',
+                        style={'color': 'var(--text-3)', 'fontSize': '0.8125rem', 'marginLeft': '8px'}
+                    ),
+                ]),
+                html.Span(f'R {anchor_value + (intercept or 0):.2f}',
+                          style={'fontWeight': '700', 'fontSize': '0.9375rem', 'color': 'var(--text-1)'}),
+            ]),
+            html.Div(className='contrib-anchor-row', style={'marginTop': '6px'}, children=[
+                html.Div(children=[
+                    html.Span('Correction Term', style={'fontWeight': '600', 'fontSize': '0.875rem'}),
+                    html.Span(
+                        '  Net adjustment from 10 macro signals',
+                        style={'color': 'var(--text-3)', 'fontSize': '0.8125rem', 'marginLeft': '8px'}
+                    ),
+                ]),
+                html.Span(f'{total_correction:+.2f} ZAR',
+                          style={'fontWeight': '700', 'fontSize': '0.9375rem',
+                                 'color': '#EF4444' if total_correction > 0 else '#10B981'}),
+            ]),
+        ])
+    )
+
+    # Correction feature bars
+    for c in correction_contribs:
+        feat_name = get_friendly_feature_name(c['feature'])
         contrib = c['contribution']
 
-        # Direction label based on coefficient sign (MSc research standard)
-        # Positive coef → ZAR per USD increases → ZAR depreciates (weakens)
-        # Negative coef → ZAR per USD decreases → ZAR appreciates (strengthens)
-        if abs(coef) < 0.0001:
+        if abs(contrib) < 0.0001:
             direction_label = 'Neutral'
-        elif coef > 0:
-            direction_label = 'ZAR Depreciates'
+        elif contrib > 0:
+            direction_label = 'Weakens ZAR'
         else:
-            direction_label = 'ZAR Appreciates'
+            direction_label = 'Strengthens ZAR'
 
         bar_color = '#EF4444' if contrib > 0 else '#10B981'
-        bar_width = min(abs(contrib) / max(abs(x['contribution']) for x in result['contributions']) * 100, 100)
-
-        # Add unit suffix based on transform type
-        unit_suffix = get_coefficient_unit(c['transform_type'])
+        bar_width = min(abs(contrib) / max_correction * 100, 100)
 
         contrib_rows.append(
             html.Div(className='contrib-row', children=[
@@ -1589,11 +1689,11 @@ def render_model_ui(active_tab, prediction_data, theme):
                 ]),
                 html.Div(className='contrib-bar-container', children=[
                     html.Div(className='contrib-bar', style={
-                        'width': f'{bar_width}%',
+                        'width': f'{max(bar_width, 2)}%',
                         'backgroundColor': bar_color,
                     }),
                 ]),
-                html.Span(f'{coef:+.4f} {unit_suffix}', className='contrib-value',
+                html.Span(f'{contrib:+.4f} ZAR', className='contrib-value',
                           style={'color': bar_color}),
             ])
         )
@@ -1710,24 +1810,24 @@ def render_model_ui(active_tab, prediction_data, theme):
         html.H5('Model Specification',
                 style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('Type', 'ElasticNet (L1 = Lasso)',
-                       'Statistical model using both L1 and L2 regularization to find the best predictors.'),
-            _info_pill('Alpha', f"{info['alpha']:.4f}" if info.get('alpha') is not None else "N/A",
-                       'Regularization strength: higher values mean more indicators are excluded to prevent overfitting.'),
-            _info_pill('L1 Ratio', f"{info['l1_ratio']:.2f}" if info.get('l1_ratio') is not None else "N/A",
-                       'Balance between Lasso (1.0) and Ridge (0.0) regularization.'),
-            _info_pill('Intercept', f"{info['intercept']:+.4f}" if info.get('intercept') is not None else "N/A",
-                       'The base log-return forecast before considering macroeconomic indicator impacts.'),
-            _info_pill('Training Obs', str(info.get('training_observations', 'N/A')),
-                       'Number of historical monthly data points used to calibrate the model.'),
-            _info_pill('Features', f"{info.get('n_selected', 0)} / {info.get('n_features', 0)} selected",
-                       'The number of macroeconomic indicators the model found statistically significant.'),
-            _info_pill('Date Range', info.get('training_date_range', 'N/A'),
-                       'The historical window of data used for training the current model version.'),
-            _info_pill('Target', 'Log-return ZAR/USD (% MoM)',
-                       'The model predicts the percentage change in the exchange rate from one month to the next.'),
+            _info_pill('Type', 'HuberRegressor (ℓ₂ penalty)',
+                       'Robust regression that downweights outlier residuals via the Huber loss function, with Ridge (ℓ₂) regularization.'),
+            _info_pill('Alpha (α)', f"{info['alpha']:.4f}" if info.get('alpha') is not None else "N/A",
+                       'ℓ₂ regularisation strength. Higher α shrinks coefficients toward zero, trading bias for variance reduction.'),
+            _info_pill('Epsilon (ε)', f"{info.get('epsilon', 1.1):.1f}",
+                       'Huber loss transition point. Residuals exceeding ε·σ̂ are treated as outliers with linear (not quadratic) loss.'),
+            _info_pill('Intercept (β₀)', f"{info['intercept']:+.4f}" if info.get('intercept') is not None else "N/A",
+                       'Base level correction applied before lag and feature adjustments.'),
+            _info_pill('Scale (σ̂)', f"{info.get('scale', 0):.4f}" if info.get('scale') else "N/A",
+                       'Fitted robust standard deviation of residuals. Used with ε to classify outliers.'),
+            _info_pill('Features', f"{info.get('n_selected', 0)} predictors (all non-zero)",
+                       'All 11 economically motivated features contribute; none were shrunk to zero by ℓ₂ regularization.'),
+            _info_pill('Training / Test', f"{info.get('training_observations', 'N/A')} / {info.get('test_observations', 'N/A')} obs",
+                       'Chronological 80/20 split with no shuffling. 13 observations lost to rolling window + lag.'),
+            _info_pill('Target', 'ZAR/USD Level (error-correction)',
+                       'Predicts next month\'s exchange rate directly. Starts from S_{t-1} as random-walk anchor, then applies corrections.'),
         ]),
-        html.H5('In-Sample Performance Metrics',
+        html.H5('Out-of-Sample Performance Metrics (Test Set)',
                 style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px',
                        'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
@@ -1736,37 +1836,35 @@ def render_model_ui(active_tab, prediction_data, theme):
             _info_pill('RMSE', f"ZAR {metrics.get('rmse', 0):.4f}",
                        'Root Mean Squared Error: Similar to MAE but penalizes larger misses more heavily.'),
             _info_pill('R²', f"{metrics.get('r2', 0):.4f}",
-                       'Explains how much of the ZAR/USD volatility is captured by the model (0 to 1 scale).'),
+                       'Out-of-sample R². Explains 61.57% of test-set variance — modest but noteworthy for FX (Meese-Rogoff puzzle).'),
             _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%",
                        'Mean Absolute Percentage Error: Average error relative to the exchange rate level.'),
-            _info_pill('MedAE', f"ZAR {metrics.get('medae', 0):.4f}",
-                       'Median Absolute Error: The median value of all absolute errors. Robust to outliers.'),
-            _info_pill('Max Error', f"ZAR {metrics.get('max_error', 0):.4f}",
-                       'Maximum Error: The largest absolute difference between actual and predicted ZAR/USD.'),
-            _info_pill('Explained Variance', f"{metrics.get('evs', 0):.4f}",
-                       'Measures how much of the variation in ZAR/USD is captured by the model.'),
+            _info_pill("Theil's U", f"{metrics.get('theils_u', 0):.4f}",
+                       'Model RMSE / random-walk RMSE. U < 1 means the model beats the naïve forecast (U = 0.9969).'),
             _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%",
-                       'Percentage of months where the model correctly predicted if the ZAR would strengthen or weaken.'),
+                       'Correctly predicted direction in 67.65% of test months (vs 50% random guessing).'),
         ]),
-        html.H5('Forward Model Estimates',
+        html.H5('Valuation & Forward Estimates',
                 style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px',
                        'marginBottom': '12px'}),
         html.Div(className='model-info-grid', children=[
-            _info_pill('1 Month Forward', f"R {result.get('forecasts', {}).get('1m', {}).get('fair_value', 0):.4f}",
-                       f"Estimate for {result.get('forecasts', {}).get('1m', {}).get('date', 'next month')}. Using latest macro drivers."),
-            _info_pill('3 Month Forward', f"R {result.get('forecasts', {}).get('3m', {}).get('fair_value', 0):.4f}",
-                       f"Estimate for {result.get('forecasts', {}).get('3m', {}).get('date', 'in 3 months')}. Iterative multi-horizon forecast."),
-            _info_pill('6 Month Forward', f"R {result.get('forecasts', {}).get('6m', {}).get('fair_value', 0):.4f}",
-                       f"Estimate for {result.get('forecasts', {}).get('6m', {}).get('date', 'in 6 months')}. Assuming macro conditions persist."),
+            _info_pill('Point Estimate (1M)', f"R {result.get('predicted_level', 0):.4f}",
+                       f"Direct 1-step-ahead prediction for {result.get('next_month_date', 'next month')}. Single-pass pipeline output."),
+            _info_pill('Fair Value (Equilibrium)', f"R {result.get('fair_value', 0):.4f}",
+                       f"Long-run equilibrium where error-correction fully resolves. Misalignment vs spot: {result.get('fair_value_misalignment_pct', 0):+.1f}%."),
+            _info_pill('3M Forward', f"R {result.get('forecasts', {}).get('3m', {}).get('fair_value', 0):.4f}",
+                       f"Iterative 3-month point estimate for {result.get('forecasts', {}).get('3m', {}).get('date', 'in 3 months')}."),
+            _info_pill('6M Forward', f"R {result.get('forecasts', {}).get('6m', {}).get('fair_value', 0):.4f}",
+                       f"Iterative 6-month point estimate for {result.get('forecasts', {}).get('6m', {}).get('date', 'in 6 months')}. Assuming macro conditions persist."),
         ]),
     ])
 
-    # Dynamic Description Generation (MSc research standard)
+    # Dynamic Description Generation
     top_feature = result['contributions'][0] if result['contributions'] else None
     feature_impact_text = ""
     if top_feature:
-        feat_name = get_friendly_feature_name(top_feature['feature'], top_feature['transform_type'])
-        impact_dir = "depreciation" if top_feature['zar_level_coefficient'] > 0 else "appreciation"
+        feat_name = get_friendly_feature_name(top_feature['feature'])
+        impact_dir = "depreciation" if top_feature['contribution'] > 0 else "appreciation"
         feature_impact_text = f"The most significant driver for this period is {feat_name}, which is associated with expected ZAR {impact_dir} pressure."
 
     direction_text = ""
@@ -1777,15 +1875,19 @@ def render_model_ui(active_tab, prediction_data, theme):
     else:
         direction_text = "The model expects the ZAR/USD exchange rate to remain relatively stable."
 
-    perf_text = f"Historically, this model has achieved a directional accuracy of {metrics.get('directional_accuracy', 0):.1f}% during its training period, with a mean absolute error (MAE) of approximately {metrics.get('mae', 0):.2f} cents per Dollar."
+    perf_text = (
+        f"On the out-of-sample test set, this model achieved a directional accuracy of {metrics.get('directional_accuracy', 0):.1f}%, "
+        f"Theil's U of {metrics.get('theils_u', 0):.4f} (marginally beating the random walk), "
+        f"and a mean absolute error (MAE) of ZAR {metrics.get('mae', 0):.4f}."
+    )
 
     analysis_content = html.Div([
         html.P(f"Based on the latest data for {result['last_date']}, {direction_text} {feature_impact_text}"),
         html.P(perf_text),
         html.P(
-            "This forecast is based on an ElasticNet (Lasso) regression model that automatically selects the most relevant macroeconomic indicators. "
-            "Coefficients represent expected changes in ZAR per USD holding all else constant. "
-            "The model uses log-returns to ensure statistical stability and then converts the results back to level exchange rates for interpretability.")
+            "This forecast uses a HuberRegressor with ℓ₂ regularization — an error-correction model that starts from the previous month's "
+            "exchange rate as a random-walk anchor, then applies small corrections based on momentum, mean-reversion, global risk sentiment, "
+            "interest rate changes, and commodity prices. The Huber loss function ensures that extreme market shocks do not distort the relationships.")
     ])
 
     return ({'display': 'block'}, '', forecast_table, contrib_rows, fig_dict, info_items, analysis_content,
@@ -1985,27 +2087,19 @@ def _info_pill(label, value, description=None):
 SCENARIO_FRIENDLY_NAMES = {
     'VIX': 'VIX (Volatility Index)',
     'GOLD_PRICE': 'Gold Price (USD/oz)',
-    'BRENT_OIL_PRICE': 'Brent Crude Oil (USD/bbl)',
     'EPU(USA)': 'US Economic Policy Uncertainty',
     'WUIZAF(SA)': 'SA World Uncertainty Index',
     '10_YEAR_BOND_RATES(USA)': 'US 10-Year Bond Rate (%)',
     '10_YEAR_BOND_RATES(SA)': 'SA 10-Year Bond Rate (%)',
-    'INFLATION_DIFF': 'SA-US Inflation Differential (pp)',
-    'SA_INFLATION_YOY': 'SA Inflation YoY (%)',
-    'US_CPI_YOY': 'US CPI YoY (%)',
 }
 
 SCENARIO_UNITS = {
     'VIX': '',
     'GOLD_PRICE': 'USD',
-    'BRENT_OIL_PRICE': 'USD',
     'EPU(USA)': '',
     'WUIZAF(SA)': '',
     '10_YEAR_BOND_RATES(USA)': '%',
     '10_YEAR_BOND_RATES(SA)': '%',
-    'INFLATION_DIFF': 'pp',
-    'SA_INFLATION_YOY': '%',
-    'US_CPI_YOY': '%',
 }
 
 
@@ -2241,7 +2335,7 @@ def run_scenario_prediction(current_values, baseline, theme):
 
     fig = go.Figure()
     if active_waterfall:
-        labels = [get_friendly_feature_name(w['feature'], w['transform_type']) for w in active_waterfall]
+        labels = [get_friendly_feature_name(w['feature']) for w in active_waterfall]
         deltas = [w['delta'] for w in active_waterfall]
         colors = ['#EF4444' if d > 0 else '#10B981' for d in deltas]
 

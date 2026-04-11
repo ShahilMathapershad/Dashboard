@@ -5,16 +5,16 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with UIv5">
-      <change afterPath="$PROJECT_DIR$/frozen models/ZAR_USD_Model_Report.pdf" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/frozen models/zar_usd_forecast_model.pkl" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.cache/58/9a/6b2dec348145b8cc2906d2b2d619.val" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/.cache/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/cache.db" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.cache/data/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/data/cache.db" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frozen models/zar_usd_model_v1.pkl" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/frozen models/zar_usd_model_v1_old.pkl" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/frozen models/zar_usd_trainsetmodel.pkl" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/frozen models/zar_usd_trainsetmodel_old.pkl" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/run/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/run/run.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CLAUDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/CLAUDE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/assets/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/assets/style.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/logic/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/logic/model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pages/dashboard.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/dashboard.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pages/login.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/login.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -93,8 +93,8 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/.venv/production models" />
       <recent name="$PROJECT_DIR$/frozen models" />
+      <recent name="$PROJECT_DIR$/.venv/production models" />
       <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/assets" />
     </key>
@@ -193,15 +193,7 @@
       <workItem from="1775589723443" duration="3000" />
       <workItem from="1775916135276" duration="1474000" />
       <workItem from="1775936639058" duration="183000" />
-      <workItem from="1775936826844" duration="757000" />
-    </task>
-    <task id="LOCAL-00016" summary="h">
-      <option name="closed" value="true" />
-      <created>1772707945164</created>
-      <option name="number" value="00016" />
-      <option name="presentableId" value="LOCAL-00016" />
-      <option name="project" value="LOCAL" />
-      <updated>1772707945164</updated>
+      <workItem from="1775936826844" duration="4268000" />
     </task>
     <task id="LOCAL-00017" summary="h">
       <option name="closed" value="true" />
@@ -587,7 +579,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775936896739</updated>
     </task>
-    <option name="localTasksCounter" value="65" />
+    <task id="LOCAL-00065" summary="lastest with UIv5">
+      <option name="closed" value="true" />
+      <created>1775937592680</created>
+      <option name="number" value="00065" />
+      <option name="presentableId" value="LOCAL-00065" />
+      <option name="project" value="LOCAL" />
+      <updated>1775937592680</updated>
+    </task>
+    <option name="localTasksCounter" value="66" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -638,7 +638,7 @@
     <SUITE FILE_PATH="coverage/Dash$app.coverage" NAME="app Coverage Results" MODIFIED="1772054274074" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Dash$model.coverage" NAME="model Coverage Results" MODIFIED="1773921359384" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
     <SUITE FILE_PATH="coverage/Dash$data_fetcher.coverage" NAME="data_fetcher Coverage Results" MODIFIED="1772707608345" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
-    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1775937158790" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
+    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1775939823647" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
     <SUITE FILE_PATH="coverage/Dash$dashboard.coverage" NAME="dashboard Coverage Results" MODIFIED="1774026661116" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/pages" />
   </component>
 </project>

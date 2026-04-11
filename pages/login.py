@@ -44,7 +44,7 @@ def layout():
             # Stat pills
             html.Div(className='stat-pills', children=[
                 html.Div(className='stat-pill', children=[
-                    html.Span('24', className='stat-pill-number'),
+                    html.Span('11', className='stat-pill-number'),
                     html.Span('Features', className='stat-pill-label'),
                 ]),
                 html.Div(className='stat-pill', children=[
@@ -56,7 +56,7 @@ def layout():
                     html.Span('Data Refresh', className='stat-pill-label'),
                 ]),
                 html.Div(className='stat-pill', children=[
-                    html.Span('ElasticNet', className='stat-pill-number'),
+                    html.Span('HuberRegressor', className='stat-pill-number'),
                     html.Span('Algorithm', className='stat-pill-label'),
                 ]),
             ]),
