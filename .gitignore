@@ -13,3 +13,4 @@ api_keys.txt
 
 # IDEs
 .idea/
+.mcp.json

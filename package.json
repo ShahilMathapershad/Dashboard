@@ -13,6 +13,7 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@playwright/test": "^1.59.1",
     "three": "^0.170.0"
   }
 }

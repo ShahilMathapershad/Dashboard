@@ -78,9 +78,11 @@ def create_scenario_slider(slider_id, label, unit, min_val, max_val, current_val
 
 
 def sidebar(active_tab):
+    icons = {'data': '⊞', 'model': '◆', 'scenario': '◇'}
     def link(id_, label, tab_name):
         classes = 'nav-link-custom active' if active_tab == tab_name else 'nav-link-custom'
         return html.Div(id=id_, className=classes, children=[
+            html.Span(icons.get(tab_name, ''), className='nav-icon'),
             html.Span(label, className='nav-label')
         ], n_clicks=0)
 

@@ -63,19 +63,19 @@ def layout():
 
             html.Div(className='feature-cards', children=[
                 html.Div(className='feature-card', children=[
-                    html.Div("↗", className='feature-icon-wrap'),
+                    html.Div("◈", className='feature-icon-wrap'),
                     html.Div("Macroeconomic Drivers", className='feature-title'),
-                    html.Div("Highlighting how variables like commodity prices and interest rate differentials impact the ZAR.", className='feature-desc'),
+                    html.Div("Track how commodity prices, interest rate spreads, and volatility indices shape the Rand in real time.", className='feature-desc'),
                 ]),
                 html.Div(className='feature-card', children=[
-                    html.Div("⚙", className='feature-icon-wrap'),
+                    html.Div("⬡", className='feature-icon-wrap'),
                     html.Div("Scenario Modeling", className='feature-title'),
-                    html.Div("Explaining the ability to test hypothetical changes in underlying factors.", className='feature-desc'),
+                    html.Div("Adjust macro variables and instantly see how the ZAR/USD would respond under different conditions.", className='feature-desc'),
                 ]),
                 html.Div(className='feature-card', children=[
-                    html.Div("◎", className='feature-icon-wrap'),
+                    html.Div("◉", className='feature-icon-wrap'),
                     html.Div("Automated Precision", className='feature-title'),
-                    html.Div("Showcasing monthly updates synced with FRED and Statistics South Africa.", className='feature-desc'),
+                    html.Div("Data refreshes monthly from FRED and Stats SA, feeding a robust ML model with 11 engineered features.", className='feature-desc'),
                 ]),
             ]),
 
