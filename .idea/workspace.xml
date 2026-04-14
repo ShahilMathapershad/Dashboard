@@ -4,9 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with UIv7">
-      <change beforePath="$PROJECT_DIR$/logic/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/logic/model.py" afterDir="false" />
-    </list>
+    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with UIv7" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -188,15 +186,7 @@
       <workItem from="1775991187700" duration="768000" />
       <workItem from="1776006383375" duration="8107000" />
       <workItem from="1776080502355" duration="199000" />
-      <workItem from="1776155634902" duration="4677000" />
-    </task>
-    <task id="LOCAL-00022" summary="latest claude">
-      <option name="closed" value="true" />
-      <created>1772991490775</created>
-      <option name="number" value="00022" />
-      <option name="presentableId" value="LOCAL-00022" />
-      <option name="project" value="LOCAL" />
-      <updated>1772991490775</updated>
+      <workItem from="1776155634902" duration="5116000" />
     </task>
     <task id="LOCAL-00023" summary="latest claude">
       <option name="closed" value="true" />
@@ -582,7 +572,15 @@
       <option name="project" value="LOCAL" />
       <updated>1776159211986</updated>
     </task>
-    <option name="localTasksCounter" value="71" />
+    <task id="LOCAL-00071" summary="lastest with UIv7">
+      <option name="closed" value="true" />
+      <created>1776161188401</created>
+      <option name="number" value="00071" />
+      <option name="presentableId" value="LOCAL-00071" />
+      <option name="project" value="LOCAL" />
+      <updated>1776161188401</updated>
+    </task>
+    <option name="localTasksCounter" value="72" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

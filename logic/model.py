@@ -650,7 +650,7 @@ def get_scenario_baseline():
     df_features, df_raw = engineer_features(raw_df)
 
     if df_features.empty:
-claud        raise ValueError("Not enough data to compute features.")
+        raise ValueError("Not enough data to compute features.")
 
     # Base prediction (latest features → next month level)
     X_latest = df_features.iloc[[-1]][feature_names]
