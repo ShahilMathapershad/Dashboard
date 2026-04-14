@@ -54,14 +54,10 @@ pip install -r requirements.txt
 ### Running Locally
 
 ```bash
-# Development mode (with hot reload)
 python app.py
-
-# Or use the convenience runner (auto-opens browser)
-python run/run.py
 ```
 
-The app will be available at `http://localhost:10000` (app.py) or `http://localhost:8050` (run.py).
+The app will be available at `http://localhost:10000`.
 
 ### Production
 
@@ -69,14 +65,14 @@ The app will be available at `http://localhost:10000` (app.py) or `http://localh
 gunicorn app:server -b 0.0.0.0:10000 --workers 1 --threads 4 --worker-class gthread --timeout 120 --preload
 ```
 
-See [`DEPLOYMENT.md`](DEPLOYMENT.md) for full deployment instructions.
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for full deployment instructions.
 
 ## Project Structure
 
 ```
 Dash/
 ├── app.py                    # Entry point -- Dash app init, auth, chat, callbacks
-├── Procfile                  # Render/Heroku process definition
+├── Procfile                  # Render process definition
 ├── requirements.txt          # Python dependencies
 ├── package.json              # Node.js deps (Three.js build)
 ├── tsconfig.json             # TypeScript configuration
@@ -93,16 +89,15 @@ Dash/
 │   ├── data_fetcher.py       # FRED/World Bank/StatsSA data pipeline
 │   └── model.py              # ML inference, feature engineering, scenarios
 │
-├── frozen models/            # Serialized ML artifacts
+├── models/                   # Serialized ML artifacts
 │   ├── zar_usd_forecast_model.pkl
 │   └── ZAR_USD_Model_Report.pdf
 │
 ├── assets/                   # Static assets (auto-served by Dash)
-│   ├── style.css             # Global stylesheet (~3,500 lines)
+│   ├── style.css             # Global stylesheet
 │   ├── interactions.js       # Client-side JS (resize, animations)
-│   ├── three-scenes.js       # Bundled Three.js scenes
-│   ├── logo.svg / logo_light.svg / logo_dark.svg
-│   └── background.png / data.png / model.png
+│   ├── three-scenes.js       # Bundled Three.js scenes (built from src/)
+│   └── logo*.svg             # Light/dark logo variants
 │
 ├── src/three/                # Three.js TypeScript source
 │   ├── index.ts
@@ -111,13 +106,12 @@ Dash/
 │   ├── ChartTilt.ts          # Chart tilt interactions
 │   └── noise.ts              # Noise generation utilities
 │
-├── run/
-│   └── run.py                # Development runner (auto-opens browser)
-│
-├── data/
-│   └── zar_usd_hist.csv      # Historical data placeholder
-│
-└── .cache/                   # DiskCache directory (runtime)
+└── docs/                     # Project documentation
+    ├── ARCHITECTURE.md       # Tech stack, design patterns
+    ├── API.md                # External API integrations
+    ├── DATABASE.md           # Database schema
+    ├── DEPLOYMENT.md         # Render deployment guide
+    └── CONTRIBUTING.md       # Code style and conventions
 ```
 
 ## Data Sources
@@ -143,15 +137,15 @@ With `B1 ~ 0.96`, the model behaves as a random-walk anchor with small correctio
 - Theil's U = 0.9969
 - Directional Accuracy = 67.65%
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for detailed model documentation.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for detailed model documentation.
 
 ## Documentation
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) -- Tech stack, folder structure, and design patterns
-- [`DATABASE.md`](DATABASE.md) -- Database schema and table documentation
-- [`API.md`](API.md) -- External API integrations and data flow
-- [`DEPLOYMENT.md`](DEPLOYMENT.md) -- Deployment instructions for Render
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) -- Code style guide and contribution conventions
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) -- Tech stack, folder structure, and design patterns
+- [`docs/DATABASE.md`](docs/DATABASE.md) -- Database schema and table documentation
+- [`docs/API.md`](docs/API.md) -- External API integrations and data flow
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) -- Deployment instructions for Render
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) -- Code style guide and contribution conventions
 
 ## License
 

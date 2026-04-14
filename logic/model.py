@@ -18,7 +18,7 @@ except ModuleNotFoundError as exc:
 logger = logging.getLogger("ModelPredictor")
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          'frozen models', 'zar_usd_forecast_model.pkl')
+                          'models', 'zar_usd_forecast_model.pkl')
 
 # The 11 features in the order the pipeline expects
 FEATURE_LIST = [

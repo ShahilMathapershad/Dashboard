@@ -2,15 +2,36 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
 venv/
 .venv/
 env/
+
+# Environment / secrets
 .env
 api_keys.txt
 
 # OS
 .DS_Store
+Thumbs.db
 
 # IDEs
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# Node
+node_modules/
+
+# Runtime / cache
+.cache/
+*.log
+
+# MCP / Playwright artifacts
 .mcp.json
+.playwright-mcp/
