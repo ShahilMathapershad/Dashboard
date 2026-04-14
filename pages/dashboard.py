@@ -246,12 +246,17 @@ def model_tab_content(existing_model_data=None):
     return html.Div(id='model-tab', className='tab-content', style={'display': 'none'}, children=[
         html.Div(className='page-header', children=[
             html.Div(children=[
-                html.H2('Model Forecasts', className='page-title'),
-                html.P("ZAR/USD estimates via HuberRegressor error-correction model.",
+                html.H2('Model', className='page-title'),
+                html.P("HuberRegressor error-correction model for ZAR/USD.",
                        className='page-subtitle'),
             ]),
             html.Div(className='page-actions', children=[
-                html.Div(id='model-status-display', className='status-badge'),
+                # Sub-tab toggle
+                html.Div(className='model-sub-tab-toggle', children=[
+                    html.Button('Predictions', id='model-sub-predictions', className='model-sub-tab-btn model-sub-tab-active', n_clicks=0),
+                    html.Button('Specifications', id='model-sub-specifications', className='model-sub-tab-btn', n_clicks=0),
+                ]),
+                html.Div(id='model-status-display', className='status-badge', style={'marginLeft': '12px'}),
             ])
         ]),
 
@@ -263,60 +268,53 @@ def model_tab_content(existing_model_data=None):
                              visible=not existing_model_data),
 
         html.Div(id='model-results-container', style=model_style, children=[
-            # Multi-horizon Forecast Cards
-            html.Div(className='model-card', children=[
-                html.H4('ZAR/USD Forecast', className='card-title'),
-                html.P('Error-correction model estimates across multiple horizons. The model starts from the current rate and applies small adjustments based on economic signals.',
-                       className='card-subtitle'),
-                html.Div(id='forecast-table-container', className='forecast-table-wrapper')
+
+            # ── SUB-TAB: Predictions ──
+            html.Div(id='model-predictions-panel', children=[
+                # Multi-horizon Forecast Cards
+                html.Div(className='model-card', children=[
+                    html.H4('ZAR/USD Forecast', className='card-title'),
+                    html.P('Point estimates and fair values across multiple horizons.',
+                           className='card-subtitle'),
+                    html.Div(id='forecast-table-container', className='forecast-table-wrapper')
+                ]),
+
+                # Feature Contributions
+                html.Div(className='model-card', children=[
+                    html.H4('What\'s Driving the Forecast', className='card-title'),
+                    html.P('Anchored on last month\'s rate, then adjusted by 10 macro correction signals.',
+                           className='card-subtitle'),
+                    html.Div(id='feature-contributions'),
+                ]),
+
+                # Dynamic model description / analysis
+                html.Div(className='model-card', children=[
+                    html.H4('Forecast Summary', className='card-title'),
+                    html.Div(id='model-description-content', className='model-analysis-text', style={
+                        'lineHeight': '1.7',
+                        'color': 'var(--text-2)',
+                        'fontSize': '0.9375rem',
+                    }),
+                ]),
             ]),
 
-            # Feature Contributions
-            html.Div(className='model-card', children=[
-                html.H4('What\'s Driving the Forecast', className='card-title'),
-                html.P('The model anchors on last month\'s rate (random walk), then adjusts based on 10 macro correction signals. '
-                       'Positive values push ZAR/USD higher (ZAR weakens), negative values push it lower (ZAR strengthens).',
-                       className='card-subtitle'),
-                html.Div(id='feature-contributions'),
-            ]),
+            # ── SUB-TAB: Specifications ──
+            html.Div(id='model-specifications-panel', style={'display': 'none'}, children=[
+                # Model Info
+                html.Div(className='model-card model-info-card', children=[
+                    html.H4('Model Specification & Performance', className='card-title'),
+                    html.P('Architecture, hyperparameters, and out-of-sample test metrics.',
+                           className='card-subtitle'),
+                    html.Div(id='model-info-content'),
+                ]),
 
-            # Historical Fit Chart — 3D tilt
-            html.Div(id='model-visualization-container', className='model-card chart-3d', children=[
-                html.H4('Historical Fit', className='card-title'),
-                html.P('Model predictions vs actual ZAR/USD (level space)',
-                       className='card-subtitle'),
-                dcc.Graph(
-                    id='model-history-chart',
-                    className='model-chart',
-                    style={'height': '420px'},
-                    config={
-                        'displayModeBar': 'hover',
-                        'displaylogo': False,
-                        'responsive': True,
-                        'scrollZoom': True,
-                    },
-                ),
-            ]),
-
-            # Model Info
-            html.Div(className='model-card model-info-card', children=[
-                html.H4('Model Specification & Forecast Equilibrium', className='card-title'),
-                html.Div(id='model-info-content'),
-                # Dynamic model description
-                html.Hr(style={'margin': '24px 0', 'borderTop': '1px solid var(--border)'}),
-                html.H4('Model Analysis & Forecast Summary', className='card-title'),
-                html.Div(id='model-description-content', className='model-analysis-text', style={
-                    'lineHeight': '1.6',
-                    'color': 'var(--text-2)',
-                    'fontSize': '0.9375rem',
-                    'marginTop': '12px'
-                }),
-            ]),
-
-            # Diagnostic Plots Section
-            html.Div(className='model-card', children=[
-                html.H4('Diagnostic Plots', className='card-title'),
-                html.Div(id='diagnostics-container'),
+                # Diagnostic Plots Section
+                html.Div(className='model-card', children=[
+                    html.H4('Diagnostic Plots', className='card-title'),
+                    html.P('Visual checks of model fit quality and per-feature relationships.',
+                           className='card-subtitle'),
+                    html.Div(id='diagnostics-container'),
+                ]),
             ]),
         ]),
     ])
@@ -522,7 +520,7 @@ dash.clientside_callback(
         var tabKeys = ['data', 'model', 'scenario'];
         var tabNames = {
             'data': 'Data Explorer',
-            'model': 'Model Forecasts',
+            'model': 'Model',
             'scenario': 'Scenario Analysis'
         };
 
@@ -1478,7 +1476,6 @@ def fetch_scenario_baseline(trigger, existing_data):
     Output('model-error', 'children', allow_duplicate=True),
     Output('forecast-table-container', 'children'),
     Output('feature-contributions', 'children'),
-    Output('model-history-chart', 'figure'),
     Output('model-info-content', 'children'),
     Output('model-description-content', 'children'),
     Output('model-loading', 'style'),
@@ -1489,16 +1486,14 @@ def fetch_scenario_baseline(trigger, existing_data):
 )
 def render_model_ui(active_tab, prediction_data, theme):
     if active_tab != 'model':
-        return [dash.no_update] * 8
+        return [dash.no_update] * 7
 
     if not prediction_data:
-        empty_fig = go.Figure().to_dict()
-        return ({'display': 'none'}, '', '', '', empty_fig, '', '', {'display': 'flex'})
+        return ({'display': 'none'}, '', '', '', '', '', {'display': 'flex'})
 
     result = prediction_data.get('raw_result')
     if not result:
-        empty_fig = go.Figure().to_dict()
-        return ({'display': 'none'}, 'Prediction results unavailable.', '', '', empty_fig, '', '', {'display': 'none'})
+        return ({'display': 'none'}, 'Prediction results unavailable.', '', '', '', '', {'display': 'none'})
 
     pred_level = result['predicted_level']
     direction = result['direction']
@@ -1708,109 +1703,6 @@ def render_model_ui(active_tab, prediction_data, theme):
             ])
         )
 
-    # ── Historical fit chart ──
-    history = result.get('history', {})
-    # Fallback to dark theme if theme is None — Apple palette
-    is_dark = (theme == 'dark') if theme else True
-    text_color = '#f5f5f7' if is_dark else '#1d1d1f'
-    text_muted = '#86868b' if is_dark else '#6e6e73'
-    grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
-    line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
-
-    fig = go.Figure()
-
-    # Ensure data is valid and not empty
-    dates = history.get('dates', [])
-    actual = history.get('actual', [])
-    predicted = history.get('predicted', [])
-
-    if dates and actual and predicted and len(dates) > 0:
-        # Convert all values to native Python types to avoid serialization issues
-        dates_clean = [str(d) for d in dates]
-        actual_clean = [float(a) for a in actual]
-        predicted_clean = [float(p) for p in predicted]
-
-        # Ensure no NaN or infinite values
-        valid_data = True
-        for i, (d, a, p) in enumerate(zip(dates_clean, actual_clean, predicted_clean)):
-            if not (d and a == a and p == p):  # Check for NaN
-                valid_data = False
-                break
-
-        if valid_data:
-            fig.add_trace(go.Scatter(
-                x=dates_clean, y=actual_clean,
-                name='Actual', mode='lines',
-                line=dict(color='#E8E8E8' if is_dark else '#1A1A1A', width=2.5),
-                hovertemplate='Actual: %{y:.4f}<extra></extra>'
-            ))
-            fig.add_trace(go.Scatter(
-                x=dates_clean, y=predicted_clean,
-                name='Predicted', mode='lines',
-                line=dict(color='#5b8def', width=2, dash='dot'),
-                hovertemplate='Predicted: %{y:.4f}<extra></extra>'
-            ))
-            # Next-month forecast point
-            fig.add_trace(go.Scatter(
-                x=[result['next_month_date']], y=[pred_level],
-                name='Forecast', mode='markers',
-                marker=dict(color='#F59E0B', size=10, symbol='diamond',
-                            line=dict(width=2, color='#fff' if is_dark else '#000')),
-                hovertemplate=f'<b>Forecast</b>: R {pred_level:.4f}<extra></extra>',
-            ))
-        else:
-            fig.add_annotation(
-                text="Invalid data detected",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False,
-                font=dict(color=text_muted, size=14)
-            )
-    else:
-        # Empty figure with message
-        fig.add_annotation(
-            text="No data available for chart",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(color=text_muted, size=14)
-        )
-
-    font_family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif"
-    layout = {
-        'template': None,
-        'paper_bgcolor': 'rgba(0,0,0,0)',
-        'plot_bgcolor': 'rgba(0,0,0,0)',
-        'margin': dict(l=48, r=24, t=24, b=48),
-        'autosize': True,
-        'font': dict(family=font_family, size=12, color=text_color),
-        'legend': dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-            font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
-            borderwidth=0,
-        ),
-        'hovermode': "x unified",
-        'hoverlabel': dict(
-            bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
-            font_size=12, font_family=font_family, font_color=text_color,
-            bordercolor=line_color,
-        ),
-        'xaxis': dict(
-            showgrid=False, zeroline=False, showline=True, linewidth=1,
-            linecolor=line_color, tickfont=dict(size=10, color=text_muted),
-        ),
-        'yaxis': dict(
-            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
-            zeroline=False, showline=False,
-            tickfont=dict(size=10, color=text_muted),
-            title=dict(text="ZAR / USD", font=dict(size=11, color=text_muted)),
-            tickformat=".2f",
-        ),
-    }
-
-    fig.update_layout(layout)
-
-    # Convert to dict to ensure proper serialization
-    fig_dict = fig.to_dict()
-
     # ── Model info ──
     info = result['model_info']
     metrics = result.get('metrics', {})
@@ -1902,8 +1794,58 @@ def render_model_ui(active_tab, prediction_data, theme):
             "interest rate changes, and commodity prices. The Huber loss function ensures that extreme market shocks do not distort the relationships.")
     ])
 
-    return ({'display': 'block'}, '', forecast_table, contrib_rows, fig_dict, info_items, analysis_content,
+    return ({'display': 'block'}, '', forecast_table, contrib_rows, info_items, analysis_content,
             {'display': 'none'})
+
+
+# ── Model sub-tab toggle ──
+@callback(
+    Output('model-sub-tab', 'data'),
+    Output('model-sub-predictions', 'className'),
+    Output('model-sub-specifications', 'className'),
+    Input('model-sub-predictions', 'n_clicks'),
+    Input('model-sub-specifications', 'n_clicks'),
+    State('model-sub-tab', 'data'),
+    prevent_initial_call=True
+)
+def toggle_model_sub_tab(pred_clicks, spec_clicks, current):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return current, dash.no_update, dash.no_update
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    active = 'model-sub-tab-btn model-sub-tab-active'
+    inactive = 'model-sub-tab-btn'
+    if trigger == 'model-sub-specifications':
+        return 'specifications', inactive, active
+    return 'predictions', active, inactive
+
+
+dash.clientside_callback(
+    """
+    function(subTab) {
+        var pred = document.getElementById('model-predictions-panel');
+        var spec = document.getElementById('model-specifications-panel');
+        if (pred && spec) {
+            if (subTab === 'specifications') {
+                pred.style.display = 'none';
+                spec.style.display = 'block';
+                spec.style.animation = 'none';
+                void spec.offsetWidth;
+                spec.style.animation = 'tabFadeIn 0.25s cubic-bezier(0,0,0.2,1)';
+            } else {
+                spec.style.display = 'none';
+                pred.style.display = 'block';
+                pred.style.animation = 'none';
+                void pred.offsetWidth;
+                pred.style.animation = 'tabFadeIn 0.25s cubic-bezier(0,0,0.2,1)';
+            }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('model-predictions-panel', 'id'),
+    Input('model-sub-tab', 'data')
+)
 
 
 def _build_diagnostic_plots(diagnostics_data, theme):

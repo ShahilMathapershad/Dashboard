@@ -1200,6 +1200,48 @@ p  { margin: 0; color: var(--text-2); }
 /* ═══════════════════════════════════════════
    Model Page
    ═══════════════════════════════════════════ */
+
+/* Model Sub-Tab Toggle */
+.model-sub-tab-toggle {
+    display: inline-flex;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 3px;
+    gap: 2px;
+}
+.model-sub-tab-btn {
+    padding: 6px 18px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-3);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s var(--ease);
+    white-space: nowrap;
+    font-family: inherit;
+    letter-spacing: -0.01em;
+}
+.model-sub-tab-btn:hover {
+    color: var(--text-2);
+    background: rgba(255,255,255,0.04);
+}
+.model-sub-tab-active {
+    color: var(--text-1) !important;
+    background: var(--bg-raised) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.04);
+    font-weight: 600;
+}
+.light-theme .model-sub-tab-btn:hover {
+    background: rgba(0,0,0,0.04);
+}
+.light-theme .model-sub-tab-active {
+    background: #fff !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+}
+
 .model-top-row {
     display: grid;
     grid-template-columns: 340px 1fr;
@@ -1232,9 +1274,10 @@ p  { margin: 0; color: var(--text-2); }
     margin-bottom: 4px;
 }
 .card-subtitle {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     color: var(--text-3);
     margin-bottom: 20px;
+    line-height: 1.5;
 }
 
 /* Prediction Hero Card */
@@ -1482,7 +1525,13 @@ p  { margin: 0; color: var(--text-2); }
 /* Model Chart */
 .model-card {
     position: relative;
-    min-height: 480px;
+    min-height: auto;
+}
+
+/* Model sub-tab panels */
+#model-predictions-panel > .model-card,
+#model-specifications-panel > .model-card {
+    margin-bottom: 1.5vh;
 }
 
 .model-chart {

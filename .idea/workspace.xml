@@ -4,23 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with UIv5">
-      <change afterPath="$PROJECT_DIR$/API.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ARCHITECTURE.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CONTRIBUTING.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/DATABASE.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/DEPLOYMENT.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+    <list default="true" id="78493cd4-80c4-4119-8b0b-d7ef84b51f4c" name="Changes" comment="lastest with UIv6">
       <change beforePath="$PROJECT_DIR$/.cache/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/cache.db" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.cache/data/cache.db" beforeDir="false" afterPath="$PROJECT_DIR$/.cache/data/cache.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/assets/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/assets/style.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/node_modules/.package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/node_modules/.package-lock.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pages/dashboard.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/dashboard.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pages/login.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/login.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -28,7 +18,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="49" />
+    <option name="cachedIndexableFilesCount" value="78" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="FlaskConsoleOptions" custom-start-script="import sys; print('Python %s on %s' % (sys.version, sys.platform)); sys.path.extend([WORKING_DIR_AND_PYTHON_PATHS])&#10;from flask.cli import ScriptInfo, NoAppException&#10;for module in [&quot;main.py&quot;, &quot;wsgi.py&quot;, &quot;app.py&quot;]:&#10;    try: locals().update(ScriptInfo(app_import_path=module, create_app=None).load_app().make_shell_context()); print(&quot;\nFlask App: %s&quot; % app.import_name); break&#10;    except NoAppException: pass">
@@ -201,15 +191,9 @@
       <workItem from="1775936639058" duration="183000" />
       <workItem from="1775936826844" duration="5976000" />
       <workItem from="1775991187700" duration="768000" />
-      <workItem from="1776006383375" duration="7608000" />
-    </task>
-    <task id="LOCAL-00019" summary="h">
-      <option name="closed" value="true" />
-      <created>1772710758915</created>
-      <option name="number" value="00019" />
-      <option name="presentableId" value="LOCAL-00019" />
-      <option name="project" value="LOCAL" />
-      <updated>1772710758915</updated>
+      <workItem from="1776006383375" duration="8107000" />
+      <workItem from="1776080502355" duration="199000" />
+      <workItem from="1776155634902" duration="1717000" />
     </task>
     <task id="LOCAL-00020" summary="h">
       <option name="closed" value="true" />
@@ -595,7 +579,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775942298617</updated>
     </task>
-    <option name="localTasksCounter" value="68" />
+    <task id="LOCAL-00068" summary="lastest with UIv6">
+      <option name="closed" value="true" />
+      <created>1776014623440</created>
+      <option name="number" value="00068" />
+      <option name="presentableId" value="LOCAL-00068" />
+      <option name="project" value="LOCAL" />
+      <updated>1776014623450</updated>
+    </task>
+    <option name="localTasksCounter" value="69" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -640,13 +632,14 @@
     <MESSAGE value="lastest with UIv3" />
     <MESSAGE value="lastest with UIv4" />
     <MESSAGE value="lastest with UIv5" />
-    <option name="LAST_COMMIT_MESSAGE" value="lastest with UIv5" />
+    <MESSAGE value="lastest with UIv6" />
+    <option name="LAST_COMMIT_MESSAGE" value="lastest with UIv6" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Dash$app.coverage" NAME="app Coverage Results" MODIFIED="1772054274074" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Dash$model.coverage" NAME="model Coverage Results" MODIFIED="1773921359384" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
     <SUITE FILE_PATH="coverage/Dash$data_fetcher.coverage" NAME="data_fetcher Coverage Results" MODIFIED="1772707608345" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/logic" />
-    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1775942301004" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
+    <SUITE FILE_PATH="coverage/Dash$run.coverage" NAME="run Coverage Results" MODIFIED="1776080511496" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/run" />
     <SUITE FILE_PATH="coverage/Dash$dashboard.coverage" NAME="dashboard Coverage Results" MODIFIED="1774026661116" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/pages" />
   </component>
 </project>

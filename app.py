@@ -73,6 +73,7 @@ app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='selected-compare-vars', data=[], storage_type='session'),
     dcc.Store(id='force-refresh-trigger', data=0, storage_type='memory'),
     dcc.Store(id='table-view-mode', data='raw', storage_type='session'),
+    dcc.Store(id='model-sub-tab', data='predictions', storage_type='session'),
 
     dash.page_container,
 
