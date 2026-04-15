@@ -401,6 +401,7 @@ def predict_next_month():
     mae = float(test_metrics.get('MAE', 0))
     rmse = float(test_metrics.get('RMSE', 0))
     r2 = float(test_metrics.get('R2', 0))
+    adjusted_r2 = float(stored_metrics.get('adjusted_r2_test', 0))
     directional_accuracy = float(stored_metrics.get('directional_accuracy_test', 0)) * 100
     theils_u = float(stored_metrics.get('theils_u_test', 0))
 
@@ -605,6 +606,7 @@ def predict_next_month():
             'mae': mae,
             'rmse': rmse,
             'r2': r2,
+            'adjusted_r2': adjusted_r2,
             'mape': mape,
             'theils_u': theils_u,
             'directional_accuracy': directional_accuracy,
