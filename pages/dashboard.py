@@ -52,7 +52,7 @@ def create_scenario_slider(slider_id, label, unit, min_val, max_val, current_val
         # --- TOP ROW: Label and Active Value Display ---
         html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
                         'marginBottom': '12px'}, children=[
-            html.Span(label, style={'fontWeight': '600', 'color': '#f8fafc', 'fontSize': '0.9rem'}),
+            html.Span(label, className='scenario-slider-label', style={'fontWeight': '600', 'fontSize': '0.9rem'}),
             html.Span(
                 f"{active_val:.{decimals}f} {unit}".strip(),
                 id={'type': 'scenario-value-display', 'index': slider_id},
@@ -167,8 +167,6 @@ def data_tab_content(existing_data=None):
             ])
         ]),
 
-        html.Div(id='data-error', className='error-message'),
-
         # Loading state
         _render_loading_state('data', 'Analyzing historical data...',
                              'Connecting to database and processing macroeconomic series.',
@@ -260,8 +258,6 @@ def model_tab_content(existing_model_data=None):
             ])
         ]),
 
-        html.Div(id='model-error', className='error-message'),
-
         # Loading state
         _render_loading_state('model', 'Running model prediction...',
                              'Analyzing latest macroeconomic drivers and generating forecast.',
@@ -335,8 +331,6 @@ def scenario_tab_content():
                 html.Div(id='scenario-status-display', className='status-badge', style={'marginLeft': '12px'}),
             ])
         ]),
-
-        html.Div(id='scenario-error', className='error-message'),
 
         # Loading state while baseline is fetched
         _render_loading_state('scenario', 'Loading scenario engine...',

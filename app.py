@@ -77,6 +77,15 @@ app.layout = html.Div(id='theme-main-container', children=[
 
     dash.page_container,
 
+    # Global error-message stubs. These must always exist in the layout so that
+    # dashboard background callbacks (registered globally via @callback) can
+    # resolve their `allow_duplicate=True` Outputs on non-dashboard pages
+    # (e.g. /login) without emitting "nonexistent object" warnings.
+    # Hidden via CSS `.error-message:not(:empty)` until populated.
+    html.Div(id='data-error', className='error-message'),
+    html.Div(id='model-error', className='error-message'),
+    html.Div(id='scenario-error', className='error-message'),
+
     # ── Global AI Chat Panel (available on all pages) ──
     html.Div(id='chat-panel', className='chat-panel', children=[
         html.Div(className='chat-header', children=[
