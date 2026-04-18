@@ -2060,16 +2060,20 @@ SCENARIO_UNITS = {
     Output('scenario-current-values', 'data'),
     Input('dashboard-tab', 'data'),
     Input('scenario-baseline-data', 'data'),
+    State('scenario-current-values', 'data'),
     prevent_initial_call='initial_duplicate'
 )
-def sync_scenario_ui(active_tab, existing_baseline):
+def sync_scenario_ui(active_tab, existing_baseline, existing_values):
     if active_tab != 'scenario':
         return [dash.no_update] * 4
 
     if not existing_baseline:
         return '', {'display': 'flex'}, {'display': 'none'}, dash.no_update
 
-    # Already have baseline, just return current state
+    # Only set initial values if none exist yet — don't clobber agent or user slider changes
+    if existing_values:
+        return '', {'display': 'none'}, {'display': 'block'}, dash.no_update
+
     current_vals = {p['raw_col']: p['current_value'] for p in existing_baseline.get('predictors', [])}
     return '', {'display': 'none'}, {'display': 'block'}, current_vals
 
@@ -2079,9 +2083,10 @@ def sync_scenario_ui(active_tab, existing_baseline):
     Output('scenario-base-value', 'children'),
     Output('scenario-base-change', 'children'),
     Input('scenario-baseline-data', 'data'),
+    Input('agent-slider-sync', 'data'),
     State('scenario-current-values', 'data'),
 )
-def render_scenario_sliders(baseline, current_values):
+def render_scenario_sliders(baseline, _agent_sync, current_values):
     if not baseline:
         return dash.no_update, dash.no_update, dash.no_update
 

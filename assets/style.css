@@ -3350,6 +3350,145 @@ p  { margin: 0; color: var(--text-2); }
 
 
 /* ═══════════════════════════════════════════
+   AGENT MODE — Toggle, Action Chips, Visual Feedback
+   ═══════════════════════════════════════════ */
+
+.chat-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Agent mode toggle switch */
+.agent-mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+}
+.agent-mode-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
+    transition: color 0.2s var(--ease);
+}
+.agent-mode-label-active {
+    color: var(--text-1);
+}
+.agent-mode-active .agent-mode-label-chat {
+    color: var(--text-3);
+}
+.agent-mode-active .agent-mode-label-agent {
+    color: #a78bfa;
+}
+
+.agent-mode-switch {
+    width: 34px;
+    height: 18px;
+    border-radius: 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    position: relative;
+    cursor: pointer;
+    transition: all 0.25s var(--ease);
+}
+.agent-mode-switch:hover {
+    border-color: var(--accent);
+}
+.agent-mode-knob {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-3);
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.agent-mode-active .agent-mode-switch {
+    background: linear-gradient(135deg, #7c3aed, #a78bfa);
+    border-color: #7c3aed;
+}
+.agent-mode-active .agent-mode-knob {
+    left: 18px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(124, 58, 237, 0.4);
+}
+
+/* Agent mode panel glow */
+.chat-agent-mode {
+    border-color: rgba(124, 58, 237, 0.3);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.25), 0 0 0 1px rgba(124, 58, 237, 0.15),
+                0 0 24px rgba(124, 58, 237, 0.08);
+}
+.chat-agent-mode .chat-header {
+    border-bottom-color: rgba(124, 58, 237, 0.2);
+}
+.chat-agent-mode .chat-input:focus {
+    border-color: #7c3aed;
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+.chat-agent-mode .chat-send-btn {
+    background: linear-gradient(135deg, #7c3aed, #a78bfa);
+}
+
+/* Agent action chips in chat */
+.chat-message-agent-action {
+    justify-content: flex-start;
+    animation: chatBubbleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.chat-agent-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 2px 0;
+}
+.chat-action-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(167, 139, 250, 0.08));
+    border: 1px solid rgba(124, 58, 237, 0.2);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: #a78bfa;
+    max-width: 85%;
+    animation: actionChipIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.chat-action-chip:nth-child(2) { animation-delay: 0.1s; }
+.chat-action-chip:nth-child(3) { animation-delay: 0.2s; }
+
+.chat-action-icon {
+    font-size: 0.75rem;
+}
+
+@keyframes actionChipIn {
+    from {
+        opacity: 0;
+        transform: translateX(-8px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+/* Light theme overrides for agent mode */
+.light-theme .chat-action-chip {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(167, 139, 250, 0.05));
+    border-color: rgba(124, 58, 237, 0.15);
+    color: #7c3aed;
+}
+.light-theme .chat-agent-mode {
+    box-shadow: 0 16px 48px rgba(0,0,0,0.1), 0 0 0 1px rgba(124, 58, 237, 0.12),
+                0 0 24px rgba(124, 58, 237, 0.06);
+}
+
+/* ═══════════════════════════════════════════
    3D RENDER SYSTEM
    Three.js canvas + interactive tilt + glass depth
    ═══════════════════════════════════════════ */

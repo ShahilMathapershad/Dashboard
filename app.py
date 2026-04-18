@@ -74,6 +74,9 @@ app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='force-refresh-trigger', data=0, storage_type='memory'),
     dcc.Store(id='table-view-mode', data='raw', storage_type='session'),
     dcc.Store(id='model-sub-tab', data='predictions', storage_type='session'),
+    dcc.Store(id='agent-mode-store', data=False, storage_type='session'),
+    dcc.Store(id='agent-action-store', storage_type='memory'),
+    dcc.Store(id='agent-slider-sync', data=0, storage_type='memory'),
 
     dash.page_container,
 
@@ -91,9 +94,18 @@ app.layout = html.Div(id='theme-main-container', children=[
         html.Div(className='chat-header', children=[
             html.Div(className='chat-header-left', children=[
                 html.Span('✦', className='chat-header-icon'),
-                html.Span('AI Assistant', className='chat-header-title'),
+                html.Span('AI Assistant', id='chat-header-title', className='chat-header-title'),
             ]),
-            html.Button('✕', id='chat-close-btn', className='chat-close-btn', n_clicks=0),
+            html.Div(className='chat-header-right', children=[
+                html.Div(className='agent-mode-toggle', id='agent-mode-toggle', children=[
+                    html.Span('Chat', className='agent-mode-label agent-mode-label-chat agent-mode-label-active'),
+                    html.Div(className='agent-mode-switch', id='agent-mode-switch', n_clicks=0, children=[
+                        html.Div(className='agent-mode-knob'),
+                    ]),
+                    html.Span('Agent', className='agent-mode-label agent-mode-label-agent'),
+                ]),
+                html.Button('✕', id='chat-close-btn', className='chat-close-btn', n_clicks=0),
+            ]),
         ]),
         html.Div(id='chat-messages', className='chat-messages', children=[
             html.Div(className='chat-message chat-message-ai', children=[
@@ -284,6 +296,185 @@ def auth_redirection(current_path, session_data):
 # ═══════════════════════════════════════════
 #   Global AI Chatbot — Clientside Callbacks
 # ═══════════════════════════════════════════
+
+# Toggle agent mode on/off
+app.clientside_callback(
+    """
+    function(n_clicks, currentMode) {
+        if (!n_clicks) return window.dash_clientside.no_update;
+        const newMode = !currentMode;
+
+        const toggle = document.getElementById('agent-mode-toggle');
+        const panel = document.getElementById('chat-panel');
+        const input = document.getElementById('chat-input');
+        const title = document.getElementById('chat-header-title');
+
+        if (toggle) {
+            if (newMode) {
+                toggle.classList.add('agent-mode-active');
+                if (panel) panel.classList.add('chat-agent-mode');
+                if (input) input.placeholder = 'Ask the agent to do something...';
+                if (title) title.textContent = 'AI Agent';
+            } else {
+                toggle.classList.remove('agent-mode-active');
+                if (panel) panel.classList.remove('chat-agent-mode');
+                if (input) input.placeholder = 'Ask about ZAR/USD or economics...';
+                if (title) title.textContent = 'AI Assistant';
+            }
+        }
+        return newMode;
+    }
+    """,
+    Output('agent-mode-store', 'data'),
+    Input('agent-mode-switch', 'n_clicks'),
+    State('agent-mode-store', 'data'),
+    prevent_initial_call=True
+)
+
+# Execute agent actions — watches agent-action-store and updates dashboard stores
+@callback(
+    Output('dashboard-tab', 'data', allow_duplicate=True),
+    Output('scenario-current-values', 'data', allow_duplicate=True),
+    Output('selected-predictors', 'data', allow_duplicate=True),
+    Output('plot-mode', 'data', allow_duplicate=True),
+    Output('agent-slider-sync', 'data'),
+    Output('selected-compare-vars', 'data', allow_duplicate=True),
+    Input('agent-action-store', 'data'),
+    State('scenario-baseline-data', 'data'),
+    State('agent-slider-sync', 'data'),
+    prevent_initial_call=True
+)
+def execute_agent_actions(action_data, baseline_data, slider_sync):
+    if not action_data or not isinstance(action_data, dict):
+        return (dash.no_update,) * 6
+
+    actions = action_data.get('actions', [])
+    if not actions:
+        return (dash.no_update,) * 6
+
+    tab_out = dash.no_update
+    scenario_vals_out = dash.no_update
+    predictors_out = dash.no_update
+    plot_mode_out = dash.no_update
+    slider_sync_out = dash.no_update
+    compare_vars_out = dash.no_update
+
+    for action in actions:
+        atype = action.get('type', '')
+
+        if atype == 'navigate_tab':
+            tab_name = action.get('tab', '')
+            if tab_name in ('data', 'model', 'scenario'):
+                tab_out = tab_name
+
+        elif atype == 'set_scenario_sliders':
+            slider_vals = action.get('values', {})
+            if slider_vals and baseline_data:
+                # Always reset to baseline first so each agent scenario starts clean
+                new_vals = {}
+                for pred in baseline_data.get('predictors', []):
+                    new_vals[pred.get('raw_col', '')] = pred.get('current_value', 0)
+
+                known_keys = {p.get('raw_col') for p in baseline_data.get('predictors', [])}
+                for key, val in slider_vals.items():
+                    if key not in known_keys:
+                        continue
+                    try:
+                        # Support percentage changes like {"VIX": "+10%"}
+                        if isinstance(val, str) and '%' in val:
+                            pct = float(val.replace('%', '').replace('+', ''))
+                            base_val = new_vals.get(key, 0)
+                            new_vals[key] = base_val * (1 + pct / 100)
+                        else:
+                            new_vals[key] = float(val)
+                    except (ValueError, TypeError):
+                        continue
+
+                    # Clamp to slider range
+                    for pred in baseline_data.get('predictors', []):
+                        if pred.get('raw_col') == key:
+                            new_vals[key] = max(pred.get('range_low', new_vals[key]),
+                                                min(pred.get('range_high', new_vals[key]), new_vals[key]))
+                            break
+
+                scenario_vals_out = new_vals
+                tab_out = 'scenario'
+                slider_sync_out = (slider_sync or 0) + 1
+
+        elif atype == 'select_predictors':
+            variables = action.get('variables', [])
+            if variables:
+                predictors_out = variables
+                plot_mode_out = 'timeseries'
+                tab_out = 'data'
+
+        elif atype == 'set_compare_variables':
+            variables = action.get('variables', [])
+            if variables and 2 <= len(variables) <= 3:
+                compare_vars_out = variables[:3]
+                plot_mode_out = 'compare'
+                tab_out = 'data'
+
+        elif atype == 'set_plot_mode':
+            mode = action.get('mode', '')
+            if mode in ('timeseries', 'compare', 'correlation'):
+                plot_mode_out = mode
+                tab_out = 'data'
+
+        elif atype == 'reset_scenario':
+            if baseline_data:
+                reset_vals = {}
+                for pred in baseline_data.get('predictors', []):
+                    reset_vals[pred['raw_col']] = pred['current_value']
+                scenario_vals_out = reset_vals
+                tab_out = 'scenario'
+                slider_sync_out = (slider_sync or 0) + 1
+
+    return tab_out, scenario_vals_out, predictors_out, plot_mode_out, slider_sync_out, compare_vars_out
+
+# Sync plot-mode button UI when agent changes the store directly
+# (The dashboard's switch_plot_mode callback only fires on button clicks, not store changes)
+app.clientside_callback(
+    """
+    function(mode) {
+        if (!mode) return window.dash_clientside.no_update;
+        var base = 'plot-mode-btn';
+        var active = 'plot-mode-btn plot-mode-active';
+
+        /* Button highlight */
+        var ts = document.getElementById('mode-timeseries');
+        var cmp = document.getElementById('mode-compare');
+        var cor = document.getElementById('mode-correlation');
+        if (ts) ts.className = (mode === 'timeseries') ? active : base;
+        if (cmp) cmp.className = (mode === 'compare') ? active : base;
+        if (cor) cor.className = (mode === 'correlation') ? active : base;
+
+        /* Container visibility */
+        var predBox = document.getElementById('predictor-checkboxes-container');
+        var cmpBox  = document.getElementById('compare-checkboxes-container');
+        var cmpHint = document.getElementById('compare-hint');
+        var hide = 'none', show = '';
+
+        if (mode === 'timeseries') {
+            if (predBox) predBox.style.display = show;
+            if (cmpBox)  cmpBox.style.display  = hide;
+            if (cmpHint) cmpHint.style.display  = hide;
+        } else if (mode === 'compare') {
+            if (predBox) predBox.style.display = hide;
+            if (cmpBox)  cmpBox.style.display  = show;
+            if (cmpHint) cmpHint.style.display  = show;
+        } else if (mode === 'correlation') {
+            if (predBox) predBox.style.display = hide;
+            if (cmpBox)  cmpBox.style.display  = hide;
+            if (cmpHint) cmpHint.style.display  = hide;
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('plot-mode', 'id'),
+    Input('plot-mode', 'data'),
+    prevent_initial_call=True
+)
 
 # Toggle chat panel open/closed
 app.clientside_callback(
@@ -559,10 +750,275 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
     return "\n\n".join(sections)
 
 
+AGENT_SYSTEM_PROMPT = (
+    "You are an AI agent embedded in a ZAR/USD exchange rate forecasting dashboard built for South African "
+    "agribusiness. You can both ANSWER questions AND EXECUTE actions on the dashboard.\n\n"
+
+    "== MODEL KNOWLEDGE ==\n"
+    "The core model is a HuberRegressor error-correction framework (robust to outliers, α=7.906, ε=1.1).\n"
+    "Equation: Ŝ_{t+1} = β₀ + β₁·S_{t-1} + Σ β_j·x̃_j(t)\n"
+    "β₁ ≈ 0.96 so it behaves as a random-walk anchor: next month's rate ≈ this month's rate, with small "
+    "corrections from 10 macro signals.\n"
+    "11 features (internal column names):\n"
+    "  ZAR_USD_lag1 (passthrough), ZAR_USD_logret1, ZAR_USD_change3, ZAR_USD_zscore12,\n"
+    "  VIX, VIX_change1, VIX_zscore12, EPU_USA, WUIZAF_SA, bond_spread_change1, GOLD_PRICE_logret1\n"
+    "Pipeline: ColumnTransformer (passthrough for lag1, StandardScaler for remaining 10) → HuberRegressor.\n"
+    "SA Inflation, US CPI, and Brent Oil are deliberately EXCLUDED (trending non-stationary series that "
+    "cause train-test distribution shift).\n"
+    "Test R²=0.6157, Theil's U=0.9969, Directional Accuracy=67.65%.\n"
+    "Multi-horizon forecasts (1M, 3M, 6M) iterate predictions assuming macro drivers persist.\n\n"
+
+    "== DASHBOARD TABS — DETAILED ==\n\n"
+
+    "--- DATA TAB ---\n"
+    "Three mutually exclusive plot modes, each with different variable selection mechanics:\n\n"
+    "1. TIME SERIES mode (default):\n"
+    "   - All selected variables plotted as normalized (0–100) lines over time on the SAME chart.\n"
+    "   - X-axis is always Date. Each variable is min-max scaled so they share a common Y-axis.\n"
+    "   - You can select ANY number of variables to overlay together.\n"
+    "   - Use this when the user says: 'show me VIX and gold', 'plot ZAR and bond rates together',\n"
+    "     'overlay all variables', 'show the time series of X and Y', 'put X and Y on the same chart'.\n"
+    "   - Action: select_predictors — sets which variables appear on the shared time axis.\n\n"
+    "2. COMPARE mode:\n"
+    "   - Plots one variable AGAINST another (X vs Y), NOT over time.\n"
+    "   - 2 variables → 2D scatter/line: X-axis is variable 1, Y-axis is variable 2. Shows r correlation.\n"
+    "   - 3 variables → 3D surface: X=var1, Y=var2, Z=var3 (interpolated surface).\n"
+    "   - Maximum 3 variables. This is a different selection from time series.\n"
+    "   - Use this when the user says: 'plot VIX versus gold price', 'scatter X against Y',\n"
+    "     'X vs Y', 'relationship between X and Y', '3D surface of X, Y, Z', 'plot X as a function of Y'.\n"
+    "   - Action: set_compare_variables — sets the 2 or 3 variables for the compare axes.\n"
+    "   - MUST also set plot mode to 'compare'.\n\n"
+    "3. CORRELATION mode:\n"
+    "   - Displays a heatmap matrix of Pearson correlations (r values) between ALL variables.\n"
+    "   - No variable selection needed — it always shows the full matrix.\n"
+    "   - Use this when the user says: 'show correlations', 'correlation matrix', 'heatmap',\n"
+    "     'which variables are most correlated'.\n"
+    "   - Action: set_plot_mode with mode='correlation'. No variable selection needed.\n\n"
+
+    "CRITICAL DISTINCTION:\n"
+    "  'Show VIX and gold on the chart' → TIME SERIES: both lines overlaid on a shared date axis.\n"
+    "  'Plot VIX versus gold' / 'VIX vs gold' → COMPARE: X-axis=VIX, Y-axis=Gold, shows relationship.\n"
+    "  'Correlation between VIX and gold' → Could be COMPARE (2D with r annotation) or just answer the r value from context.\n\n"
+
+    "Available variable column names (use EXACTLY these strings):\n"
+    "  ZAR_USD               — ZAR/USD Exchange Rate\n"
+    "  VIX                   — CBOE Volatility Index\n"
+    "  EPU(USA)              — US Economic Policy Uncertainty Index\n"
+    "  WUIZAF(SA)            — SA World Uncertainty Index\n"
+    "  GOLD_PRICE            — Gold Price (USD/oz)\n"
+    "  10_YEAR_BOND_RATES(SA)  — SA 10-Year Bond Rate\n"
+    "  10_YEAR_BOND_RATES(USA) — US 10-Year Treasury Rate\n"
+    "  US_CPI                — US Consumer Price Index\n"
+    "  SA_INFLATION          — SA Headline CPI Index\n"
+    "  BRENT_OIL_PRICE       — Brent Crude Oil Price\n"
+    "  USA_CPI               — US CPI Growth Rate\n"
+    "  SA_CPI_FRED           — SA CPI Growth Rate (FRED)\n\n"
+
+    "--- MODEL TAB ---\n"
+    "Two sub-tabs (switching is automatic, you just navigate here):\n"
+    "  Predictions sub-tab: Multi-horizon forecast table (1M/3M/6M point estimates + fair values),\n"
+    "    feature contribution bar chart (what's pushing ZAR up/down), forecast summary narrative.\n"
+    "  Specifications sub-tab: Model card (HuberRegressor params, α, ε, training/test split),\n"
+    "    performance metrics (MAE, RMSE, R², Theil's U, directional accuracy, MAPE),\n"
+    "    diagnostic plots (residual distribution, actual vs fitted, feature partial dependence).\n"
+    "Use this when the user asks about: forecast, prediction, what the model says, model accuracy,\n"
+    "  feature importance, what's driving the rate, diagnostics, residuals, model performance.\n\n"
+
+    "--- SCENARIO TAB ---\n"
+    "Slider-driven what-if analysis. Six adjustable macro predictors:\n"
+    "  VIX             — Volatility Index (unitless, typically 10–80)\n"
+    "  GOLD_PRICE      — Gold Price in USD/oz (typically 1200–2500)\n"
+    "  EPU(USA)        — US Economic Policy Uncertainty (unitless, ~50–600)\n"
+    "  WUIZAF(SA)      — SA World Uncertainty Index (unitless, ~0–0.5)\n"
+    "  10_YEAR_BOND_RATES(USA) — US 10-Year Bond Rate (%, ~1.5–5)\n"
+    "  10_YEAR_BOND_RATES(SA)  — SA 10-Year Bond Rate (%, ~7–12)\n\n"
+    "When sliders are adjusted, the model re-engineers all derived features (log returns, z-scores,\n"
+    "bond spread, etc.) and generates a new prediction. The dashboard shows:\n"
+    "  - Base vs Scenario comparison cards (R value, % change)\n"
+    "  - Impact waterfall chart (contribution delta per feature)\n"
+    "  - Summary table (current vs scenario value per predictor, % change)\n"
+    "  - Up to 5 saved scenario snapshots for comparison\n"
+    "Use this when the user asks: 'what if VIX goes up', 'impact of higher gold',\n"
+    "  'stress test bonds at X%', 'scenario where uncertainty doubles',\n"
+    "  'what happens to the Rand if...', 'sensitivity to VIX'.\n\n"
+
+    "== ACTIONS YOU CAN TAKE ==\n"
+    "When the user asks you to DO something (show, navigate, adjust, compare, plot, set, change, etc.), "
+    "respond with a JSON block containing actions, followed by your explanation.\n\n"
+    "Available action types:\n\n"
+    "1. navigate_tab — Switch to a tab.\n"
+    "   {\"type\": \"navigate_tab\", \"tab\": \"data|model|scenario\"}\n\n"
+    "2. set_scenario_sliders — Adjust scenario slider values.\n"
+    "   Values can be absolute numbers OR percentage changes from current (\"+10%\", \"-20%\").\n"
+    "   IMPORTANT: Every set_scenario_sliders action automatically RESETS all sliders to baseline first,\n"
+    "   then applies only the specified changes. This means each scenario request starts clean — you do NOT\n"
+    "   need to emit a separate reset_scenario action before setting sliders.\n"
+    "   Automatically navigates to Scenario tab.\n"
+    "   {\"type\": \"set_scenario_sliders\", \"values\": {\"VIX\": \"+10%\", \"GOLD_PRICE\": 2500}}\n\n"
+    "3. select_predictors — Select variables for the TIME SERIES chart (overlaid on shared date axis).\n"
+    "   Always include ZAR_USD along with the requested variables so the user can see the exchange rate.\n"
+    "   Automatically navigates to Data tab and sets plot mode to timeseries.\n"
+    "   {\"type\": \"select_predictors\", \"variables\": [\"ZAR_USD\", \"VIX\", \"GOLD_PRICE\"]}\n\n"
+    "4. set_compare_variables — Select 2 or 3 variables for COMPARE mode (X vs Y, or 3D surface).\n"
+    "   Automatically navigates to Data tab and sets plot mode to compare.\n"
+    "   2 vars → 2D line (X vs Y with correlation annotation).\n"
+    "   3 vars → 3D surface (X, Y → Z interpolated).\n"
+    "   {\"type\": \"set_compare_variables\", \"variables\": [\"VIX\", \"GOLD_PRICE\"]}\n\n"
+    "5. set_plot_mode — Change the data tab plot mode directly.\n"
+    "   {\"type\": \"set_plot_mode\", \"mode\": \"timeseries|compare|correlation\"}\n\n"
+    "6. reset_scenario — Reset all scenario sliders to current baseline values.\n"
+    "   {\"type\": \"reset_scenario\"}\n\n"
+
+    "== RESPONSE FORMAT ==\n"
+    "When executing actions, you MUST use this EXACT format:\n"
+    "```json\n"
+    "{\"actions\": [... array of action objects ...]}\n"
+    "```\n"
+    "Then on the next line after the closing ```, write your explanation to the user.\n\n"
+    "When just answering a question (no action needed), respond with plain text (no JSON block).\n\n"
+
+    "== EXAMPLES ==\n\n"
+    "User: \"What happens if VIX increases by 10%?\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"set_scenario_sliders\", \"values\": {\"VIX\": \"+10%\"}}]}\n"
+    "```\n"
+    "I've increased VIX by 10% on the Scenario tab. The waterfall chart now shows the isolated impact "
+    "on ZAR/USD — a higher VIX signals risk aversion, typically weakening the Rand as capital flows to "
+    "safe-haven assets.\n\n"
+
+    "User: \"Show VIX and gold price on the chart\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"select_predictors\", \"variables\": [\"ZAR_USD\", \"VIX\", \"GOLD_PRICE\"]}]}\n"
+    "```\n"
+    "I've overlaid VIX, Gold Price, and ZAR/USD on the time series chart. All three are normalized to a "
+    "0–100 scale so you can compare their movements over the same time period.\n\n"
+
+    "User: \"Plot VIX versus gold price\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"set_compare_variables\", \"variables\": [\"VIX\", \"GOLD_PRICE\"]}]}\n"
+    "```\n"
+    "I've set up a 2D compare chart with VIX on the X-axis and Gold Price on the Y-axis. The correlation "
+    "coefficient (r) is annotated on the plot, showing how these two variables relate to each other "
+    "independent of time.\n\n"
+
+    "User: \"Show me a 3D surface of VIX, gold, and ZAR\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"set_compare_variables\", \"variables\": [\"VIX\", \"GOLD_PRICE\", \"ZAR_USD\"]}]}\n"
+    "```\n"
+    "I've created a 3D surface plot with VIX on the X-axis, Gold Price on the Y-axis, and ZAR/USD as the "
+    "Z-surface. The interpolated surface shows how the exchange rate varies across different VIX and gold "
+    "price combinations.\n\n"
+
+    "User: \"Show the correlations\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"set_plot_mode\", \"mode\": \"correlation\"}]}\n"
+    "```\n"
+    "I've switched to the correlation heatmap showing Pearson r values between all variables in the dataset.\n\n"
+
+    "User: \"Show me the model predictions\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"navigate_tab\", \"tab\": \"model\"}]}\n"
+    "```\n"
+    "I've navigated to the Model tab where you can see the multi-horizon forecast, feature contributions "
+    "driving the prediction, and the forecast summary.\n\n"
+
+    "User: \"Stress test: VIX at 40 with gold dropping to 1800\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"set_scenario_sliders\", \"values\": {\"VIX\": 40, \"GOLD_PRICE\": 1800}}]}\n"
+    "```\n"
+    "I've set VIX to 40 and Gold Price to $1,800/oz in the Scenario tab. This simulates a high-volatility "
+    "environment with declining gold — check the waterfall chart for how each factor contributes to the "
+    "ZAR/USD change.\n\n"
+
+    "User: \"What is the current ZAR/USD rate?\"\n"
+    "(no JSON block — just answer using numbers from DASHBOARD STATE)\n\n"
+
+    "== IMPORTANT RULES ==\n"
+    "- ALWAYS emit actions when the user asks to DO something (show, navigate, adjust, set, compare, plot, "
+    "change, reset, stress test, etc.)\n"
+    "- 'show X and Y' / 'overlay X and Y' → select_predictors (time series, shared date axis)\n"
+    "- 'X vs Y' / 'X versus Y' / 'X against Y' / 'scatter X and Y' → set_compare_variables (compare mode)\n"
+    "- 'correlation' / 'heatmap' / 'correlations' → set_plot_mode correlation\n"
+    "- Use percentage changes (\"+10%\") when the user says increase/decrease by a percentage\n"
+    "- Use absolute values when the user specifies an exact number (e.g. 'VIX at 40')\n"
+    "- For select_predictors, ALWAYS include ZAR_USD so the user sees the exchange rate alongside\n"
+    "- For set_compare_variables, use exactly 2 or 3 variables (max 3)\n"
+    "- You can chain multiple actions (e.g. navigate + set sliders)\n"
+    "- After setting scenario sliders, explain the economic reasoning behind the expected impact\n"
+    "- Use specific numbers from the DASHBOARD STATE when discussing results\n"
+    "- When discussing correlations, cite the actual r values if they are in the context\n"
+    "- Keep explanations concise (2-4 sentences) but informative and economically grounded\n"
+    "- You ONLY handle economics/ZAR/USD/dashboard topics. Politely decline anything else.\n"
+)
+
+CHAT_SYSTEM_PROMPT = (
+    "You are an economics assistant embedded in a ZAR/USD exchange rate forecasting dashboard built for "
+    "South African agribusiness.\n\n"
+
+    "== MODEL KNOWLEDGE ==\n"
+    "The core model is a HuberRegressor error-correction framework (robust to outliers, α=7.906, ε=1.1).\n"
+    "Equation: Ŝ_{t+1} = β₀ + β₁·S_{t-1} + Σ β_j·x̃_j(t). β₁ ≈ 0.96 so it behaves as a random-walk "
+    "anchor with small corrections from 10 macro signals.\n"
+    "11 features: ZAR_USD_lag1 (passthrough), ZAR_USD_logret1, ZAR_USD_change3, ZAR_USD_zscore12, "
+    "VIX, VIX_change1, VIX_zscore12, EPU_USA, WUIZAF_SA, bond_spread_change1, GOLD_PRICE_logret1.\n"
+    "SA Inflation, US CPI, and Brent Oil deliberately EXCLUDED (non-stationary, cause train-test shift).\n"
+    "Test R²=0.6157, Theil's U=0.9969, Directional Accuracy=67.65%.\n"
+    "Multi-horizon (1M/3M/6M) forecasts iterate predictions assuming macro drivers persist.\n\n"
+
+    "== DASHBOARD TABS ==\n"
+    "1. DATA TAB: Three plot modes — Time Series (normalized 0–100 overlaid lines over date), "
+    "Compare (2 vars → 2D X-vs-Y scatter with r, 3 vars → 3D surface), Correlation (full heatmap).\n"
+    "   Variables: ZAR_USD, VIX, EPU(USA), WUIZAF(SA), GOLD_PRICE, 10_YEAR_BOND_RATES(SA), "
+    "10_YEAR_BOND_RATES(USA), US_CPI, SA_INFLATION, BRENT_OIL_PRICE, USA_CPI, SA_CPI_FRED.\n"
+    "2. MODEL TAB: Predictions sub-tab (multi-horizon forecast table, feature contributions bar chart, "
+    "forecast summary). Specifications sub-tab (model card with HuberRegressor params, performance "
+    "metrics: MAE, RMSE, R², Theil's U, directional accuracy, MAPE, diagnostic plots).\n"
+    "3. SCENARIO TAB: Slider-driven what-if analysis. 6 adjustable predictors: VIX, GOLD_PRICE, "
+    "EPU(USA), WUIZAF(SA), 10_YEAR_BOND_RATES(USA), 10_YEAR_BOND_RATES(SA). Shows base vs scenario "
+    "comparison, impact waterfall chart, summary table, and up to 5 saved scenario snapshots.\n\n"
+
+    "== INSTRUCTIONS ==\n"
+    "You have full access to the dashboard state below. Use specific numbers from the context.\n"
+    "You ONLY answer questions about: the data in the dashboard, ZAR/USD exchange rate dynamics, "
+    "macroeconomic indicators, South African and US economics, the model's predictions and methodology, "
+    "scenario analysis, correlations between variables, and how these factors relate to the Rand.\n"
+    "If the user asks about anything unrelated, politely decline and redirect.\n"
+    "When discussing correlations, cite actual r values from the data.\n"
+    "Tip the user that they can switch to Agent mode (toggle in the chat header) if they want you to "
+    "execute dashboard actions like adjusting sliders, switching tabs, or setting up charts.\n"
+    "Keep answers concise (2-4 sentences) unless the user asks for detail."
+)
+
+
+def _parse_agent_response(response_text):
+    """Parse agent response to extract actions JSON and display message."""
+    import json
+    import re
+
+    actions = []
+    message = response_text
+
+    # Look for ```json ... ``` block
+    json_match = re.search(r'```json\s*\n?(.*?)\n?\s*```', response_text, re.DOTALL)
+    if json_match:
+        try:
+            parsed = json.loads(json_match.group(1))
+            actions = parsed.get('actions', [])
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        # Message is everything outside the JSON block (prefer after, fall back to before)
+        after = response_text[json_match.end():].strip()
+        before = response_text[:json_match.start()].strip()
+        message = after or before or "Done."
+
+    return actions, message
+
+
 @callback(
     Output('chat-messages', 'children'),
     Output('chat-input', 'value'),
     Output('chat-history', 'data'),
+    Output('agent-action-store', 'data'),
     Input('chat-send-btn', 'n_clicks'),
     Input('chat-input', 'n_submit'),
     State('chat-input', 'value'),
@@ -576,22 +1032,21 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
     State('model-prediction-data', 'data'),
     State('scenario-baseline-data', 'data'),
     State('dashboard-tab', 'data'),
+    State('agent-mode-store', 'data'),
     prevent_initial_call=True
 )
 def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_history,
                      fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars,
-                     prediction_data, scenario_data, active_tab):
+                     prediction_data, scenario_data, active_tab, agent_mode):
     import traceback
 
     if not user_msg or not user_msg.strip():
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     user_msg = user_msg.strip()
     current_messages = current_messages or []
     chat_history = chat_history or []
 
-    # The user message is already shown by the clientside callback (instant loading state).
-    # We still need to add it to the Dash children list so it persists across re-renders.
     current_messages.append(
         html.Div(className='chat-message chat-message-user', children=[
             html.Div(user_msg, className='chat-bubble chat-bubble-user')
@@ -605,35 +1060,18 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
 
     chat_history.append({'role': 'user', 'parts': [user_msg]})
 
+    agent_actions = dash.no_update
+
     try:
         from google import genai
         from google.genai import types
 
         client = genai.Client(api_key=GOOGLE_API_KEY)
 
-        system_instruction = (
-            "You are an economics assistant embedded in a ZAR/USD exchange rate forecasting dashboard built for South African agribusiness. "
-            "The dashboard uses a HuberRegressor error-correction model that predicts the ZAR/USD exchange rate. "
-            "The model anchors on the previous month's rate (β₁≈0.96, random-walk anchor) and applies small corrections from 10 macro signals: "
-            "ZAR/USD momentum, 3-month trend, mean-reversion z-score, VIX level/change/z-score, US policy uncertainty (EPU), "
-            "SA uncertainty (WUIZAF), bond spread change, and gold return. SA Inflation, US CPI, and Brent Oil are deliberately excluded "
-            "(trending non-stationary series that cause train-test distribution shift).\n\n"
-            "The dashboard has three tabs:\n"
-            "1. DATA TAB: Normalized (0-100) time series chart of macroeconomic variables vs ZAR/USD. Three plot modes: Time Series, Compare (2D/3D), Correlation heatmap.\n"
-            "2. MODEL TAB: Shows the point estimate (1M ahead prediction), fair value (long-run equilibrium where error-correction resolves), "
-            "multi-horizon forecasts (1M/3M/6M), feature contribution bar chart, historical fit chart, model specification (α, ε, σ̂), "
-            "and out-of-sample performance metrics (MAE, RMSE, R², Theil's U, directional accuracy).\n"
-            "3. SCENARIO TAB: Slider-driven what-if analysis. Users adjust VIX, EPU(USA), WUIZAF(SA), gold price, and SA/US bond rates "
-            "to see how the ZAR/USD would respond. Shows base vs scenario comparison, impact waterfall, and summary table.\n\n"
-            "You have full access to the dashboard state below. Use specific numbers from the context when answering. "
-            "You ONLY answer questions about: the data in the dashboard, ZAR/USD exchange rate dynamics, "
-            "macroeconomic indicators, South African and US economics, the model's predictions and methodology, "
-            "scenario analysis, correlations between variables, and how these factors relate to the Rand. "
-            "If the user asks about anything unrelated, politely decline and redirect them to economics or dashboard questions. "
-            "When discussing correlations, cite the actual r values from the data. "
-            "Keep answers concise (2-4 sentences) unless the user asks for detail.\n\n"
-            f"DASHBOARD STATE:\n{full_context}"
-        )
+        if agent_mode:
+            system_instruction = AGENT_SYSTEM_PROMPT + f"\n\nDASHBOARD STATE:\n{full_context}"
+        else:
+            system_instruction = CHAT_SYSTEM_PROMPT + f"\n\nDASHBOARD STATE:\n{full_context}"
 
         contents = []
         for msg in chat_history:
@@ -653,6 +1091,54 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
         )
 
         ai_text = (response.text or "I couldn't generate a response. Please try again.").strip()
+
+        # In agent mode, parse out actions
+        if agent_mode:
+            actions, display_msg = _parse_agent_response(ai_text)
+            if actions:
+                import time
+                agent_actions = {'actions': actions, 'ts': time.time()}
+
+                # Build action summary chips for the chat
+                action_chips = []
+                for a in actions:
+                    atype = a.get('type', '')
+                    if atype == 'navigate_tab':
+                        action_chips.append(f"Navigate → {a.get('tab', '').title()} Tab")
+                    elif atype == 'set_scenario_sliders':
+                        vals = a.get('values', {})
+                        parts = [f"{k}: {v}" for k, v in vals.items()]
+                        action_chips.append(f"Set sliders: {', '.join(parts)}")
+                    elif atype == 'select_predictors':
+                        action_chips.append(f"Time series: {', '.join(a.get('variables', []))}")
+                    elif atype == 'set_compare_variables':
+                        vs = a.get('variables', [])
+                        if len(vs) == 3:
+                            action_chips.append(f"3D surface: {vs[0]} × {vs[1]} → {vs[2]}")
+                        else:
+                            action_chips.append(f"Compare: {' vs '.join(vs)}")
+                    elif atype == 'set_plot_mode':
+                        mode_labels = {'timeseries': 'Time Series', 'compare': 'Compare', 'correlation': 'Correlation Heatmap'}
+                        action_chips.append(f"Plot mode → {mode_labels.get(a.get('mode', ''), a.get('mode', ''))}")
+                    elif atype == 'reset_scenario':
+                        action_chips.append("Reset scenario")
+
+                # Show action chips + message
+                current_messages.append(
+                    html.Div(className='chat-message chat-message-agent-action', children=[
+                        html.Div(className='chat-agent-actions', children=[
+                            html.Div(className='chat-action-chip', children=[
+                                html.Span('⚡', className='chat-action-icon'),
+                                html.Span(chip),
+                            ]) for chip in action_chips
+                        ])
+                    ])
+                )
+                ai_text = display_msg
+            else:
+                # No actions parsed, keep full text
+                pass
+
     except Exception as e:
         print(f"[Chatbot Error] {type(e).__name__}: {e}")
         traceback.print_exc()
@@ -667,7 +1153,7 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
         ])
     )
 
-    return current_messages, '', chat_history
+    return current_messages, '', chat_history, agent_actions
 
 
 server = app.server
