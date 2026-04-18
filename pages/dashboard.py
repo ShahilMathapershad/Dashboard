@@ -502,7 +502,7 @@ def set_active_tab(data_clicks, model_clicks, scenario_clicks, signout_clicks, c
     if trigger == 'nav-scenario':
         return 'scenario'
     if trigger == 'nav-signout':
-        return 'signout'
+        return dash.no_update
     return current_tab or 'data'
 
 
@@ -1109,7 +1109,7 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
     df = df.sort_values('Date')
 
     # Shared theme colors — Apple-inspired palette
-    is_dark = theme == 'dark'
+    is_dark = theme != 'light'
     grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
     line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
     text_color = '#f5f5f7' if is_dark else '#1d1d1f'
@@ -1958,7 +1958,7 @@ def _build_diagnostic_plots(diagnostics_data, theme):
                             name='Trend',
                             hoverinfo='skip'
                         ))
-                except:
+                except Exception:
                     pass
 
                 partial_fig.update_layout(

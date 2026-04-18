@@ -97,10 +97,21 @@ def layout():
             # Sign out
             html.Div(className='profile-section-card profile-signout-card',
                      style={'animationDelay': '0.3s'}, children=[
-                html.A('Sign Out', href='/', className='profile-signout-link'),
+                html.Button('Sign Out', id='profile-signout-btn', n_clicks=0, className='profile-signout-link'),
             ]),
         ]),
     ])
+
+
+@callback(
+    Output('user-session', 'data', allow_duplicate=True),
+    Input('profile-signout-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
+def profile_signout(n_clicks):
+    if n_clicks:
+        return None
+    return dash.no_update
 
 
 @callback(

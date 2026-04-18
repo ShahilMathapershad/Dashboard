@@ -247,24 +247,6 @@ def chain_scenario_baseline(model_data, current_trigger):
         return 1
     return dash.no_update
 
-# Simplized clientside callback for figure changes
-app.clientside_callback(
-    """
-    function(figure) {
-        // Minimal trigger for figure changes
-        if (figure && figure.data && figure.data.length > 0) {
-            setTimeout(() => {
-                window.dispatchEvent(new Event('plotlyResize'));
-            }, 50);
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('prediction-value', 'id'), # Dummy output
-    Input('model-history-chart', 'figure'),
-)
-
-
 # Global auth and navigation guard
 @callback(
     Output('_pages_location', 'pathname'),
@@ -604,10 +586,9 @@ GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 
 
 def _build_chat_context(fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars,
-                        prediction_data=None, scenario_data=None, active_tab=None):
+                        prediction_data=None, scenario_data=None, active_tab=None,
+                        scenario_current_vals=None):
     """Build comprehensive text summary of all dashboard state for the AI chatbot."""
-    import numpy as np
-
     sections = []
 
     # ── Current page / tab context ──
@@ -626,7 +607,7 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
         label_map = {opt['value']: opt['label'] for opt in (predictor_options or [])}
         numeric_cols = [c for c in df.columns if c != 'Date' and df[c].dtype in ['float64', 'int64', 'float32']]
 
-        lines = [f"=== DATASET OVERVIEW ==="]
+        lines = ["=== DATASET OVERVIEW ==="]
         lines.append(f"Date range: {df['Date'].min().strftime('%Y-%m')} to {df['Date'].max().strftime('%Y-%m')}")
         lines.append(f"Data points: {len(df)} monthly observations")
         lines.append(f"Active plot mode: {plot_mode or 'timeseries'}")
@@ -634,38 +615,88 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
         if plot_mode == 'compare' and compare_vars:
             cmp_names = [label_map.get(v, v) for v in compare_vars]
             if len(compare_vars) == 2:
-                lines.append(f"Compare mode: 2D line plot — X={cmp_names[0]}, Y={cmp_names[1]}")
+                lines.append(f"Compare mode: 2D plot — X={cmp_names[0]} (col: {compare_vars[0]}), Y={cmp_names[1]} (col: {compare_vars[1]})")
             elif len(compare_vars) >= 3:
-                lines.append(f"Compare mode: 3D surface — X={cmp_names[0]}, Y={cmp_names[1]}, Z(surface)={cmp_names[2]}")
+                lines.append(f"Compare mode: 3D surface — X={cmp_names[0]} (col: {compare_vars[0]}), Y={cmp_names[1]} (col: {compare_vars[1]}), Z={cmp_names[2]} (col: {compare_vars[2]})")
         if selected_predictors:
-            sel_names = [label_map.get(v, v) for v in selected_predictors]
-            lines.append(f"Variables on time series chart: {', '.join(sel_names)}")
+            sel_info = [f"{label_map.get(v, v)} (col: {v})" for v in selected_predictors]
+            lines.append(f"Variables on time series chart: {', '.join(sel_info)}")
 
-        lines.append(f"\n=== ALL VARIABLES (summary stats) ===")
+        lines.append(f"\n=== AVAILABLE VARIABLES ===")
+        lines.append("Column name → Friendly label (use column names in actions):")
+        for col in numeric_cols:
+            friendly = label_map.get(col, col)
+            lines.append(f"  {col} → {friendly}")
+
+        lines.append(f"\n=== ALL VARIABLES — LATEST VALUES & TRENDS ===")
         for col in numeric_cols:
             s = df[col].dropna()
             if s.empty:
                 continue
             friendly = label_map.get(col, col)
             latest = s.iloc[-1]
-            lines.append(f"• {friendly}: latest={latest:.4f}, min={s.min():.4f}, max={s.max():.4f}, mean={s.mean():.4f}")
+            parts = [f"• {friendly} ({col}): latest={latest:.4f}"]
+            parts.append(f"min={s.min():.4f}, max={s.max():.4f}, mean={s.mean():.4f}, std={s.std():.4f}")
+
+            trend_parts = []
             if len(s) >= 2:
                 pct_m = ((s.iloc[-1] - s.iloc[-2]) / abs(s.iloc[-2])) * 100 if s.iloc[-2] != 0 else 0
-                lines.append(f"    MoM: {pct_m:+.2f}%")
+                trend_parts.append(f"1M: {pct_m:+.2f}%")
+            if len(s) >= 3:
+                pct_3m = ((s.iloc[-1] - s.iloc[-3]) / abs(s.iloc[-3])) * 100 if s.iloc[-3] != 0 else 0
+                trend_parts.append(f"3M: {pct_3m:+.2f}%")
+            if len(s) >= 6:
+                pct_6m = ((s.iloc[-1] - s.iloc[-6]) / abs(s.iloc[-6])) * 100 if s.iloc[-6] != 0 else 0
+                trend_parts.append(f"6M: {pct_6m:+.2f}%")
             if len(s) >= 12:
                 yoy = ((s.iloc[-1] - s.iloc[-12]) / abs(s.iloc[-12])) * 100 if s.iloc[-12] != 0 else 0
-                lines.append(f"    YoY: {yoy:+.2f}%")
+                trend_parts.append(f"12M: {yoy:+.2f}%")
+            if trend_parts:
+                parts.append(f"Changes: {', '.join(trend_parts)}")
+
+            # Current position within historical range
+            range_span = s.max() - s.min()
+            if range_span > 0:
+                percentile = (latest - s.min()) / range_span * 100
+                parts.append(f"Historical percentile: {percentile:.0f}%")
+
+            lines.append("  ".join(parts))
 
         lines.append(f"\n=== KEY CORRELATIONS ===")
         if 'ZAR_USD' in numeric_cols and len(numeric_cols) > 1:
             corr = df[numeric_cols].corr()
             zar_corr = corr['ZAR_USD'].drop('ZAR_USD').sort_values(key=abs, ascending=False)
-            lines.append("Correlations with ZAR/USD (ranked by strength):")
+            lines.append("Correlations with ZAR/USD (ranked by |r|):")
             for var, r in zar_corr.items():
                 friendly = label_map.get(var, var)
                 direction = "positive" if r > 0 else "negative"
                 strength = "strong" if abs(r) > 0.7 else "moderate" if abs(r) > 0.4 else "weak"
-                lines.append(f"  • {friendly}: r={r:.3f} ({strength} {direction})")
+                econ = ""
+                if 'VIX' in var:
+                    econ = " — higher VIX = risk-off, capital flees EM → weaker ZAR"
+                elif 'GOLD' in var:
+                    econ = " — gold rises in risk-off; ZAR is a gold exporter"
+                elif 'EPU' in var:
+                    econ = " — US policy uncertainty spills over to EM risk premia"
+                elif 'WUIZAF' in var:
+                    econ = " — domestic uncertainty raises SA risk premium"
+                elif 'BOND' in var and 'USA' in var:
+                    econ = " — higher US yields attract capital away from EM"
+                elif 'BOND' in var and 'SA' in var:
+                    econ = " — SA bond yield reflects risk premium + SARB policy"
+                lines.append(f"  • {friendly}: r={r:.3f} ({strength} {direction}){econ}")
+
+            # Cross-correlations between key pairs (not just ZAR)
+            key_pairs = [('VIX', 'GOLD_PRICE'), ('VIX', 'EPU(USA)'),
+                         ('10_YEAR_BOND_RATES(USA)', '10_YEAR_BOND_RATES(SA)')]
+            cross_lines = []
+            for a, b in key_pairs:
+                if a in corr.columns and b in corr.columns:
+                    r = corr.loc[a, b]
+                    cross_lines.append(f"  • {label_map.get(a, a)} ↔ {label_map.get(b, b)}: r={r:.3f}")
+            if cross_lines:
+                lines.append("\nNotable cross-correlations:")
+                lines.extend(cross_lines)
 
         sections.append("\n".join(lines))
 
@@ -678,11 +709,26 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
             m.append(f"Model: HuberRegressor (error-correction framework)")
             m.append(f"Current spot rate: R {result['last_zar_usd']:.4f} (as of {result['last_date']})")
             m.append(f"Point estimate (1M ahead): R {result['predicted_level']:.4f} ({result['predicted_change_pct']:+.2f}%)")
-            m.append(f"Direction: {result['direction']} — {'ZAR weakening' if result['direction'] == 'weaken' else 'ZAR strengthening' if result['direction'] == 'strengthen' else 'stable'}")
+
+            direction = result['direction']
+            if direction == 'weaken':
+                dir_text = "ZAR weakening (rate going up = more ZAR per USD)"
+            elif direction == 'strengthen':
+                dir_text = "ZAR strengthening (rate going down = fewer ZAR per USD)"
+            else:
+                dir_text = "stable (negligible change expected)"
+            m.append(f"Direction: {dir_text}")
 
             if result.get('fair_value'):
-                m.append(f"Fair value (equilibrium): R {result['fair_value']:.4f}")
-                m.append(f"Misalignment vs spot: {result.get('fair_value_misalignment_pct', 0):+.2f}% ({result.get('fair_value_signal', 'unknown')})")
+                fv = result['fair_value']
+                mis_pct = result.get('fair_value_misalignment_pct', 0)
+                signal = result.get('fair_value_signal', 'unknown')
+                m.append(f"Fair value (long-run equilibrium): R {fv:.4f}")
+                m.append(f"Misalignment: spot is {abs(mis_pct):.2f}% {'above' if mis_pct < 0 else 'below'} fair value → {signal}")
+                if signal == 'undervalued':
+                    m.append("  Interpretation: ZAR is currently stronger than fundamentals suggest; model expects weakening toward fair value.")
+                elif signal == 'overvalued':
+                    m.append("  Interpretation: ZAR is currently weaker than fundamentals suggest; model expects strengthening toward fair value.")
 
             forecasts = result.get('forecasts', {})
             if forecasts:
@@ -693,37 +739,52 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
                         pt = f.get('point_estimate', f.get('fair_value', 0))
                         fv = f.get('fair_value', 0)
                         gap = pt - fv
-                        m.append(f"  {key}: Point R {pt:.4f}, Fair Value R {fv:.4f} (gap {gap:+.4f}) — {f['reason']}")
+                        change_from_spot = ((pt - result['last_zar_usd']) / result['last_zar_usd']) * 100
+                        m.append(f"  {key}: Point R {pt:.4f} ({change_from_spot:+.2f}% vs spot), Fair Value R {fv:.4f} (gap {gap:+.4f})")
+                        m.append(f"       Reason: {f['reason']}")
 
-            # Feature contributions
+            # Feature contributions with economic interpretation
             contribs = result.get('contributions', [])
             if contribs:
-                m.append("\nTop feature contributions (ZAR impact):")
-                for c in contribs[:6]:
-                    friendly = c.get('feature', '')
+                m.append("\nFeature contributions to 1M prediction (sorted by |impact|):")
+                m.append("(Positive contribution → pushes ZAR/USD rate UP = weakens ZAR)")
+                m.append("(Negative contribution → pushes ZAR/USD rate DOWN = strengthens ZAR)")
+                for c in contribs:
+                    feat = c.get('feature', '')
                     contrib_val = c.get('contribution', 0)
+                    coef = c.get('coefficient', 0)
+                    scaled_val = c.get('scaled_value', 0)
+                    unscaled_coef = c.get('unscaled_coefficient', 0)
+                    if abs(contrib_val) < 0.0001:
+                        continue
+
                     direction = "weakens ZAR" if contrib_val > 0 else "strengthens ZAR"
-                    m.append(f"  • {friendly}: {contrib_val:+.4f} ZAR ({direction})")
+                    m.append(f"  • {feat}: {contrib_val:+.4f} ZAR ({direction})")
+                    m.append(f"      coefficient={coef:+.4f}, scaled_input={scaled_val:.4f}, unscaled_coef={unscaled_coef:+.6f}")
 
             # Performance metrics
             metrics = result.get('metrics', {})
             if metrics:
-                m.append(f"\nModel performance (out-of-sample test set):")
-                m.append(f"  MAE: R {metrics.get('mae', 0):.4f}, RMSE: R {metrics.get('rmse', 0):.4f}")
-                m.append(f"  R²: {metrics.get('r2', 0):.4f}, Theil's U: {metrics.get('theils_u', 0):.4f}")
-                m.append(f"  Directional accuracy: {metrics.get('directional_accuracy', 0):.1f}%")
-                m.append(f"  MAPE: {metrics.get('mape', 0):.2f}%")
+                m.append(f"\nModel performance (out-of-sample test set, {result.get('model_info', {}).get('test_observations', '?')} obs):")
+                m.append(f"  MAE: R {metrics.get('mae', 0):.4f} (avg error magnitude)")
+                m.append(f"  RMSE: R {metrics.get('rmse', 0):.4f} (penalizes large errors)")
+                m.append(f"  R²: {metrics.get('r2', 0):.4f} (variance explained, 1.0 = perfect)")
+                theils = metrics.get('theils_u', 0)
+                m.append(f"  Theil's U: {theils:.4f} ({'better than naive' if theils < 1 else 'worse than naive random walk'})")
+                m.append(f"  Directional accuracy: {metrics.get('directional_accuracy', 0):.1f}% (correct up/down calls)")
+                m.append(f"  MAPE: {metrics.get('mape', 0):.2f}% (mean absolute percentage error)")
 
             # Model info
             info = result.get('model_info', {})
             if info:
                 m.append(f"\nModel specification:")
-                m.append(f"  Type: HuberRegressor with ℓ₂ penalty (robust regression)")
-                m.append(f"  Alpha (ℓ₂ strength): {info.get('alpha', 'N/A')}")
-                m.append(f"  Epsilon (Huber threshold): {info.get('epsilon', 'N/A')}")
-                m.append(f"  11 features: ZAR/USD lag, momentum, mean-reversion, VIX (level/change/zscore), US policy uncertainty, SA uncertainty, bond spread change, gold return")
+                m.append(f"  Type: HuberRegressor with ℓ₂ penalty (robust to outliers)")
+                m.append(f"  Alpha (ℓ₂ regularization): {info.get('alpha', 'N/A')}")
+                m.append(f"  Epsilon (Huber threshold): {info.get('epsilon', 'N/A')} — residuals below ε use squared loss, above use linear")
+                m.append(f"  Intercept: {info.get('intercept', 'N/A')}")
                 m.append(f"  Training: {info.get('training_observations', 'N/A')} obs, Test: {info.get('test_observations', 'N/A')} obs")
-                m.append(f"  SA Inflation, US CPI, Brent Oil deliberately excluded (non-stationary, cause train-test distribution shift)")
+                m.append(f"  Date range: {info.get('training_date_range', 'N/A')}")
+                m.append(f"  Excluded variables: SA Inflation, US CPI, Brent Oil (non-stationary, cause train-test distribution shift)")
 
             sections.append("\n".join(m))
 
@@ -731,17 +792,51 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
     if scenario_data:
         baseline = scenario_data if isinstance(scenario_data, dict) else {}
         if baseline.get('predictors'):
-            s = ["=== SCENARIO ANALYSIS BASELINE ==="]
-            s.append("Adjustable predictors (current values):")
-            for pred in baseline.get('predictors', []):
-                name = pred.get('raw_col', pred.get('name', ''))
-                current = pred.get('current_value', pred.get('current', 0))
-                hist_min = pred.get('hist_min', pred.get('min', 0))
-                hist_max = pred.get('hist_max', pred.get('max', 0))
-                s.append(f"  • {name}: {current:.2f} (historical range: {hist_min:.2f} — {hist_max:.2f})")
+            s = ["=== SCENARIO ANALYSIS ==="]
             if baseline.get('base_prediction'):
-                s.append(f"Base prediction (no scenario changes): R {baseline['base_prediction']:.4f}")
-            s.append("Scenario analysis lets users adjust VIX, US/SA policy uncertainty, gold price, and bond rates to see how the ZAR/USD would respond.")
+                s.append(f"Base prediction (all sliders at current values): R {baseline['base_prediction']:.4f}")
+            if baseline.get('last_zar_usd'):
+                s.append(f"Current spot: R {baseline['last_zar_usd']:.4f}")
+
+            s.append("\nAdjustable predictors:")
+            s.append(f"{'Predictor':<32} {'Current':>10} {'Slider Min':>12} {'Slider Max':>12} {'Hist Min':>10} {'Hist Max':>10}")
+            s.append("-" * 90)
+            for pred in baseline.get('predictors', []):
+                name = pred.get('raw_col', '')
+                current = pred.get('current_value', 0)
+                rng_low = pred.get('range_low', 0)
+                rng_high = pred.get('range_high', 0)
+                hist_min = pred.get('hist_min', 0)
+                hist_max = pred.get('hist_max', 0)
+                s.append(f"  {name:<30} {current:>10.2f} {rng_low:>12.2f} {rng_high:>12.2f} {hist_min:>10.2f} {hist_max:>10.2f}")
+
+            # Show current slider modifications if any
+            if scenario_current_vals and baseline.get('predictors'):
+                modified = []
+                for pred in baseline['predictors']:
+                    raw_col = pred['raw_col']
+                    baseline_val = pred['current_value']
+                    slider_val = scenario_current_vals.get(raw_col, baseline_val)
+                    if abs(slider_val - baseline_val) > 0.001:
+                        pct_change = ((slider_val - baseline_val) / abs(baseline_val)) * 100 if baseline_val != 0 else 0
+                        modified.append(f"  {raw_col}: {baseline_val:.2f} → {slider_val:.2f} ({pct_change:+.1f}%)")
+                if modified:
+                    s.append("\n⚠ ACTIVE SCENARIO MODIFICATIONS (sliders moved from baseline):")
+                    s.extend(modified)
+                else:
+                    s.append("\nSliders are at baseline (no modifications active).")
+            else:
+                s.append("\nSliders are at baseline (no modifications active).")
+
+            s.append("\nEconomic intuition for scenario predictors:")
+            s.append("  VIX ↑ → risk-off globally → capital leaves EM → ZAR weakens")
+            s.append("  GOLD_PRICE ↑ → mixed: risk-off signal BUT SA is a gold exporter (improves trade balance)")
+            s.append("  EPU(USA) ↑ → US policy uncertainty → risk aversion → EM currencies weaken")
+            s.append("  WUIZAF(SA) ↑ → SA-specific uncertainty → higher risk premium → ZAR weakens")
+            s.append("  10Y_BOND(USA) ↑ → higher US yields → carry trade unwinds → capital flows to US → ZAR weakens")
+            s.append("  10Y_BOND(SA) ↑ → higher SA yields → could attract carry inflows BUT also signals risk/inflation")
+            s.append("  Bond spread (SA−US) is a key derived feature: wider spread = higher SA risk premium")
+
             sections.append("\n".join(s))
 
     if not sections:
@@ -1033,11 +1128,12 @@ def _parse_agent_response(response_text):
     State('scenario-baseline-data', 'data'),
     State('dashboard-tab', 'data'),
     State('agent-mode-store', 'data'),
+    State('scenario-current-values', 'data'),
     prevent_initial_call=True
 )
 def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_history,
                      fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars,
-                     prediction_data, scenario_data, active_tab, agent_mode):
+                     prediction_data, scenario_data, active_tab, agent_mode, scenario_current_vals):
     import traceback
 
     if not user_msg or not user_msg.strip():
@@ -1056,6 +1152,7 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
     full_context = _build_chat_context(
         fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars,
         prediction_data=prediction_data, scenario_data=scenario_data, active_tab=active_tab,
+        scenario_current_vals=scenario_current_vals,
     )
 
     chat_history.append({'role': 'user', 'parts': [user_msg]})
