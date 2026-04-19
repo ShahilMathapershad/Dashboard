@@ -1853,11 +1853,12 @@ p  { margin: 0; color: var(--text-2); }
 /* ── Tablet / small laptop (<=1024px) ── */
 @media (max-width: 1024px) {
     .sidebar {
-        transform: translateX(-100%);
-        position: fixed;
+        transform: translateX(-100%) !important;
+        position: fixed !important;
         height: 100vh;
         height: 100dvh;
         z-index: 100;
+        width: var(--sidebar-w) !important;
         transition: transform 0.35s var(--spring);
     }
     .sidebar.sidebar-mobile-open {
@@ -2088,6 +2089,90 @@ p  { margin: 0; color: var(--text-2); }
     .chat-fab { bottom: calc(16px + env(safe-area-inset-bottom)) !important; }
     .chat-panel { bottom: calc(16px + env(safe-area-inset-bottom)) !important; }
     .btn-get-started { margin-bottom: env(safe-area-inset-bottom); }
+}
+
+/* ═══════════════════════════════════════════
+   Mobile Performance — strip GPU-heavy effects
+   Each backdrop-filter/blur creates a compositing layer.
+   On the landing page alone there are 5+ stacked blurs
+   that choke mobile GPUs. Replace with solid fallbacks.
+   ═══════════════════════════════════════════ */
+@media (max-width: 1024px) {
+    /* Kill all backdrop-filter — single biggest mobile perf win */
+    .login-card-glass,
+    .login-card-glass:hover,
+    .feature-card,
+    .stat-pill,
+    .topbar,
+    .sidebar,
+    .profile-topbar,
+    .chat-panel {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+
+    /* Replace login-container ambient glow blobs (filter: blur(140px) is brutal) */
+    .login-container::before,
+    .login-container::after {
+        filter: blur(60px) !important;
+        animation: none !important;
+        opacity: 0.18 !important;
+    }
+
+    /* Solid glass fallbacks */
+    .login-card-glass {
+        background: rgba(14, 14, 14, 0.88) !important;
+    }
+    .login-card-glass:hover {
+        background: rgba(18, 18, 18, 0.92) !important;
+    }
+    .light-theme .login-card-glass {
+        background: rgba(255, 255, 255, 0.92) !important;
+    }
+    .light-theme .login-card-glass:hover {
+        background: rgba(255, 255, 255, 0.95) !important;
+    }
+    .feature-card {
+        background: rgba(255, 255, 255, 0.05) !important;
+    }
+    .light-theme .feature-card {
+        background: rgba(255, 255, 255, 0.85) !important;
+    }
+
+    /* Kill non-essential animations on landing (float, pulse, stagger) */
+    .login-container::before,
+    .login-container::after {
+        animation: none !important;
+    }
+    .data-pulse-btn {
+        animation: none !important;
+    }
+    .feature-card,
+    .stat-pill {
+        animation: none !important;
+    }
+
+    /* Reduce box-shadow complexity */
+    .login-card-glass {
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
+    }
+    .feature-card {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
+    }
+    .feature-card:hover {
+        transform: none !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
+    }
+}
+
+/* Extra reduction for phones */
+@media (max-width: 768px) {
+    .login-container::before,
+    .login-container::after {
+        filter: blur(40px) !important;
+        width: 200px !important;
+        height: 200px !important;
+    }
 }
 
 /* ═══════════════════════════════════════════

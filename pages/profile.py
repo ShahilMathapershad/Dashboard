@@ -66,6 +66,7 @@ def layout():
                         placeholder='Current password',
                         className='form-input',
                         autoComplete='current-password',
+                        debounce=True,
                     ),
                     dcc.Input(
                         id='profile-new-password',
@@ -73,6 +74,7 @@ def layout():
                         placeholder='New password (min. 6 characters)',
                         className='form-input',
                         autoComplete='new-password',
+                        debounce=True,
                     ),
                     dcc.Input(
                         id='profile-confirm-password',
@@ -80,6 +82,7 @@ def layout():
                         placeholder='Confirm new password',
                         className='form-input',
                         autoComplete='new-password',
+                        debounce=True,
                     ),
                 ]),
                 html.Div(className='profile-action-row', children=[

@@ -95,16 +95,15 @@ def layout():
                 html.Form(id='login-form', children=[
                     dcc.Input(id='username', type='text', placeholder='Username',
                               className='form-input', autoComplete='username',
-                              name='username'),
+                              name='username', debounce=True),
                     dcc.Input(id='password', type='password', placeholder='Password',
                               className='form-input', autoComplete='current-password',
-                              name='password'),
+                              name='password', debounce=True),
 
                     html.Button('Sign In', id='login-button', n_clicks=0,
                                 className='login-button data-pulse-btn',
                                 type='button'),
-                ], style={'margin': '0'},
-                   **{'data-dash-form': 'true'}),
+                ], style={'margin': '0'}),
 
                 html.Div(id='login-output', className='login-error'),
                 

@@ -24,10 +24,10 @@ def layout():
                 html.Form(id='register-form', children=[
                     dcc.Input(id='reg-username', type='text', placeholder='Username',
                               className='form-input', autoComplete='username',
-                              name='username'),
+                              name='username', debounce=True),
                     dcc.Input(id='reg-password', type='password', placeholder='Password',
                               className='form-input', autoComplete='new-password',
-                              name='password'),
+                              name='password', debounce=True),
 
                     html.Button('Register', id='register-button', n_clicks=0,
                                 className='login-button', type='button'),

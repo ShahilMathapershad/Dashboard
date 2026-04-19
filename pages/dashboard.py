@@ -467,9 +467,12 @@ def toggle_sidebar(n_clicks, current_state):
 dash.clientside_callback(
     """
     function(state) {
-        const container = document.getElementById('dashboard-container');
-        const toggleBtn = document.getElementById('sidebar-toggle');
-        if (state === 'collapsed') {
+        var container = document.getElementById('dashboard-container');
+        var toggleBtn = document.getElementById('sidebar-toggle');
+        // Force collapsed on mobile regardless of localStorage
+        var isMobile = window.innerWidth <= 1024;
+        var effectiveState = isMobile ? 'collapsed' : state;
+        if (effectiveState === 'collapsed') {
             container.classList.add('sidebar-collapsed');
             if (toggleBtn) toggleBtn.innerText = '❯';
         } else {

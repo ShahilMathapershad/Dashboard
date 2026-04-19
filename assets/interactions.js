@@ -15,36 +15,27 @@ const MIN_RESIZE_MS = 180;
 
 document.addEventListener('DOMContentLoaded', () => {
 
-    /* ── Mobile: disable Three.js 3D scene on phones/tablets ───────────── */
-    const disableThreeOnMobile = () => {
-        const isMobile = window.innerWidth <= 1024 ||
-                         ('ontouchstart' in window && window.innerWidth <= 1280);
-        if (!isMobile) return;
-
-        // Prevent the Three.js scene from ever initializing by removing its container
-        const threeContainer = document.getElementById('three-canvas-landing');
-        if (threeContainer) {
-            // Remove any existing canvas (if Three.js already started)
-            const canvas = threeContainer.querySelector('canvas');
-            if (canvas) canvas.remove();
-            // Destroy the scene instance if it exists
-            if (window.DashScenes && window.DashScenes.landingScene) {
-                try { window.DashScenes.landingScene.destroy(); } catch (_) {}
-                window.DashScenes.landingScene = null;
-            }
-            // Mark container so Three.js index.ts skips init (rect will be 0x0)
-            threeContainer.style.display = 'none';
+    /* ── Three.js: only load on desktop (never parse 3800-line bundle on mobile) ── */
+    const loadThreeIfDesktop = () => {
+        const isDesktop = window.innerWidth > 1024 &&
+                          !('ontouchstart' in window && window.innerWidth <= 1280);
+        if (!isDesktop) {
+            // Hide 3D container + particles on mobile — CSS gradient fallback
+            const c = document.getElementById('three-canvas-landing');
+            if (c) c.style.display = 'none';
+            const p = document.querySelector('.particles-container');
+            if (p && window.innerWidth <= 768) p.style.display = 'none';
+            return;
         }
-
-        // Also hide floating particle labels on small phones — they overlap content
-        if (window.innerWidth <= 768) {
-            const particles = document.querySelector('.particles-container');
-            if (particles) particles.style.display = 'none';
+        // Desktop only: dynamically inject Three.js (non-render-blocking)
+        if (!document.querySelector('script[src*="three-scenes"]')) {
+            const s = document.createElement('script');
+            s.src = '/assets/three-scenes.js';
+            s.defer = true;
+            document.head.appendChild(s);
         }
     };
-    disableThreeOnMobile();
-    // Also handle orientation changes
-    window.addEventListener('resize', () => { disableThreeOnMobile(); }, { passive: true });
+    loadThreeIfDesktop();
 
     /* ── Login: Enter key + prevent native form submit ───────────────────── */
     const handleLoginEnterKey = () => {
