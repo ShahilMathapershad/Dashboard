@@ -165,8 +165,10 @@ document.addEventListener('DOMContentLoaded', () => {
         schedule(300);
     };
 
-    /* ── Predictor chips: staggered spring entrance ─────────────────────── */
+    /* ── Predictor chips: staggered spring entrance (desktop only) ────── */
     const observeChips = () => {
+        // Skip stagger animation on mobile — chips appear instantly
+        if (window.innerWidth <= 1024) return;
         new MutationObserver(() => {
             document.querySelectorAll('.predictor-checkbox-item:not([data-revealed])').forEach((chip, i) => {
                 chip.dataset.revealed = 'true';
@@ -183,8 +185,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }).observe(document.body, { childList: true, subtree: true });
     };
 
-    /* ── Landing page: SVG trendline injection ──────────────────────────── */
+    /* ── Landing page: SVG trendline injection (desktop only) ─────────── */
     const observeTrendline = () => {
+        // Skip entirely on mobile — saves DOM injection + animation cost
+        if (window.innerWidth <= 1024) return;
         const inject = () => {
             const container = document.getElementById('bg-trendline-container');
             if (!container || container.dataset.injected) return;
@@ -219,68 +223,71 @@ document.addEventListener('DOMContentLoaded', () => {
         new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
     };
 
-    /* ── Landing: scroll trendline + mouse parallax ─────────────────────── */
-    window.addEventListener('scroll', () => {
-        const path = document.querySelector('.trendline-path');
-        if (!path) return;
-        const scrollY = window.scrollY;
-        if (scrollY > 10) {
-            const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-            const pct = Math.min(1, scrollY / maxScroll);
-            path.style.animation = 'none';
-            path.style.strokeDashoffset = 2000 - (2000 * pct);
-            path.style.opacity = String(0.15 + pct * 0.08);
-        }
-    }, { passive: true });
+    /* ── Landing: scroll trendline + mouse parallax (desktop only) ────── */
+    if (window.innerWidth > 1024) {
+        window.addEventListener('scroll', () => {
+            const path = document.querySelector('.trendline-path');
+            if (!path) return;
+            const scrollY = window.scrollY;
+            if (scrollY > 10) {
+                const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+                const pct = Math.min(1, scrollY / maxScroll);
+                path.style.animation = 'none';
+                path.style.strokeDashoffset = 2000 - (2000 * pct);
+                path.style.opacity = String(0.15 + pct * 0.08);
+            }
+        }, { passive: true });
 
-    window.addEventListener('mousemove', (e) => {
-        const particles = document.querySelectorAll('.particle-node');
-        if (!particles.length) return;
-        const mx = e.clientX / window.innerWidth - 0.5;
-        const my = e.clientY / window.innerHeight - 0.5;
-        particles.forEach((p, i) => {
-            const s = (i + 1) * 16;
-            p.style.margin = `${my * s}px 0 0 ${mx * s}px`;
-        });
-    }, { passive: true });
+        window.addEventListener('mousemove', (e) => {
+            const particles = document.querySelectorAll('.particle-node');
+            if (!particles.length) return;
+            const mx = e.clientX / window.innerWidth - 0.5;
+            const my = e.clientY / window.innerHeight - 0.5;
+            particles.forEach((p, i) => {
+                const s = (i + 1) * 16;
+                p.style.margin = `${my * s}px 0 0 ${mx * s}px`;
+            });
+        }, { passive: true });
+    }
 
     /* ── Stage: spring entrance on page load ────────────────────────────── */
     const initStageEntrance = () => {
+        const isMobile = window.innerWidth <= 1024;
         const run = () => {
             const landing = document.getElementById('landing-stage');
-            if (!landing || landing.dataset.entered) return true; // done or already ran
+            if (!landing || landing.dataset.entered) return true;
 
-            // Only animate if the stage is actually visible (has stage-active or no class yet)
             const isActive = landing.classList.contains('stage-active') ||
                              (!landing.classList.contains('stage-hidden'));
-            if (!isActive) return true; // wrong state, don't retry
+            if (!isActive) return true;
 
             landing.dataset.entered = 'true';
-            landing.style.opacity = '0';
-            landing.style.transform = 'translateY(16px)';
-            landing.style.willChange = 'opacity, transform';
 
-            // Double-rAF ensures paint is committed before transition starts
+            if (isMobile) {
+                // Mobile: skip fancy entrance — show content instantly
+                landing.style.opacity = '1';
+                landing.style.transform = 'none';
+                return true;
+            }
+
+            // Desktop: smooth entrance
+            landing.style.opacity = '0';
+            landing.style.transform = 'translateY(12px)';
             requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    landing.style.transition = `opacity 0.8s ${SPRING}, transform 0.8s ${SPRING}`;
-                    landing.style.opacity = '1';
-                    landing.style.transform = 'translateY(0)';
-                    setTimeout(() => { landing.style.willChange = ''; }, 1000);
-                });
+                landing.style.transition = `opacity 0.5s ${SPRING}, transform 0.5s ${SPRING}`;
+                landing.style.opacity = '1';
+                landing.style.transform = 'translateY(0)';
             });
             return true;
         };
 
-        // Try immediately, then retry via observer if Dash hasn't rendered yet
         if (run()) return;
         let attempts = 0;
         const obs = new MutationObserver(() => {
-            if (run() || ++attempts > 50) obs.disconnect();
+            if (run() || ++attempts > 30) obs.disconnect();
         });
         obs.observe(document.body, { childList: true, subtree: true });
-        // Hard fallback: force after 3s no matter what
-        setTimeout(() => { obs.disconnect(); run(); }, 3000);
+        setTimeout(() => { obs.disconnect(); run(); }, 2000);
     };
 
     /* ── Slider marks: force-hide white boxes ───────────────────────────── */
@@ -369,31 +376,46 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.style.overflow = '';
         };
 
+        // Attach directly to elements (robust across all mobile browsers)
+        const bindHamburger = () => {
+            const btn = document.getElementById('mobile-menu-btn');
+            if (btn && !btn.dataset.bound) {
+                btn.dataset.bound = 'true';
+                const toggle = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const sidebar = document.getElementById('sidebar');
+                    if (sidebar && sidebar.classList.contains('sidebar-mobile-open')) {
+                        closeSidebar();
+                    } else {
+                        openSidebar();
+                    }
+                };
+                btn.addEventListener('click', toggle);
+                btn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    toggle(e);
+                }, { passive: false });
+            }
+            const overlay = document.getElementById('sidebar-overlay');
+            if (overlay && !overlay.dataset.bound) {
+                overlay.dataset.bound = 'true';
+                overlay.addEventListener('click', closeSidebar);
+            }
+        };
+        bindHamburger();
+        // Re-bind after Dash SPA navigation (elements may re-render)
+        new MutationObserver(bindHamburger).observe(document.body, { childList: true, subtree: true });
+
+        // Close on nav link tap
         document.addEventListener('click', (e) => {
-            // Hamburger button opens sidebar
-            if (e.target.closest('#mobile-menu-btn')) {
-                e.stopPropagation();
-                const sidebar = document.getElementById('sidebar');
-                if (sidebar && sidebar.classList.contains('sidebar-mobile-open')) {
-                    closeSidebar();
-                } else {
-                    openSidebar();
-                }
-                return;
-            }
-            // Overlay tap closes sidebar
-            if (e.target.closest('#sidebar-overlay')) {
-                closeSidebar();
-                return;
-            }
-            // Clicking a nav link inside sidebar on mobile — close after a short delay
             if (e.target.closest('.nav-link-custom, .nav-link-profile') &&
                 window.innerWidth <= 1024) {
-                setTimeout(closeSidebar, 200);
+                setTimeout(closeSidebar, 150);
             }
         });
 
-        // Close mobile sidebar on window resize if going above breakpoint
+        // Close on resize above breakpoint
         window.addEventListener('resize', () => {
             if (window.innerWidth > 1024) closeSidebar();
         }, { passive: true });

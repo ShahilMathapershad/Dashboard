@@ -2139,17 +2139,25 @@ p  { margin: 0; color: var(--text-2); }
         background: rgba(255, 255, 255, 0.85) !important;
     }
 
-    /* Kill non-essential animations on landing (float, pulse, stagger) */
+    /* Kill ALL non-essential animations on mobile */
     .login-container::before,
-    .login-container::after {
-        animation: none !important;
-    }
-    .data-pulse-btn {
-        animation: none !important;
-    }
+    .login-container::after,
+    .data-pulse-btn,
     .feature-card,
-    .stat-pill {
+    .stat-pill,
+    .particle-node,
+    .trendline-path,
+    .bg-trendline-svg *,
+    .login-card,
+    .login-card-glass,
+    .profile-hero-card,
+    .profile-section-card {
         animation: none !important;
+    }
+    /* Hide decorative elements that serve no purpose without 3D */
+    .bg-trendline-svg,
+    .particles-container {
+        display: none !important;
     }
 
     /* Reduce box-shadow complexity */

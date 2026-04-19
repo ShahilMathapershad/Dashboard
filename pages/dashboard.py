@@ -115,7 +115,7 @@ def topbar():
     date_str = f"{now.strftime('%a, %b')} {now.day}, {now.year}"
     return html.Div(className='topbar', children=[
         html.Div(className='topbar-left', children=[
-            html.Button('☰', id='mobile-menu-btn', className='mobile-menu-btn', n_clicks=0),
+            html.Div('☰', id='mobile-menu-btn', className='mobile-menu-btn', role='button', tabIndex=0),
             html.Div(className='topbar-breadcrumb', children=[
                 html.Span('ZAR/USD Dashboard', className='topbar-root'),
                 html.Span(' / ', className='topbar-sep'),
