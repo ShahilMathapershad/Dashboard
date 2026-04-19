@@ -47,7 +47,7 @@ app = Dash(
     ],
     suppress_callback_exceptions=True,
     background_callback_manager=background_callback_manager,
-    meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}]
+    meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"}]
 )
 
 app.layout = html.Div(id='theme-main-container', children=[

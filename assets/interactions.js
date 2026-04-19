@@ -306,6 +306,53 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    /* ── Mobile sidebar hamburger menu ──────────────────────────────────── */
+    const setupMobileSidebar = () => {
+        const openSidebar = () => {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (sidebar) sidebar.classList.add('sidebar-mobile-open');
+            if (overlay) overlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        };
+        const closeSidebar = () => {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (sidebar) sidebar.classList.remove('sidebar-mobile-open');
+            if (overlay) overlay.classList.remove('active');
+            document.body.style.overflow = '';
+        };
+
+        document.addEventListener('click', (e) => {
+            // Hamburger button opens sidebar
+            if (e.target.closest('#mobile-menu-btn')) {
+                e.stopPropagation();
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar && sidebar.classList.contains('sidebar-mobile-open')) {
+                    closeSidebar();
+                } else {
+                    openSidebar();
+                }
+                return;
+            }
+            // Overlay tap closes sidebar
+            if (e.target.closest('#sidebar-overlay')) {
+                closeSidebar();
+                return;
+            }
+            // Clicking a nav link inside sidebar on mobile — close after a short delay
+            if (e.target.closest('.nav-link-custom, .nav-link-profile') &&
+                window.innerWidth <= 1024) {
+                setTimeout(closeSidebar, 200);
+            }
+        });
+
+        // Close mobile sidebar on window resize if going above breakpoint
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 1024) closeSidebar();
+        }, { passive: true });
+    };
+
     /* ── Init ────────────────────────────────────────────────────────────── */
     handleLoginEnterKey();
     managePlotFadeIn();
@@ -315,6 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
     hideSliderMarks();
     observeScrollAnimations();
     setupModeCrossfade();
+    setupMobileSidebar();
     // Deferred — let Dash render the landing stage first
     setTimeout(initStageEntrance, 50);
 });

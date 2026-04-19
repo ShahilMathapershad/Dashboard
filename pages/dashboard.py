@@ -114,10 +114,13 @@ def topbar():
     now = datetime.datetime.now()
     date_str = f"{now.strftime('%a, %b')} {now.day}, {now.year}"
     return html.Div(className='topbar', children=[
-        html.Div(className='topbar-breadcrumb', children=[
-            html.Span('ZAR/USD Dashboard', className='topbar-root'),
-            html.Span(' / ', className='topbar-sep'),
-            html.Span('Data Explorer', id='topbar-page-name', className='topbar-page'),
+        html.Div(className='topbar-left', children=[
+            html.Button('☰', id='mobile-menu-btn', className='mobile-menu-btn', n_clicks=0),
+            html.Div(className='topbar-breadcrumb', children=[
+                html.Span('ZAR/USD Dashboard', className='topbar-root'),
+                html.Span(' / ', className='topbar-sep'),
+                html.Span('Data Explorer', id='topbar-page-name', className='topbar-page'),
+            ]),
         ]),
         html.Div(className='topbar-right', children=[
             html.Span(date_str, className='topbar-date'),
@@ -204,7 +207,7 @@ def data_tab_content(existing_data=None):
             dcc.Graph(
                 id='zar-graph',
                 className='hero-chart chart-3d',
-                style={'height': '68vh', 'minHeight': '560px', 'maxHeight': '760px', 'width': '100%'},
+                style={'height': 'clamp(300px, 55vh, 760px)', 'width': '100%'},
                 config={
                     'displayModeBar': 'hover',
                     'displaylogo': False,
@@ -437,6 +440,7 @@ def scenario_tab_content():
 def layout():
     return html.Div(id='dashboard-container', className='page-transition sidebar-collapsed', n_clicks=0, children=[
         sidebar('data'),
+        html.Div(id='sidebar-overlay', className='sidebar-overlay', n_clicks=0),
         html.Div(className='content-area', id='content-area', children=[
             topbar(),
             html.Div(id='content-body', className='content-body', children=[
