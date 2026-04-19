@@ -790,3 +790,131 @@ def scenario_predict(scenario_values):
         'waterfall': waterfall,
         'scenario_values': {k: round(float(v), 4) for k, v in scenario_values.items()},
     }
+
+
+def find_scenario_for_target(target_level):
+    """
+    Given a target ZAR/USD level, find plausible predictor values that would produce it.
+
+    Strategy: since HuberRegressor is linear in the transformed feature space, we measure
+    each predictor's per-unit sensitivity (d prediction / d raw_value) and iteratively
+    nudge the most effective predictors toward the target. Much faster than black-box
+    optimization because each sensitivity probe is a single scenario_predict call.
+
+    Returns a dict with the found scenario values, the achieved prediction, and metadata.
+    """
+    import numpy as np
+
+    baseline = get_scenario_baseline()
+    predictors = baseline.get('predictors', [])
+
+    if not predictors:
+        raise ValueError("No baseline data available for reverse scenario search.")
+
+    keys = [p['raw_col'] for p in predictors]
+    current = {p['raw_col']: p['current_value'] for p in predictors}
+    bounds = {p['raw_col']: (p['range_low'], p['range_high']) for p in predictors}
+
+    # Start from current values
+    best = dict(current)
+
+    # Measure per-predictor sensitivity: how much does prediction change per unit of raw input?
+    base_result = scenario_predict(best)
+    base_level = base_result['scenario_level']
+
+    sensitivities = {}
+    for key in keys:
+        lo, hi = bounds[key]
+        span = hi - lo
+        probe_delta = span * 0.01  # 1% of range
+        if probe_delta == 0:
+            continue
+        probe = dict(best)
+        probe[key] = min(best[key] + probe_delta, hi)
+        probe_result = scenario_predict(probe)
+        sens = (probe_result['scenario_level'] - base_level) / probe_delta
+        sensitivities[key] = sens
+
+    # Iterative greedy descent: nudge predictors proportionally to their sensitivity
+    for iteration in range(50):
+        result = scenario_predict(best)
+        gap = target_level - result['scenario_level']
+
+        if abs(gap) < 0.005:
+            break  # Close enough
+
+        # Rank predictors by how much they can help close the gap
+        candidates = []
+        for key in keys:
+            sens = sensitivities.get(key, 0)
+            if abs(sens) < 1e-8:
+                continue
+            lo, hi = bounds[key]
+            # How much room is there to move in the direction that helps?
+            if gap * sens > 0:
+                # Need to increase this predictor
+                room = hi - best[key]
+            else:
+                # Need to decrease this predictor
+                room = best[key] - lo
+            if room < 1e-6:
+                continue
+            # Desired delta to fully close gap via this predictor alone
+            desired = gap / sens
+            # Clamp to available room (with damping to avoid overshooting)
+            actual = np.clip(desired * 0.6, -room, room) if gap * sens < 0 else np.clip(desired * 0.6, -room, room)
+            candidates.append((key, actual, abs(sens * actual)))
+
+        if not candidates:
+            break  # No predictor can help further
+
+        # Apply top contributors (spread the change across multiple predictors)
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        n_apply = min(3, len(candidates))
+        for key, delta, _ in candidates[:n_apply]:
+            lo, hi = bounds[key]
+            best[key] = float(np.clip(best[key] + delta, lo, hi))
+
+        # Re-measure sensitivities every 10 iterations (feature engineering is nonlinear)
+        if iteration % 10 == 9:
+            ref_result = scenario_predict(best)
+            ref_level = ref_result['scenario_level']
+            for key in keys:
+                lo, hi = bounds[key]
+                span = hi - lo
+                probe_delta = span * 0.01
+                if probe_delta == 0:
+                    continue
+                probe = dict(best)
+                probe[key] = min(best[key] + probe_delta, hi)
+                pr = scenario_predict(probe)
+                sensitivities[key] = (pr['scenario_level'] - ref_level) / probe_delta
+
+    # Final result
+    final_result = scenario_predict(best)
+
+    # Build a summary of what changed
+    changes = []
+    for p in predictors:
+        key = p['raw_col']
+        cur = p['current_value']
+        new_val = best[key]
+        if abs(new_val - cur) > 0.001:
+            pct = ((new_val - cur) / abs(cur)) * 100 if cur != 0 else 0
+            changes.append({
+                'predictor': key,
+                'current': round(cur, 4),
+                'scenario': round(new_val, 4),
+                'change_pct': round(pct, 1),
+            })
+
+    return {
+        'target_level': round(target_level, 4),
+        'achieved_level': final_result['scenario_level'],
+        'base_level': final_result['base_level'],
+        'last_zar_usd': final_result['last_zar_usd'],
+        'scenario_values': best,
+        'changes': changes,
+        'gap': round(abs(final_result['scenario_level'] - target_level), 4),
+        'feasible': abs(final_result['scenario_level'] - target_level) < 0.5,
+    }

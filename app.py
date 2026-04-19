@@ -77,6 +77,7 @@ app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='agent-mode-store', data=False, storage_type='session'),
     dcc.Store(id='agent-action-store', storage_type='memory'),
     dcc.Store(id='agent-slider-sync', data=0, storage_type='memory'),
+    dcc.Store(id='agent-highlight-store', storage_type='memory'),
 
     dash.page_container,
 
@@ -321,18 +322,21 @@ app.clientside_callback(
     Output('plot-mode', 'data', allow_duplicate=True),
     Output('agent-slider-sync', 'data'),
     Output('selected-compare-vars', 'data', allow_duplicate=True),
+    Output('_pages_location', 'pathname', allow_duplicate=True),
+    Output('agent-highlight-store', 'data'),
     Input('agent-action-store', 'data'),
     State('scenario-baseline-data', 'data'),
     State('agent-slider-sync', 'data'),
+    State('_pages_location', 'pathname'),
     prevent_initial_call=True
 )
-def execute_agent_actions(action_data, baseline_data, slider_sync):
+def execute_agent_actions(action_data, baseline_data, slider_sync, current_path):
     if not action_data or not isinstance(action_data, dict):
-        return (dash.no_update,) * 6
+        return (dash.no_update,) * 8
 
     actions = action_data.get('actions', [])
     if not actions:
-        return (dash.no_update,) * 6
+        return (dash.no_update,) * 8
 
     tab_out = dash.no_update
     scenario_vals_out = dash.no_update
@@ -340,6 +344,11 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
     plot_mode_out = dash.no_update
     slider_sync_out = dash.no_update
     compare_vars_out = dash.no_update
+    path_out = dash.no_update
+    highlight_out = dash.no_update
+
+    # Collect highlight targets
+    highlight_data = {}
 
     for action in actions:
         atype = action.get('type', '')
@@ -348,6 +357,18 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
             tab_name = action.get('tab', '')
             if tab_name in ('data', 'model', 'scenario'):
                 tab_out = tab_name
+                # If user asked about specific model metrics/sections, highlight them
+                highlight_keys = action.get('highlight', [])
+                if highlight_keys:
+                    highlight_data = {'type': 'model', 'keys': highlight_keys}
+
+        elif atype == 'highlight_model':
+            # Dedicated action to highlight model tab elements
+            tab_out = 'model'
+            targets = action.get('targets', [])
+            sub_tab = action.get('sub_tab', '')
+            if targets:
+                highlight_data = {'type': 'model', 'keys': targets, 'sub_tab': sub_tab}
 
         elif atype == 'set_scenario_sliders':
             slider_vals = action.get('values', {})
@@ -357,6 +378,7 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
                 for pred in baseline_data.get('predictors', []):
                     new_vals[pred.get('raw_col', '')] = pred.get('current_value', 0)
 
+                changed_keys = []
                 known_keys = {p.get('raw_col') for p in baseline_data.get('predictors', [])}
                 for key, val in slider_vals.items():
                     if key not in known_keys:
@@ -372,6 +394,8 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
                     except (ValueError, TypeError):
                         continue
 
+                    changed_keys.append(key)
+
                     # Clamp to slider range
                     for pred in baseline_data.get('predictors', []):
                         if pred.get('raw_col') == key:
@@ -382,6 +406,8 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
                 scenario_vals_out = new_vals
                 tab_out = 'scenario'
                 slider_sync_out = (slider_sync or 0) + 1
+                if changed_keys:
+                    highlight_data = {'type': 'sliders', 'keys': changed_keys}
 
         elif atype == 'select_predictors':
             variables = action.get('variables', [])
@@ -389,6 +415,7 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
                 predictors_out = variables
                 plot_mode_out = 'timeseries'
                 tab_out = 'data'
+                highlight_data = {'type': 'predictors', 'keys': variables}
 
         elif atype == 'set_compare_variables':
             variables = action.get('variables', [])
@@ -396,6 +423,7 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
                 compare_vars_out = variables[:3]
                 plot_mode_out = 'compare'
                 tab_out = 'data'
+                highlight_data = {'type': 'predictors', 'keys': variables}
 
         elif atype == 'set_plot_mode':
             mode = action.get('mode', '')
@@ -412,7 +440,18 @@ def execute_agent_actions(action_data, baseline_data, slider_sync):
                 tab_out = 'scenario'
                 slider_sync_out = (slider_sync or 0) + 1
 
-    return tab_out, scenario_vals_out, predictors_out, plot_mode_out, slider_sync_out, compare_vars_out
+    # Navigate to /dashboard if on a different page and actions target the dashboard
+    if tab_out is not dash.no_update and current_path != '/dashboard':
+        path_out = '/dashboard'
+
+    # Build highlight output with timestamp for change detection
+    if highlight_data:
+        import time
+        highlight_data['ts'] = time.time()
+        highlight_out = highlight_data
+
+    return (tab_out, scenario_vals_out, predictors_out, plot_mode_out,
+            slider_sync_out, compare_vars_out, path_out, highlight_out)
 
 # Sync plot-mode button UI when agent changes the store directly
 # (The dashboard's switch_plot_mode callback only fires on button clicks, not store changes)
@@ -455,6 +494,142 @@ app.clientside_callback(
     """,
     Output('plot-mode', 'id'),
     Input('plot-mode', 'data'),
+    prevent_initial_call=True
+)
+
+# Apply purple highlights when agent executes actions
+app.clientside_callback(
+    """
+    function(highlightData) {
+        if (!highlightData || !highlightData.keys) return window.dash_clientside.no_update;
+
+        var HIGHLIGHT_CLASS = 'agent-highlight';
+        var HIGHLIGHT_DURATION = 4000;
+
+        /* Clear any existing highlights first */
+        document.querySelectorAll('.' + HIGHLIGHT_CLASS).forEach(function(el) {
+            el.classList.remove(HIGHLIGHT_CLASS);
+        });
+
+        /* Delay to let tab switch + render complete */
+        setTimeout(function() {
+            var type = highlightData.type;
+            var keys = highlightData.keys || [];
+
+            if (type === 'sliders') {
+                /* Highlight scenario slider groups by scanning all slider containers */
+                var sliderGroups = document.querySelectorAll('.scenario-slider-group');
+                sliderGroups.forEach(function(group) {
+                    var idEl = group.querySelector('[id]');
+                    if (!idEl) return;
+                    var idStr = idEl.id || '';
+                    for (var i = 0; i < keys.length; i++) {
+                        if (idStr.indexOf(keys[i]) !== -1 && idStr.indexOf('scenario') !== -1) {
+                            group.classList.add(HIGHLIGHT_CLASS);
+                            break;
+                        }
+                    }
+                });
+            }
+
+            else if (type === 'predictors') {
+                /* Highlight predictor checkbox chips by scanning items */
+                var items = document.querySelectorAll('.predictor-checkbox-item');
+                items.forEach(function(item) {
+                    var idEl = item.querySelector('[id]');
+                    if (!idEl) return;
+                    var idStr = idEl.id || '';
+                    for (var i = 0; i < keys.length; i++) {
+                        if (idStr.indexOf(keys[i]) !== -1) {
+                            item.classList.add(HIGHLIGHT_CLASS);
+                            break;
+                        }
+                    }
+                });
+            }
+
+            else if (type === 'model') {
+                /* Switch sub-tab if requested */
+                if (highlightData.sub_tab === 'specifications') {
+                    var specBtn = document.getElementById('model-sub-specifications');
+                    if (specBtn) specBtn.click();
+                } else if (highlightData.sub_tab === 'predictions') {
+                    var predBtn = document.getElementById('model-sub-predictions');
+                    if (predBtn) predBtn.click();
+                }
+
+                /* Wait for sub-tab switch animation */
+                setTimeout(function() {
+                    /* Search info-pills by their label text */
+                    var pills = document.querySelectorAll('.info-pill');
+                    pills.forEach(function(pill) {
+                        var label = pill.querySelector('.info-pill-label');
+                        if (!label) return;
+                        var labelText = label.textContent.trim().toLowerCase();
+                        for (var i = 0; i < keys.length; i++) {
+                            if (labelText === keys[i].toLowerCase() ||
+                                labelText.indexOf(keys[i].toLowerCase()) !== -1) {
+                                pill.classList.add(HIGHLIGHT_CLASS);
+                                break;
+                            }
+                        }
+                    });
+
+                    /* Also search model cards for section-level highlights */
+                    var cards = document.querySelectorAll('.model-card');
+                    cards.forEach(function(card) {
+                        var title = card.querySelector('.card-title');
+                        if (!title) return;
+                        var titleText = title.textContent.trim().toLowerCase();
+                        for (var i = 0; i < keys.length; i++) {
+                            var k = keys[i].toLowerCase();
+                            if (k === 'forecast' && titleText.indexOf('forecast') !== -1) {
+                                card.classList.add(HIGHLIGHT_CLASS); break;
+                            }
+                            if (k === 'contributions' && titleText.indexOf('driving') !== -1) {
+                                card.classList.add(HIGHLIGHT_CLASS); break;
+                            }
+                            if (k === 'diagnostics' && titleText.indexOf('diagnostic') !== -1) {
+                                card.classList.add(HIGHLIGHT_CLASS); break;
+                            }
+                            if (k === 'specification' && titleText.indexOf('specification') !== -1) {
+                                card.classList.add(HIGHLIGHT_CLASS); break;
+                            }
+                        }
+                    });
+
+                    /* Scroll to first highlighted element */
+                    var first = document.querySelector('.' + HIGHLIGHT_CLASS);
+                    if (first) {
+                        first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }, 400);
+            }
+
+            /* Auto-remove highlights after duration */
+            setTimeout(function() {
+                document.querySelectorAll('.' + HIGHLIGHT_CLASS).forEach(function(el) {
+                    el.classList.add('agent-highlight-fade');
+                    setTimeout(function() {
+                        el.classList.remove(HIGHLIGHT_CLASS, 'agent-highlight-fade');
+                    }, 500);
+                });
+            }, HIGHLIGHT_DURATION);
+
+            /* Scroll to first highlighted element (for non-model types) */
+            if (type !== 'model') {
+                setTimeout(function() {
+                    var first = document.querySelector('.' + HIGHLIGHT_CLASS);
+                    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 200);
+            }
+        }, 600);
+
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('agent-highlight-store', 'id'),
+    Input('agent-highlight-store', 'data'),
     prevent_initial_call=True
 )
 
@@ -939,7 +1114,9 @@ AGENT_SYSTEM_PROMPT = (
 
     "== ACTIONS YOU CAN TAKE ==\n"
     "When the user asks you to DO something (show, navigate, adjust, compare, plot, set, change, etc.), "
-    "respond with a JSON block containing actions, followed by your explanation.\n\n"
+    "respond with a JSON block containing actions, followed by your explanation.\n"
+    "Actions work from ANY page — the agent will auto-navigate to /dashboard if needed.\n"
+    "Elements affected by actions get a purple highlight so the user can immediately see what changed.\n\n"
     "Available action types:\n\n"
     "1. navigate_tab — Switch to a tab.\n"
     "   {\"type\": \"navigate_tab\", \"tab\": \"data|model|scenario\"}\n\n"
@@ -948,11 +1125,11 @@ AGENT_SYSTEM_PROMPT = (
     "   IMPORTANT: Every set_scenario_sliders action automatically RESETS all sliders to baseline first,\n"
     "   then applies only the specified changes. This means each scenario request starts clean — you do NOT\n"
     "   need to emit a separate reset_scenario action before setting sliders.\n"
-    "   Automatically navigates to Scenario tab.\n"
+    "   Automatically navigates to Scenario tab. Changed sliders get a purple highlight.\n"
     "   {\"type\": \"set_scenario_sliders\", \"values\": {\"VIX\": \"+10%\", \"GOLD_PRICE\": 2500}}\n\n"
     "3. select_predictors — Select variables for the TIME SERIES chart (overlaid on shared date axis).\n"
     "   Always include ZAR_USD along with the requested variables so the user can see the exchange rate.\n"
-    "   Automatically navigates to Data tab and sets plot mode to timeseries.\n"
+    "   Automatically navigates to Data tab and sets plot mode to timeseries. Selected variables get highlighted.\n"
     "   {\"type\": \"select_predictors\", \"variables\": [\"ZAR_USD\", \"VIX\", \"GOLD_PRICE\"]}\n\n"
     "4. set_compare_variables — Select 2 or 3 variables for COMPARE mode (X vs Y, or 3D surface).\n"
     "   Automatically navigates to Data tab and sets plot mode to compare.\n"
@@ -963,6 +1140,22 @@ AGENT_SYSTEM_PROMPT = (
     "   {\"type\": \"set_plot_mode\", \"mode\": \"timeseries|compare|correlation\"}\n\n"
     "6. reset_scenario — Reset all scenario sliders to current baseline values.\n"
     "   {\"type\": \"reset_scenario\"}\n\n"
+    "7. find_scenario — Find predictor values that would produce a target ZAR/USD level.\n"
+    "   Use this when the user asks 'what would it take for ZAR to reach X', 'scenario for R17',\n"
+    "   'how could the rate get to X', 'give me a scenario where ZAR/USD is X', etc.\n"
+    "   The system runs an optimizer to find plausible predictor adjustments. It automatically\n"
+    "   sets the sliders and navigates to the Scenario tab so the user can see the result.\n"
+    "   {\"type\": \"find_scenario\", \"target_level\": 17.0}\n\n"
+    "8. highlight_model — Navigate to Model tab and highlight specific metrics, sections, or info pills.\n"
+    "   Use this when the user asks about specific model performance, metrics, or sections.\n"
+    "   sub_tab: 'predictions' or 'specifications' — auto-switches to the correct sub-tab.\n"
+    "   targets: array of label strings to highlight. Matches against info-pill labels AND card titles.\n"
+    "   Valid pill labels: 'MAE', 'RMSE', 'R²', 'Adjusted R²', 'MAPE', \"Theil's U\", 'Directional Accuracy',\n"
+    "     'Type', 'Alpha (α)', 'Epsilon (ε)', 'Intercept (β₀)', 'Scale (σ̂)', 'Features', 'Training / Test',\n"
+    "     'Target', 'Spot', 'Fair Value (Now)', '1M Pt / FV', '3M Pt / FV', '6M Pt / FV'.\n"
+    "   Valid card-level targets: 'forecast', 'contributions', 'diagnostics', 'specification'.\n"
+    "   {\"type\": \"highlight_model\", \"sub_tab\": \"specifications\", \"targets\": [\"MAE\", \"RMSE\", \"R²\"]}\n"
+    "   {\"type\": \"highlight_model\", \"sub_tab\": \"predictions\", \"targets\": [\"forecast\"]}\n\n"
 
     "== RESPONSE FORMAT ==\n"
     "When executing actions, you MUST use this EXACT format:\n"
@@ -1012,10 +1205,39 @@ AGENT_SYSTEM_PROMPT = (
 
     "User: \"Show me the model predictions\"\n"
     "```json\n"
-    "{\"actions\": [{\"type\": \"navigate_tab\", \"tab\": \"model\"}]}\n"
+    "{\"actions\": [{\"type\": \"highlight_model\", \"sub_tab\": \"predictions\", \"targets\": [\"forecast\"]}]}\n"
     "```\n"
-    "I've navigated to the Model tab where you can see the multi-horizon forecast, feature contributions "
-    "driving the prediction, and the forecast summary.\n\n"
+    "I've navigated to the Model tab and highlighted the forecast table. You can see the multi-horizon "
+    "point estimates and fair values for 1M, 3M, and 6M horizons.\n\n"
+
+    "User: \"What's the MAE and R² of the model?\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"highlight_model\", \"sub_tab\": \"specifications\", \"targets\": [\"MAE\", \"R²\"]}]}\n"
+    "```\n"
+    "I've highlighted the MAE and R² metrics on the Specifications sub-tab. The out-of-sample MAE is "
+    "R X.XXXX and R² is X.XXXX — use the actual values from context.\n\n"
+
+    "User: \"What's driving the forecast?\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"highlight_model\", \"sub_tab\": \"predictions\", \"targets\": [\"contributions\"]}]}\n"
+    "```\n"
+    "I've highlighted the feature contributions chart. It shows which macro signals are pushing ZAR/USD "
+    "up (weakening ZAR) or down (strengthening ZAR) relative to the random-walk anchor.\n\n"
+
+    "User: \"Give me a scenario for ZAR/USD to be 17 rand\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"find_scenario\", \"target_level\": 17.0}]}\n"
+    "```\n"
+    "I've run the optimizer to find predictor values that would push ZAR/USD toward R 17.00. "
+    "The sliders have been set to the found values on the Scenario tab — check the waterfall chart "
+    "to see which drivers contribute most to this move.\n\n"
+
+    "User: \"What would it take for the rand to reach 20?\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"find_scenario\", \"target_level\": 20.0}]}\n"
+    "```\n"
+    "I've searched for a plausible combination of macro conditions that would push ZAR/USD to R 20.00. "
+    "The scenario sliders now show the required changes.\n\n"
 
     "User: \"Stress test: VIX at 40 with gold dropping to 1800\"\n"
     "```json\n"
@@ -1025,12 +1247,38 @@ AGENT_SYSTEM_PROMPT = (
     "environment with declining gold — check the waterfall chart for how each factor contributes to the "
     "ZAR/USD change.\n\n"
 
+    "User: \"What is the one month ahead forecast?\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"highlight_model\", \"sub_tab\": \"predictions\", \"targets\": [\"forecast\", \"1M Pt / FV\"]}]}\n"
+    "```\n"
+    "I've navigated to the Model tab and highlighted the forecast table. The 1-month ahead point estimate "
+    "is R X.XXXX with a fair value of R X.XXXX — use actual numbers from context.\n\n"
+
+    "User: \"How accurate is this model?\"\n"
+    "```json\n"
+    "{\"actions\": [{\"type\": \"highlight_model\", \"sub_tab\": \"specifications\", \"targets\": [\"MAE\", \"RMSE\", \"R²\", \"Directional Accuracy\"]}]}\n"
+    "```\n"
+    "I've highlighted the key accuracy metrics. The model achieves an MAE of R X.XXXX, R² of X.XXXX, "
+    "and correctly predicts direction X% of the time — use actual values from context.\n\n"
+
     "User: \"What is the current ZAR/USD rate?\"\n"
     "(no JSON block — just answer using numbers from DASHBOARD STATE)\n\n"
 
     "== IMPORTANT RULES ==\n"
     "- ALWAYS emit actions when the user asks to DO something (show, navigate, adjust, set, compare, plot, "
     "change, reset, stress test, etc.)\n"
+    "- ALWAYS emit a highlight_model action when the user ASKS ABOUT any model output, even as a question.\n"
+    "  This includes: forecast, prediction, 1-month/3-month/6-month ahead, fair value, point estimate,\n"
+    "  what the model says, MAE, RMSE, R², accuracy, Theil's U, feature contributions, what's driving,\n"
+    "  diagnostics, residuals, model performance, model specification, intercept, coefficients.\n"
+    "  You MUST navigate to the model tab AND highlight the relevant section — do NOT just answer in text.\n"
+    "  Example: 'what is the 1 month forecast?' → highlight_model with sub_tab=predictions, targets=[forecast]\n"
+    "  Example: 'how accurate is the model?' → highlight_model with sub_tab=specifications, targets=[MAE, R², Directional Accuracy]\n"
+    "  Example: 'what's pushing the rate up?' → highlight_model with sub_tab=predictions, targets=[contributions]\n"
+    "  After emitting the action, ALSO answer the question with specific numbers from DASHBOARD STATE.\n"
+    "- When the user specifies a TARGET ZAR/USD level ('scenario for R17', 'what would it take to reach 20',\n"
+    "  'how could the rate get to X', 'conditions for ZAR at X'), use find_scenario with that level.\n"
+    "  This is different from set_scenario_sliders where the user specifies predictor values directly.\n"
     "- 'show X and Y' / 'overlay X and Y' → select_predictors (time series, shared date axis)\n"
     "- 'X vs Y' / 'X versus Y' / 'X against Y' / 'scatter X and Y' → set_compare_variables (compare mode)\n"
     "- 'correlation' / 'heatmap' / 'correlations' → set_plot_mode correlation\n"
@@ -1192,6 +1440,43 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
         # In agent mode, parse out actions
         if agent_mode:
             actions, display_msg = _parse_agent_response(ai_text)
+
+            # Handle find_scenario: run solver server-side, replace with set_scenario_sliders
+            resolved_actions = []
+            for a in actions:
+                if a.get('type') == 'find_scenario':
+                    try:
+                        from logic.model import find_scenario_for_target
+                        target = float(a.get('target_level', 0))
+                        result = find_scenario_for_target(target)
+                        # Replace with set_scenario_sliders using the found values
+                        resolved_actions.append({
+                            'type': 'set_scenario_sliders',
+                            'values': {k: round(v, 4) for k, v in result['scenario_values'].items()},
+                        })
+                        # Enrich the display message with solver results
+                        achieved = result['achieved_level']
+                        gap = result['gap']
+                        changes = result.get('changes', [])
+                        solver_summary = f"Target: R {target:.2f} | Achieved: R {achieved:.4f}"
+                        if gap > 0.01:
+                            solver_summary += f" (gap: R {gap:.4f})"
+                        if not result['feasible']:
+                            solver_summary += " — this target may be outside the model's reachable range."
+                        if changes:
+                            parts = []
+                            for ch in changes:
+                                parts.append(f"{ch['predictor']}: {ch['current']:.2f} → {ch['scenario']:.2f} ({ch['change_pct']:+.1f}%)")
+                            solver_summary += "\nKey changes: " + ", ".join(parts)
+                        # Prepend solver results to display message
+                        display_msg = solver_summary + "\n\n" + display_msg
+                    except Exception as solver_err:
+                        print(f"[Solver Error] {solver_err}")
+                        display_msg = f"Could not find a scenario for that target: {solver_err}"
+                else:
+                    resolved_actions.append(a)
+            actions = resolved_actions
+
             if actions:
                 import time
                 agent_actions = {'actions': actions, 'ts': time.time()}
@@ -1219,6 +1504,13 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
                         action_chips.append(f"Plot mode → {mode_labels.get(a.get('mode', ''), a.get('mode', ''))}")
                     elif atype == 'reset_scenario':
                         action_chips.append("Reset scenario")
+                    elif atype == 'highlight_model':
+                        targets = a.get('targets', [])
+                        sub = a.get('sub_tab', 'predictions').title()
+                        action_chips.append(f"Model → {sub}: {', '.join(targets)}")
+                    elif atype == 'find_scenario':
+                        target = a.get('target_level', '?')
+                        action_chips.append(f"Find scenario → R {target}")
 
                 # Show action chips + message
                 current_messages.append(
