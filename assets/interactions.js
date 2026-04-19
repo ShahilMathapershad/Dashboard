@@ -15,9 +15,52 @@ const MIN_RESIZE_MS = 180;
 
 document.addEventListener('DOMContentLoaded', () => {
 
-    /* ── Login: Enter key ───────────────────────────────────────────────── */
+    /* ── Mobile: disable Three.js 3D scene on phones/tablets ───────────── */
+    const disableThreeOnMobile = () => {
+        const isMobile = window.innerWidth <= 1024 ||
+                         ('ontouchstart' in window && window.innerWidth <= 1280);
+        if (!isMobile) return;
+
+        // Prevent the Three.js scene from ever initializing by removing its container
+        const threeContainer = document.getElementById('three-canvas-landing');
+        if (threeContainer) {
+            // Remove any existing canvas (if Three.js already started)
+            const canvas = threeContainer.querySelector('canvas');
+            if (canvas) canvas.remove();
+            // Destroy the scene instance if it exists
+            if (window.DashScenes && window.DashScenes.landingScene) {
+                try { window.DashScenes.landingScene.destroy(); } catch (_) {}
+                window.DashScenes.landingScene = null;
+            }
+            // Mark container so Three.js index.ts skips init (rect will be 0x0)
+            threeContainer.style.display = 'none';
+        }
+
+        // Also hide floating particle labels on small phones — they overlap content
+        if (window.innerWidth <= 768) {
+            const particles = document.querySelector('.particles-container');
+            if (particles) particles.style.display = 'none';
+        }
+    };
+    disableThreeOnMobile();
+    // Also handle orientation changes
+    window.addEventListener('resize', () => { disableThreeOnMobile(); }, { passive: true });
+
+    /* ── Login: Enter key + prevent native form submit ───────────────────── */
     const handleLoginEnterKey = () => {
         const bind = () => {
+            // Prevent native form submission on all Dash forms (would reload the page)
+            document.querySelectorAll('#login-form, #register-form').forEach((form) => {
+                if (form.dataset.bound) return;
+                form.dataset.bound = 'true';
+                form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    // Click the submit button inside this form
+                    const btn = form.querySelector('button');
+                    if (btn) btn.click();
+                });
+            });
+
             const user = document.getElementById('username');
             const pass = document.getElementById('password');
             const btn  = document.getElementById('login-button');
@@ -212,29 +255,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* ── Stage: spring entrance on page load ────────────────────────────── */
     const initStageEntrance = () => {
-        // Only run once on first visit — if Dash SPA navigates back, skip
-        const landing = document.getElementById('landing-stage');
-        if (!landing || landing.dataset.entered) return;
+        const run = () => {
+            const landing = document.getElementById('landing-stage');
+            if (!landing || landing.dataset.entered) return true; // done or already ran
 
-        // Only animate if the stage is actually visible (has stage-active or no class yet)
-        const isActive = landing.classList.contains('stage-active') ||
-                         (!landing.classList.contains('stage-hidden'));
-        if (!isActive) return;
+            // Only animate if the stage is actually visible (has stage-active or no class yet)
+            const isActive = landing.classList.contains('stage-active') ||
+                             (!landing.classList.contains('stage-hidden'));
+            if (!isActive) return true; // wrong state, don't retry
 
-        landing.dataset.entered = 'true';
-        landing.style.opacity = '0';
-        landing.style.transform = 'translateY(16px)';
-        landing.style.willChange = 'opacity, transform';
+            landing.dataset.entered = 'true';
+            landing.style.opacity = '0';
+            landing.style.transform = 'translateY(16px)';
+            landing.style.willChange = 'opacity, transform';
 
-        // Double-rAF ensures paint is committed before transition starts
-        requestAnimationFrame(() => {
+            // Double-rAF ensures paint is committed before transition starts
             requestAnimationFrame(() => {
-                landing.style.transition = `opacity 0.8s ${SPRING}, transform 0.8s ${SPRING}`;
-                landing.style.opacity = '1';
-                landing.style.transform = 'translateY(0)';
-                setTimeout(() => { landing.style.willChange = ''; }, 1000);
+                requestAnimationFrame(() => {
+                    landing.style.transition = `opacity 0.8s ${SPRING}, transform 0.8s ${SPRING}`;
+                    landing.style.opacity = '1';
+                    landing.style.transform = 'translateY(0)';
+                    setTimeout(() => { landing.style.willChange = ''; }, 1000);
+                });
             });
+            return true;
+        };
+
+        // Try immediately, then retry via observer if Dash hasn't rendered yet
+        if (run()) return;
+        let attempts = 0;
+        const obs = new MutationObserver(() => {
+            if (run() || ++attempts > 50) obs.disconnect();
         });
+        obs.observe(document.body, { childList: true, subtree: true });
+        // Hard fallback: force after 3s no matter what
+        setTimeout(() => { obs.disconnect(); run(); }, 3000);
     };
 
     /* ── Slider marks: force-hide white boxes ───────────────────────────── */
@@ -363,6 +418,6 @@ document.addEventListener('DOMContentLoaded', () => {
     observeScrollAnimations();
     setupModeCrossfade();
     setupMobileSidebar();
-    // Deferred — let Dash render the landing stage first
-    setTimeout(initStageEntrance, 50);
+    // Deferred — uses MutationObserver internally to wait for Dash render
+    initStageEntrance();
 });

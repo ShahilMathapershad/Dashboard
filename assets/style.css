@@ -3812,6 +3812,25 @@ p  { margin: 0; color: var(--text-2); }
 .login-stage   { z-index: 10; }
 .particles-container { z-index: 2; }
 
+/* ── Mobile fallback: subtle gradient when Three.js is disabled ── */
+@media (max-width: 1024px) {
+    #three-canvas-landing[style*="display: none"] ~ .landing-stage,
+    #three-canvas-landing[style*="display: none"] ~ .login-stage {
+        /* Ensure stages still look good without 3D */
+    }
+    .login-container::before {
+        /* Enlarge the ambient glow blobs for visual depth on mobile */
+        width: 320px; height: 320px;
+        opacity: 0.3;
+        filter: blur(100px);
+    }
+    .login-container::after {
+        width: 240px; height: 240px;
+        opacity: 0.25;
+        filter: blur(80px);
+    }
+}
+
 /* ── Chart 3D Tilt System ── */
 .chart-3d {
     transform-style: preserve-3d;

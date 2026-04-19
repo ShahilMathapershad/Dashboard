@@ -21,11 +21,17 @@ def layout():
 
                 html.H2("Create Account", className='login-title'),
 
-                dcc.Input(id='reg-username', type='text', placeholder='Username', className='form-input',
-                          autoComplete='off'),
-                dcc.Input(id='reg-password', type='password', placeholder='Password', className='form-input'),
+                html.Form(id='register-form', children=[
+                    dcc.Input(id='reg-username', type='text', placeholder='Username',
+                              className='form-input', autoComplete='username',
+                              name='username'),
+                    dcc.Input(id='reg-password', type='password', placeholder='Password',
+                              className='form-input', autoComplete='new-password',
+                              name='password'),
 
-                html.Button('Register', id='register-button', n_clicks=0, className='login-button'),
+                    html.Button('Register', id='register-button', n_clicks=0,
+                                className='login-button', type='button'),
+                ], style={'margin': '0'}),
 
                 html.Div(id='register-output', className='login-error'),
 

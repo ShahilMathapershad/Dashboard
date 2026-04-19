@@ -91,12 +91,21 @@ def layout():
                 ], style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2.5rem'}),
                 
                 html.H2("Welcome Back", className='login-title'),
-                
-                dcc.Input(id='username', type='text', placeholder='Username', className='form-input', autoComplete='off'),
-                dcc.Input(id='password', type='password', placeholder='Password', className='form-input'),
-                
-                html.Button('Sign In', id='login-button', n_clicks=0, className='login-button data-pulse-btn'),
-                
+
+                html.Form(id='login-form', children=[
+                    dcc.Input(id='username', type='text', placeholder='Username',
+                              className='form-input', autoComplete='username',
+                              name='username'),
+                    dcc.Input(id='password', type='password', placeholder='Password',
+                              className='form-input', autoComplete='current-password',
+                              name='password'),
+
+                    html.Button('Sign In', id='login-button', n_clicks=0,
+                                className='login-button data-pulse-btn',
+                                type='button'),
+                ], style={'margin': '0'},
+                   **{'data-dash-form': 'true'}),
+
                 html.Div(id='login-output', className='login-error'),
                 
                 html.Div([
