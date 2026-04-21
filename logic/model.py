@@ -19,6 +19,8 @@ logger = logging.getLogger("ModelPredictor")
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           'models', 'zar_usd_forecast_model.pkl')
+TRAIN_ONLY_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     'models', 'zar_usd_forecast_model_train_only.pkl')
 
 # The 11 features in the order the pipeline expects
 FEATURE_LIST = [
@@ -429,7 +431,17 @@ def predict_next_month():
         val_actual_arr = val_actual_arr[valid_diag]
         val_pred_arr = val_pred_arr[valid_diag]
 
+        val_dates_raw = val_target.index[valid_diag]
+        val_chart_dates = []
+        for d in val_dates_raw:
+            loc = raw_df.index.get_loc(d)
+            if loc + 1 < len(raw_df):
+                val_chart_dates.append(raw_df.index[loc + 1].strftime('%Y-%m-%d'))
+            else:
+                val_chart_dates.append((d + pd.offsets.MonthEnd(1)).strftime('%Y-%m-%d'))
+
         actual_vs_predicted = {
+            'dates': val_chart_dates,
             'actual': [float(a) for a in val_actual_arr],
             'predicted': [float(p) for p in val_pred_arr],
         }
@@ -790,6 +802,103 @@ def scenario_predict(scenario_values):
         'waterfall': waterfall,
         'scenario_values': {k: round(float(v), 4) for k, v in scenario_values.items()},
     }
+
+
+_test_set_cache = {'result': None, 'time': 0}
+
+
+def get_test_set_predictions():
+    """
+    Load the train-only model and generate actual vs predicted on the held-out test set.
+    The train-only model was trained on 2012-03-31 to 2023-04-30, so the test set
+    is everything from 2023-05-31 onwards.
+
+    Returns a dict with 'dates', 'actual', 'predicted' lists.
+    """
+    import pandas as pd
+    import numpy as np
+    global _test_set_cache
+    now = time.time()
+
+    if _test_set_cache['result'] is not None and (now - _test_set_cache['time'] < 300):
+        return _test_set_cache['result']
+
+    cache_key = "test_set_predictions"
+    cached = _persistent_cache.get(cache_key)
+    if cached is not None:
+        _test_set_cache = {'result': cached, 'time': now}
+        return cached
+
+    if JOBLIB_IMPORT_ERROR is not None:
+        raise RuntimeError("Model dependencies unavailable.") from JOBLIB_IMPORT_ERROR
+    if not os.path.exists(TRAIN_ONLY_MODEL_PATH):
+        raise FileNotFoundError(f"Train-only model not found: {TRAIN_ONLY_MODEL_PATH}")
+
+    loaded = joblib.load(TRAIN_ONLY_MODEL_PATH)
+    pipeline = loaded['pipeline']
+    feature_names = loaded['feature_list']
+    training_range = loaded.get('training_date_range', ())
+
+    # Determine train end date
+    if training_range and len(training_range) >= 2:
+        train_end = pd.Timestamp(training_range[1])
+    else:
+        train_end = pd.Timestamp('2023-04-30')
+
+    raw_df = fetch_data_from_supabase()
+    df_features, _ = engineer_features(raw_df)
+
+    # Target: S_{t+1} = raw_df['ZAR_USD'].shift(-1) aligned to feature dates
+    target = raw_df['ZAR_USD'].shift(-1)
+    target_aligned = target.reindex(df_features.index).dropna()
+
+    # Filter to test set: feature dates after train_end
+    test_mask = target_aligned.index > train_end
+    test_target = target_aligned[test_mask]
+
+    if test_target.empty:
+        raise ValueError("No test data available after training period.")
+
+    test_features = df_features.loc[test_target.index, feature_names]
+    test_pred = pipeline.predict(test_features)
+    test_actual = test_target.values
+
+    valid = ~(np.isnan(test_actual) | np.isnan(test_pred))
+    test_actual = test_actual[valid]
+    test_pred = test_pred[valid]
+    test_dates_raw = test_target.index[valid]
+
+    # Chart dates = prediction dates (one month after feature date)
+    chart_dates = []
+    for d in test_dates_raw:
+        loc = raw_df.index.get_loc(d)
+        if loc + 1 < len(raw_df):
+            chart_dates.append(raw_df.index[loc + 1])
+        else:
+            chart_dates.append(d + pd.offsets.MonthEnd(1))
+
+    # Metrics on test set
+    mae = float(np.mean(np.abs(test_actual - test_pred)))
+    rmse = float(np.sqrt(np.mean((test_actual - test_pred) ** 2)))
+    ss_res = np.sum((test_actual - test_pred) ** 2)
+    ss_tot = np.sum((test_actual - np.mean(test_actual)) ** 2)
+    r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+    result = {
+        'dates': [d.strftime('%Y-%m-%d') for d in chart_dates],
+        'actual': [float(v) for v in test_actual],
+        'predicted': [float(v) for v in test_pred],
+        'n_obs': len(test_actual),
+        'train_end': train_end.strftime('%Y-%m-%d'),
+        'mae': round(mae, 4),
+        'rmse': round(rmse, 4),
+        'r2': round(r2, 4),
+    }
+
+    _test_set_cache = {'result': result, 'time': now}
+    _persistent_cache.set(cache_key, result, expire=300)
+    logger.info("get_test_set_predictions: computed %d test observations", len(test_actual))
+    return result
 
 
 def find_scenario_for_target(target_level):

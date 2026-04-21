@@ -9,7 +9,8 @@ from logic.data_fetcher import (
 )
 from logic.model import (predict_next_month, fetch_data_from_supabase, get_scenario_baseline,
                          scenario_predict, get_friendly_feature_name as model_get_friendly_name,
-                         get_coefficient_unit as model_get_coef_unit, get_feature_category)
+                         get_coefficient_unit as model_get_coef_unit, get_feature_category,
+                         get_test_set_predictions)
 import pandas as pd
 import plotly.graph_objects as go
 import traceback
@@ -305,6 +306,14 @@ def model_tab_content(existing_model_data=None):
                     html.P('Architecture, hyperparameters, and out-of-sample test metrics.',
                            className='card-subtitle'),
                     html.Div(id='model-info-content'),
+                ]),
+
+                # Out-of-Sample Test Set Chart
+                html.Div(className='model-card', children=[
+                    html.H4('Out-of-Sample Test Performance', className='card-title'),
+                    html.P('Actual vs predicted ZAR/USD on the held-out test set (post-training period).',
+                           className='card-subtitle'),
+                    html.Div(id='test-set-chart-container'),
                 ]),
 
                 # Diagnostic Plots Section
@@ -1870,52 +1879,69 @@ def _build_diagnostic_plots(diagnostics_data, theme):
     if avp_data and avp_data.get('actual') and avp_data.get('predicted'):
         avp_fig = go.Figure()
 
+        dates = avp_data.get('dates', list(range(len(avp_data['actual']))))
         actual = avp_data['actual']
         predicted = avp_data['predicted']
-        
+        font_family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif"
+
         avp_fig.add_trace(go.Scatter(
-            x=actual,
-            y=predicted,
-            mode='markers',
-            marker=dict(color='#5b8def', size=8, opacity=0.7, 
-                        line=dict(width=1, color='rgba(255,255,255,0.1)' if is_dark else 'rgba(0,0,0,0.1)')),
-            name='Observations',
-            hovertemplate='Actual: R %{x:.4f}<br>Predicted: R %{y:.4f}<extra></extra>'
+            x=dates, y=actual,
+            name='Actual',
+            mode='lines+markers',
+            line=dict(color='#E8E8E8' if is_dark else '#1A1A1A', width=2.5, shape='spline'),
+            marker=dict(size=5, color='#E8E8E8' if is_dark else '#1A1A1A'),
+            hovertemplate='<b>Actual</b>: R %{y:.4f}<br>%{x}<extra></extra>',
         ))
 
-        min_val = min(min(actual), min(predicted)) * 0.98
-        max_val = max(max(actual), max(predicted)) * 1.02
-        
         avp_fig.add_trace(go.Scatter(
-            x=[min_val, max_val],
-            y=[min_val, max_val],
-            mode='lines',
-            line=dict(color='#EF4444', width=2, dash='dash'),
-            name='Ideal (y=x)',
-            hoverinfo='skip'
+            x=dates, y=predicted,
+            name='Predicted',
+            mode='lines+markers',
+            line=dict(color='#5b8def', width=2.5, shape='spline', dash='dot'),
+            marker=dict(size=5, color='#5b8def', symbol='diamond'),
+            hovertemplate='<b>Predicted</b>: R %{y:.4f}<br>%{x}<extra></extra>',
+        ))
+
+        avp_fig.add_trace(go.Scatter(
+            x=dates + dates[::-1],
+            y=actual + predicted[::-1],
+            fill='toself',
+            fillcolor='rgba(91,141,239,0.08)' if is_dark else 'rgba(91,141,239,0.12)',
+            line=dict(width=0),
+            hoverinfo='skip',
+            showlegend=False,
         ))
 
         avp_fig.update_layout(
             template=None,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=56, r=24, t=32, b=48),
+            autosize=True,
+            margin=dict(l=60, r=30, t=30, b=60),
             height=400,
-            font=dict(family="Inter, sans-serif", size=12, color=text_color),
+            font=dict(family=font_family, size=12, color=text_color),
+            modebar=dict(bgcolor='rgba(0,0,0,0)', color=text_muted,
+                         activecolor='#5b8def' if is_dark else '#4f7df3', orientation='v'),
             legend=dict(
                 orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
                 font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
             ),
-            hovermode="closest",
+            hovermode="x unified",
+            hoverlabel=dict(
+                bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
+                font_size=12, font_family="Inter", font_color=text_color,
+                bordercolor=line_color, namelength=-1,
+            ),
             xaxis=dict(
-                title='Actual ZAR / USD',
-                showgrid=True, gridwidth=1, gridcolor=grid_color,
+                title=dict(text='Date', font=dict(size=11, color=text_muted)),
+                showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+                zeroline=False, showline=True, linewidth=1, linecolor=line_color,
                 tickfont=dict(size=10, color=text_muted),
-                tickformat=".2f",
             ),
             yaxis=dict(
-                title='Predicted ZAR / USD',
-                showgrid=True, gridwidth=1, gridcolor=grid_color,
+                title=dict(text='ZAR / USD', font=dict(size=11, color=text_muted)),
+                showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+                zeroline=False, showline=True, linewidth=1, linecolor=line_color,
                 tickfont=dict(size=10, color=text_muted),
                 tickformat=".2f",
             ),
@@ -1924,7 +1950,7 @@ def _build_diagnostic_plots(diagnostics_data, theme):
         avp_plot = html.Div(className='diagnostic-plot-container', children=[
             html.H5('Actual vs Predicted ZAR/USD (Validation Set)',
                     style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
-            html.P('Points should cluster around the diagonal line for accurate level predictions',
+            html.P('Time series comparison of model predictions against realised exchange rates.',
                    style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '12px'}),
             dcc.Graph(id='diag-avp-plot', figure=avp_fig.to_dict(), style={'height': '400px'},
                       config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
@@ -2025,6 +2051,125 @@ def render_diagnostics(prediction_data, active_tab, theme):
         return dash.no_update
     diagnostics_data = result.get('diagnostics', {})
     return _build_diagnostic_plots(diagnostics_data, theme)
+
+
+@callback(
+    Output('test-set-chart-container', 'children'),
+    Input('dashboard-tab', 'data'),
+    Input('model-sub-tab', 'data'),
+    State('theme-store', 'data'),
+    prevent_initial_call='initial_duplicate'
+)
+def render_test_set_chart(active_tab, sub_tab, theme):
+    if active_tab != 'model' or sub_tab != 'specifications':
+        return dash.no_update
+
+    try:
+        test_data = get_test_set_predictions()
+    except Exception as e:
+        return html.P(f'Unable to load test set data: {e}',
+                      style={'color': 'var(--text-muted)', 'textAlign': 'center', 'padding': '20px'})
+
+    dates = test_data['dates']
+    actual = test_data['actual']
+    predicted = test_data['predicted']
+
+    is_dark = (theme == 'dark') if theme else True
+    text_color = '#f5f5f7' if is_dark else '#1d1d1f'
+    text_muted = '#86868b' if is_dark else '#6e6e73'
+    grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
+    line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
+    font_family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif"
+
+    fig = go.Figure()
+
+    # Actual line
+    fig.add_trace(go.Scatter(
+        x=dates, y=actual,
+        name='Actual',
+        mode='lines+markers',
+        line=dict(color='#E8E8E8' if is_dark else '#1A1A1A', width=2.5, shape='spline'),
+        marker=dict(size=5, color='#E8E8E8' if is_dark else '#1A1A1A'),
+        hovertemplate='<b>Actual</b>: R %{y:.4f}<br>%{x}<extra></extra>',
+    ))
+
+    # Predicted line
+    fig.add_trace(go.Scatter(
+        x=dates, y=predicted,
+        name='Predicted',
+        mode='lines+markers',
+        line=dict(color='#5b8def', width=2.5, shape='spline', dash='dot'),
+        marker=dict(size=5, color='#5b8def', symbol='diamond'),
+        hovertemplate='<b>Predicted</b>: R %{y:.4f}<br>%{x}<extra></extra>',
+    ))
+
+    # Error shading between actual and predicted
+    fig.add_trace(go.Scatter(
+        x=dates + dates[::-1],
+        y=actual + predicted[::-1],
+        fill='toself',
+        fillcolor='rgba(91,141,239,0.08)' if is_dark else 'rgba(91,141,239,0.12)',
+        line=dict(width=0),
+        hoverinfo='skip',
+        showlegend=False,
+    ))
+
+    fig.update_layout(
+        template=None,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        autosize=True,
+        font=dict(family=font_family, size=12, color=text_color),
+        modebar=dict(bgcolor='rgba(0,0,0,0)', color=text_muted,
+                     activecolor='#5b8def' if is_dark else '#4f7df3', orientation='v'),
+        margin=dict(l=60, r=30, t=30, b=60),
+        height=420,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+            font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
+        ),
+        hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
+            font_size=12, font_family="Inter", font_color=text_color,
+            bordercolor=line_color, namelength=-1,
+        ),
+        xaxis=dict(
+            title=dict(text='Date', font=dict(size=11, color=text_muted)),
+            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+            zeroline=False, showline=True, linewidth=1, linecolor=line_color,
+            tickfont=dict(size=10, color=text_muted),
+        ),
+        yaxis=dict(
+            title=dict(text='ZAR / USD', font=dict(size=11, color=text_muted)),
+            showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
+            zeroline=False, showline=True, linewidth=1, linecolor=line_color,
+            tickfont=dict(size=10, color=text_muted),
+            tickformat=".2f",
+        ),
+    )
+
+    # Metrics summary pills
+    metrics_row = html.Div(className='model-info-grid', style={'marginTop': '16px'}, children=[
+        _info_pill('Test Observations', str(test_data['n_obs']),
+                   f"Held-out data from {test_data['train_end']} onwards."),
+        _info_pill('MAE', f"ZAR {test_data['mae']:.4f}",
+                   'Mean Absolute Error on the out-of-sample test set.'),
+        _info_pill('RMSE', f"ZAR {test_data['rmse']:.4f}",
+                   'Root Mean Squared Error on the out-of-sample test set.'),
+        _info_pill('R²', f"{test_data['r2']:.4f}",
+                   'Proportion of test-set variance explained by the train-only model.'),
+    ])
+
+    return html.Div(children=[
+        dcc.Graph(
+            id='test-set-avp-chart',
+            figure=fig.to_dict(),
+            style={'height': '420px'},
+            config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True},
+        ),
+        metrics_row,
+    ])
 
 
 def _info_pill(label, value, description=None):
