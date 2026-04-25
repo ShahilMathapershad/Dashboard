@@ -24,10 +24,10 @@ def layout():
                 html.Form(id='register-form', children=[
                     dcc.Input(id='reg-username', type='text', placeholder='Username',
                               className='form-input', autoComplete='username',
-                              name='username', debounce=True),
+                              name='username'),
                     dcc.Input(id='reg-password', type='password', placeholder='Password',
                               className='form-input', autoComplete='new-password',
-                              name='password', debounce=True),
+                              name='password'),
 
                     html.Button('Register', id='register-button', n_clicks=0,
                                 className='login-button', type='button'),
@@ -49,7 +49,11 @@ def layout():
     ])
 
 
+import logging
 from logic.supabase_client import get_supabase
+
+logger = logging.getLogger("Registration")
+
 
 @callback(
     Output('register-output', 'children'),
@@ -64,34 +68,37 @@ def register_user(n_clicks, username, password):
         if not username or not password:
             return "Please enter both username and password", {}
 
+        username = username.strip()
+
+        if len(username) < 3:
+            return "Username must be at least 3 characters.", {}
+
+        if len(password) < 6:
+            return "Password must be at least 6 characters.", {}
+
         supabase = get_supabase()
         if not supabase:
-            return "System error: Supabase connection not established.", {}
+            return "Unable to connect. Please try again later.", {}
 
         try:
-            # Check if username exists
-            print(f"--- Registration: Checking if username '{username}' exists ---")
             response = supabase.table('users').select("username").eq('username', str(username)).execute()
-            
+
             if response.data:
-                print(f"--- Registration: Username '{username}' already exists ---")
                 return "Username already exists. Please choose another one.", {}
 
-            # Insert new user
-            print(f"--- Registration: Inserting new user '{username}' ---")
             supabase.table('users').insert({
-                "username": str(username), 
+                "username": str(username),
                 "password": str(password)
             }).execute()
 
-            print(f"--- Registration: Successfully inserted user '{username}' ---")
+            logger.info("Registration successful for '%s'", username)
             return "Registration successful! You can now log in.", {
                 'color': '#4ade80',
                 'background': 'rgba(34, 197, 94, 0.1)',
                 'border': '1px solid rgba(34, 197, 94, 0.2)'
             }
         except Exception as e:
-            print(f"--- Registration Error: {str(e)} ---")
-            return f"System error: {str(e)}", {}
+            logger.error("Registration error: %s", e)
+            return "Unable to complete registration. Please try again later.", {}
 
     return "", {}

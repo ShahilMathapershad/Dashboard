@@ -1,6 +1,7 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State
 from logic.supabase_client import get_supabase
+from logic.session import verify_session
 import datetime
 
 dash.register_page(__name__, path='/profile')
@@ -146,6 +147,10 @@ def populate_profile(session_data):
 def update_password(n_clicks, current_pw, new_pw, confirm_pw, session_data):
     no_clear = (dash.no_update, dash.no_update, dash.no_update)
 
+    # Verify HMAC token before any state-changing work — don't trust username alone.
+    if not verify_session(session_data):
+        return 'Session expired. Please log in again.', 'profile-msg error', *no_clear
+
     if not current_pw or not new_pw or not confirm_pw:
         return 'Please fill in all fields.', 'profile-msg error', *no_clear
 
@@ -155,9 +160,7 @@ def update_password(n_clicks, current_pw, new_pw, confirm_pw, session_data):
     if len(new_pw) < 6:
         return 'New password must be at least 6 characters.', 'profile-msg error', *no_clear
 
-    username = (session_data or {}).get('username')
-    if not username:
-        return 'Session expired. Please log in again.', 'profile-msg error', *no_clear
+    username = session_data['username']
 
     supabase = get_supabase()
     if not supabase:
@@ -171,5 +174,5 @@ def update_password(n_clicks, current_pw, new_pw, confirm_pw, session_data):
 
         supabase.table('users').update({'password': new_pw}).eq('username', username).execute()
         return 'Password updated successfully.', 'profile-msg success', '', '', ''
-    except Exception as e:
-        return f'Error: {str(e)}', 'profile-msg error', *no_clear
+    except Exception:
+        return 'Unable to update password. Please try again later.', 'profile-msg error', *no_clear

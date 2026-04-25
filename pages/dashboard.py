@@ -753,6 +753,26 @@ def handle_refresh_click(n_clicks):
     return None, None, n_clicks
 
 
+# Disable the refresh button while a fetch is in flight. Replaces the
+# `running=` parameter that used to live on `fetch_data`.
+dash.clientside_callback(
+    """
+    function(triggerVal, fetchedData) {
+        const ctx = window.dash_clientside.callback_context;
+        if (!ctx.triggered.length) return window.dash_clientside.no_update;
+        const trig = ctx.triggered[0].prop_id;
+        if (trig === 'force-refresh-trigger.data') return true;          // fetch starting
+        if (trig === 'fetched-data.data') return !fetchedData ? true : false;
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('refresh-data-btn', 'disabled'),
+    Input('force-refresh-trigger', 'data'),
+    Input('fetched-data', 'data'),
+    prevent_initial_call=True,
+)
+
+
 # Fetch data using hardcoded API keys
 @callback(
     Output('fetched-data', 'data'),
@@ -768,11 +788,6 @@ def handle_refresh_click(n_clicks):
     State('fetched-data-status', 'data'),
     background=True,
     prevent_initial_call='initial_duplicate',
-    running=[
-        (Output('data-error', 'children'), "", ""),
-        (Output('data-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
-        (Output('refresh-data-btn', 'disabled'), True, False),
-    ],
 )
 def fetch_data(trigger_value, force_refresh, existing_data, existing_options, existing_selected, existing_status):
     import pandas as pd
@@ -1164,7 +1179,8 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         # Truncate long labels
         friendly_names = [n[:20] + '…' if len(n) > 20 else n for n in friendly_names]
 
-        corr = df[numeric_cols].corr()
+        corr = df[numeric_cols].corr(min_periods=12)
+        corr = corr.fillna(0)
         z = corr.values
 
         fig = go.Figure(data=go.Heatmap(
@@ -1332,8 +1348,11 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
     color_idx = 0
 
     def normalize(series):
-        min_val = series.min()
-        max_val = series.max()
+        clean = series.dropna()
+        if clean.empty:
+            return series * 0
+        min_val = clean.min()
+        max_val = clean.max()
         if max_val == min_val:
             return series * 0 + 50
         return ((series - min_val) / (max_val - min_val)) * 100
@@ -1442,10 +1461,6 @@ def get_coefficient_unit(feature_name):
     State('model-prediction-data', 'data'),
     background=True,
     prevent_initial_call='initial_duplicate',
-    running=[
-        (Output('model-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
-        (Output('model-error', 'children'), "", ""),
-    ],
 )
 def fetch_model_prediction(trigger, existing_data):
     if trigger and not existing_data:
@@ -1465,10 +1480,6 @@ def fetch_model_prediction(trigger, existing_data):
     State('scenario-baseline-data', 'data'),
     background=True,
     prevent_initial_call='initial_duplicate',
-    running=[
-        (Output('scenario-loading', 'style'), {'display': 'flex'}, {'display': 'none'}),
-        (Output('scenario-error', 'children'), "", ""),
-    ],
 )
 def fetch_scenario_baseline(trigger, existing_data):
     if trigger and not existing_data:

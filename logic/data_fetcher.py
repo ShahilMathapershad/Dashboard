@@ -1,6 +1,8 @@
 import argparse
+import contextlib
 import os
 import ssl
+import threading
 import time
 import re
 import urllib.request
@@ -12,8 +14,24 @@ from logic.supabase_client import get_supabase
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("DataFetcher")
 
-# Bypass SSL verification for FRED API calls if needed
-ssl._create_default_https_context = ssl._create_unverified_context
+
+# Process-wide lock to serialize the global SSL-context mutation in
+# `_unverified_ssl`. Without it, two concurrent calls would interleave their
+# enter/exit and leave the global stuck in "unverified" mode permanently.
+_ssl_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _unverified_ssl():
+    """Temporarily disable SSL verification for FRED API calls only.
+    Serialized via _ssl_lock so concurrent callers don't corrupt the global."""
+    with _ssl_lock:
+        original = ssl._create_default_https_context
+        ssl._create_default_https_context = ssl._create_unverified_context
+        try:
+            yield
+        finally:
+            ssl._create_default_https_context = original
 
 # Series Configuration
 # Unified names to be used throughout the app
@@ -22,8 +40,6 @@ SERIES_CONFIG = {
     'WUIZAF(SA)': {'source': 'FRED', 'id': 'WUIZAF', 'label': 'World Uncertainty Index for South Africa'},
     '10_YEAR_BOND_RATES(USA)': {'source': 'FRED', 'id': 'GS10', 'label': '10-Year Treasury Constant Maturity Rate (USA)'},
     '10_YEAR_BOND_RATES(SA)': {'source': 'FRED', 'id': 'IRLTLT01ZAM156N', 'label': '10-Year Bond Rate (South Africa)'},
-    'USA_CPI': {'source': 'FRED', 'id': 'CPALTT01USM659N', 'label': 'CPI for All Items for USA'},
-    'SA_CPI_FRED': {'source': 'FRED', 'id': 'CPALTT01ZAM659N', 'label': 'CPI for All Items for South Africa (FRED)'},
     'VIX': {'source': 'FRED', 'id': 'VIXCLS', 'label': 'CBOE Volatility Index (VIX)'},
     'GOLD_PRICE': {'source': 'WORLD_BANK', 'id': 'CMO-Historical-Data-Monthly.xlsx', 'label': 'World Bank Commodity Markets Monthly Gold Price'},
     'BRENT_OIL_PRICE': {'source': 'FRED', 'id': 'POILBREUSDM', 'label': 'Global Price of Brent Crude'},
@@ -60,7 +76,8 @@ def fetch_fred_data(series_dict, api_key=None, start_date='2009-12-31', progress
     
     try:
         logger.info(f"Initializing Fred with API key (length: {len(api_key) if api_key else 0}).")
-        fred = Fred(api_key=api_key)
+        with _unverified_ssl():
+            fred = Fred(api_key=api_key)
     except Exception as e:
         logger.error(f"Error initializing FRED with provided key: {e}")
         return pd.DataFrame()
@@ -73,17 +90,18 @@ def fetch_fred_data(series_dict, api_key=None, start_date='2009-12-31', progress
         try:
             if progress_callback:
                 progress_callback(percent_start, f"Fetching {name}...")
-            
+
             logger.info(f"Fetching FRED series: {name} ({series_id}) starting from {start_date}")
-            s = fred.get_series(series_id, observation_start=start_date)
+            with _unverified_ssl():
+                s = fred.get_series(series_id, observation_start=start_date)
             df = s.to_frame(name=name)
             df_list.append(df)
-            
+
             # Successfully fetched, report updated percentage
             percent_done = int(((i + 1) / total) * 100)
             if progress_callback:
                 progress_callback(percent_done, f"Fetched {name}")
-                
+
             time.sleep(0.5) # Avoid rate limiting
         except Exception as e:
             logger.error(f"Error fetching {series_id} from FRED: {e}")
@@ -333,35 +351,43 @@ def save_to_supabase(df):
             if pd.isna(value):
                 record[key] = None
 
-        # Map app-level inflation keys to the current Supabase column names.
-        if 'usa_inflation' in record:
-            record['US_CPI'] = record.pop('usa_inflation')
-    
     logger.info(f"Saving {len(records)} records to Supabase 'data' table...")
-    
+
     supabase = get_supabase()
     if not supabase:
         logger.error("Supabase client not initialized.")
         return None
-        
+
     try:
         valid_columns = {
-            'Date', 'EPU(USA)', 'WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)', 
-            '10_YEAR_BOND_RATES(SA)', 'VIX', 
+            'Date', 'EPU(USA)', 'WUIZAF(SA)', '10_YEAR_BOND_RATES(USA)',
+            '10_YEAR_BOND_RATES(SA)', 'VIX',
             'GOLD_PRICE', 'BRENT_OIL_PRICE', 'US_CPI', 'SA_INFLATION', 'ZAR_USD'
         }
-        
+
         filtered_records = []
         for record in records:
             filtered_record = {k: v for k, v in record.items() if k in valid_columns}
             filtered_records.append(filtered_record)
 
-        logger.info("Clearing existing data in Supabase...")
-        supabase.table('data').delete().gte('Date', '1900-01-01').execute()
+        # Upsert in chunks — keeps existing rows safe if a chunk fails partway.
+        logger.info("Upserting data into Supabase...")
+        chunk_size = 500
+        for i in range(0, len(filtered_records), chunk_size):
+            chunk = filtered_records[i:i + chunk_size]
+            supabase.table('data').upsert(chunk).execute()
 
-        response = supabase.table('data').upsert(filtered_records).execute()
+        # Bounded prune: drop rows older than the 15-year lookback window. Upsert
+        # by itself never deletes, so without this old rows accumulate forever.
+        try:
+            cutoff = (pd.Timestamp.now() - pd.DateOffset(years=15)).strftime('%Y-%m-%d')
+            supabase.table('data').delete().lt('Date', cutoff).execute()
+            logger.info(f"Pruned rows older than {cutoff}.")
+        except Exception as prune_err:
+            logger.warning(f"Could not prune old rows: {prune_err}")
+
         logger.info("Successfully saved data to Supabase.")
-        return response
+        return None
     except Exception as e:
         logger.error(f"Error saving to Supabase: {e}")
         return None
@@ -383,7 +409,7 @@ def replace_gold_price_column_in_supabase(gold_series):
     gold_df.rename(columns={gold_df.columns[0]: 'Date'}, inplace=True)
     gold_df['Date'] = pd.to_datetime(gold_df['Date'], errors='coerce')
     gold_df['DateKey'] = gold_df['Date'].dt.strftime('%Y-%m-%d')
-    gold_df['Date'] = gold_df['Date'].dt.strftime('%Y-%m-%dT00:00:00+00:00')
+    gold_df['Date'] = gold_df['Date'].dt.strftime('%Y-%m-%d')
     gold_df['GOLD_PRICE'] = pd.to_numeric(gold_df['GOLD_PRICE'], errors='coerce')
     gold_df = gold_df.dropna(subset=['Date', 'DateKey', 'GOLD_PRICE'])
 

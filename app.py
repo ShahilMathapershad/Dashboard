@@ -5,9 +5,9 @@ from flask import Flask
 from dotenv import load_dotenv
 import os
 import sys
+import threading
 import diskcache
 import multiprocess
-import threading
 import pandas as pd
 
 # On Render (Linux), fork is much faster and more memory-efficient.
@@ -35,16 +35,17 @@ if PROJECT_ROOT not in sys.path:
 
 load_dotenv()
 
+from logic.session import make_session_token, verify_session, _SESSION_SECRET
+
 server = Flask(__name__)
+server.secret_key = _SESSION_SECRET
 app = Dash(
     __name__,
     server=server,
     use_pages=True,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    external_scripts=[
-        {'src': '/assets/interactions.js', 'type': 'module'},
-        # three-scenes.js loaded dynamically by interactions.js — only on desktop
-    ],
+    # interactions.js is auto-served from assets/; three-scenes.js is injected
+    # dynamically (desktop only) by interactions.js itself.
     suppress_callback_exceptions=True,
     background_callback_manager=background_callback_manager,
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"}]
@@ -85,7 +86,6 @@ app.layout = html.Div(id='theme-main-container', children=[
     # dashboard background callbacks (registered globally via @callback) can
     # resolve their `allow_duplicate=True` Outputs on non-dashboard pages
     # (e.g. /login) without emitting "nonexistent object" warnings.
-    # Hidden via CSS `.error-message:not(:empty)` until populated.
     html.Div(id='data-error', className='error-message'),
     html.Div(id='model-error', className='error-message'),
     html.Div(id='scenario-error', className='error-message'),
@@ -172,54 +172,24 @@ app.clientside_callback(
     Input('theme-store', 'data'),
 )
 
-# Simplified clientside callback - let JavaScript handle most resize logic
-app.clientside_callback(
-    """
-    function(modelResultsStyle) {
-        // Minimal trigger - let the main JavaScript handler do the work
-        if (modelResultsStyle && modelResultsStyle.display !== 'none') {
-            setTimeout(() => {
-                window.dispatchEvent(new Event('plotlyResize'));
-            }, 100);
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('model-results-container', 'id'), # Dummy output
-    Input('model-results-container', 'style'),
-)
 
-# Simplified clientside callback for data visualization
-app.clientside_callback(
-    """
-    function(dataVizStyle) {
-        // Minimal trigger - let the main JavaScript handler do the work
-        if (dataVizStyle && dataVizStyle.display !== 'none') {
-            setTimeout(() => {
-                window.dispatchEvent(new Event('plotlyResize'));
-            }, 100);
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('zar-graph', 'id'), # Dummy output
-    Input('visualization-container', 'style'),
-)
-
-
-# Global prerender trigger - starts fetching data as soon as the app is accessed
+# Global prerender trigger - starts fetching data as soon as the user is authenticated
+# Also fires when the agent navigates to /dashboard from another page
 @callback(
     Output('fetch-trigger', 'data', allow_duplicate=True),
     Output('model-prediction-trigger', 'data', allow_duplicate=True),
     Output('scenario-trigger', 'data', allow_duplicate=True),
     Input('_pages_location', 'pathname'),
+    Input('user-session', 'data'),
     State('fetch-trigger', 'data'),
     State('model-prediction-trigger', 'data'),
     State('scenario-trigger', 'data'),
     prevent_initial_call=True
 )
-def global_prerender_trigger(pathname, f_trig, m_trig, s_trig):
-    if pathname == '/dashboard' and (f_trig or 0) == 0:
+def global_prerender_trigger(pathname, session_data, f_trig, m_trig, s_trig):
+    # Only fire on /dashboard so downstream UI callbacks (render_model_ui,
+    # sync_scenario_ui) don't try to write to dashboard-only IDs from /login.
+    if pathname == '/dashboard' and verify_session(session_data) and (f_trig or 0) == 0:
         return 1, dash.no_update, dash.no_update
     return dash.no_update, dash.no_update, dash.no_update
 
@@ -256,8 +226,8 @@ def chain_scenario_baseline(model_data, current_trigger):
     prevent_initial_call=True
 )
 def auth_redirection(current_path, session_data):
-    # Determine if user is logged in
-    logged_in = session_data and session_data.get('username')
+    # Determine if user is logged in (verified via HMAC token)
+    logged_in = verify_session(session_data)
     
     # We want to know what triggered the callback
     ctx = dash.callback_context
@@ -275,6 +245,26 @@ def auth_redirection(current_path, session_data):
         pass
             
     return dash.no_update
+
+
+# Wipe user-specific session data on logout. We deliberately DON'T touch
+# fetched-data / model-prediction-data / scenario-baseline-data: those are
+# derived from public macro data (same for every user) and clearing them
+# would cascade through render_model_ui / sync_scenario_ui and emit
+# "nonexistent object" warnings on /login. Chat history and saved scenarios
+# are the only genuinely per-user state.
+@callback(
+    Output('chat-history', 'data', allow_duplicate=True),
+    Output('saved-scenarios', 'data', allow_duplicate=True),
+    Output('scenario-current-values', 'data', allow_duplicate=True),
+    Input('user-session', 'data'),
+    prevent_initial_call=True,
+)
+def clear_data_on_logout(session_data):
+    if session_data is None:
+        return [], [], None
+    return dash.no_update, dash.no_update, dash.no_update
+
 
 # ═══════════════════════════════════════════
 #   Global AI Chatbot — Clientside Callbacks
@@ -758,6 +748,11 @@ app.clientside_callback(
 # ═══════════════════════════════════════════
 
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+if not GOOGLE_API_KEY:
+    print("WARNING: GOOGLE_API_KEY not set — AI chat will be unavailable.")
+
+_genai_client = None
+_genai_client_lock = threading.Lock()
 
 
 def _build_chat_context(fetched_data, selected_predictors, predictor_options, plot_mode, compare_vars,
@@ -839,8 +834,8 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
 
         lines.append(f"\n=== KEY CORRELATIONS ===")
         if 'ZAR_USD' in numeric_cols and len(numeric_cols) > 1:
-            corr = df[numeric_cols].corr()
-            zar_corr = corr['ZAR_USD'].drop('ZAR_USD').sort_values(key=abs, ascending=False)
+            corr = df[numeric_cols].corr(min_periods=12)
+            zar_corr = corr['ZAR_USD'].drop('ZAR_USD').dropna().sort_values(key=abs, ascending=False)
             lines.append("Correlations with ZAR/USD (ranked by |r|):")
             for var, r in zar_corr.items():
                 friendly = label_map.get(var, var)
@@ -1391,6 +1386,10 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
     current_messages = current_messages or []
     chat_history = chat_history or []
 
+    # Cap chat history to prevent unbounded growth in session storage
+    if len(chat_history) > 40:
+        chat_history = chat_history[-40:]
+
     current_messages.append(
         html.Div(className='chat-message chat-message-user', children=[
             html.Div(user_msg, className='chat-bubble chat-bubble-user')
@@ -1411,7 +1410,14 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=GOOGLE_API_KEY)
+        global _genai_client
+        if _genai_client is None:
+            with _genai_client_lock:
+                if _genai_client is None:  # double-checked under lock
+                    if not GOOGLE_API_KEY:
+                        raise ValueError("AI chat is unavailable — GOOGLE_API_KEY not configured.")
+                    _genai_client = genai.Client(api_key=GOOGLE_API_KEY)
+        client = _genai_client
 
         if agent_mode:
             system_instruction = AGENT_SYSTEM_PROMPT + f"\n\nDASHBOARD STATE:\n{full_context}"

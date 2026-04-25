@@ -1,5 +1,6 @@
 import os
 import logging
+import threading
 import time
 import diskcache
 
@@ -69,6 +70,7 @@ _model_cache = {}
 _supabase_data_cache = {'df': None, 'time': 0}
 _engineered_features_cache = {'df_features': None, 'df_raw': None, 'input_hash': None, 'time': 0}
 _predict_next_month_cache = {'result': None, 'time': 0}
+_cache_lock = threading.Lock()
 
 
 def get_friendly_feature_name(feature_name, _transform_type=None):
@@ -164,7 +166,7 @@ def fetch_data_from_supabase():
     if not supabase:
         raise RuntimeError("Supabase client not initialised.")
 
-    resp = supabase.table('data').select('*').order('Date', desc=True).limit(250).execute()
+    resp = supabase.table('data').select('*').order('Date', desc=True).limit(500).execute()
     rows = resp.data or []
     if not rows:
         raise ValueError("No data returned from Supabase.")
@@ -180,7 +182,7 @@ def fetch_data_from_supabase():
     return df.copy()
 
 
-def engineer_features(df):
+def engineer_features(df, bypass_cache=False):
     """
     Build the 11 features for the HuberRegressor model from raw data.
 
@@ -204,13 +206,18 @@ def engineer_features(df):
     global _engineered_features_cache
     now = time.time()
 
-    # Cache check
+    # Cache check (lock-protected). Skip entirely when caller asks to bypass —
+    # used by scenario/iterative paths that mutate the input row and shouldn't
+    # share cache state with the base prediction.
     if not df.empty:
         current_hash = (df.shape, df.iloc[-1].sum(), df.index[-1])
-        if (_engineered_features_cache['df_features'] is not None and
-                _engineered_features_cache['input_hash'] == current_hash and
-                (now - _engineered_features_cache['time'] < 300)):
-            return _engineered_features_cache['df_features'].copy(), _engineered_features_cache['df_raw'].copy()
+        if not bypass_cache:
+            with _cache_lock:
+                cached = _engineered_features_cache
+                if (cached['df_features'] is not None and
+                        cached['input_hash'] == current_hash and
+                        (now - cached['time'] < 300)):
+                    return cached['df_features'].copy(), cached['df_raw'].copy()
     else:
         current_hash = None
 
@@ -264,12 +271,14 @@ def engineer_features(df):
     # Drop rows with NaN (need ~13 months of history for z-score features)
     features.dropna(inplace=True)
 
-    _engineered_features_cache = {
-        'df_features': features,
-        'df_raw': df,
-        'input_hash': current_hash,
-        'time': now,
-    }
+    if not bypass_cache:
+        with _cache_lock:
+            _engineered_features_cache = {
+                'df_features': features,
+                'df_raw': df,
+                'input_hash': current_hash,
+                'time': now,
+            }
 
     return features.copy(), df.copy()
 
@@ -493,13 +502,11 @@ def predict_next_month():
         dynamics. A 3-month lookahead balances responsiveness (different per horizon)
         with stability (smoothed past the initial overshoot).
         """
-        global _engineered_features_cache
         fv_df = fork_df.copy()
         fv_level = float(fv_df['ZAR_USD'].iloc[-1])
         for _ in range(lookahead):
             try:
-                _engineered_features_cache = {'df_features': None, 'df_raw': None, 'input_hash': None, 'time': 0}
-                fv_feat, _ = engineer_features(fv_df)
+                fv_feat, _ = engineer_features(fv_df, bypass_cache=True)
                 if fv_feat.empty:
                     break
                 fv_level = float(pipeline.predict(fv_feat.iloc[[-1]][feature_names])[0])
@@ -519,8 +526,7 @@ def predict_next_month():
     max_h = max(horizons.values())
     for i in range(1, max_h + 1):
         try:
-            _engineered_features_cache = {'df_features': None, 'df_raw': None, 'input_hash': None, 'time': 0}
-            df_feat_iter, _ = engineer_features(iterative_df)
+            df_feat_iter, _ = engineer_features(iterative_df, bypass_cache=True)
             if df_feat_iter.empty:
                 break
 
@@ -751,15 +757,9 @@ def scenario_predict(scenario_values):
         if raw_col in raw_df_scenario.columns:
             raw_df_scenario.loc[last_idx, raw_col] = new_val
 
-    # Clear feature cache so scenario data is re-engineered
-    global _engineered_features_cache
-    saved_cache = _engineered_features_cache.copy()
-    _engineered_features_cache = {'df_features': None, 'df_raw': None, 'input_hash': None, 'time': 0}
-
-    df_features_scen, _ = engineer_features(raw_df_scenario)
-
-    # Restore cache
-    _engineered_features_cache = saved_cache
+    # Bypass cache so the scenario row is freshly engineered without polluting
+    # the shared cache used by the base prediction path.
+    df_features_scen, _ = engineer_features(raw_df_scenario, bypass_cache=True)
 
     X_scen = df_features_scen.iloc[[-1]][feature_names]
     scen_level = float(pipeline.predict(X_scen)[0])
@@ -945,7 +945,7 @@ def find_scenario_for_target(target_level):
         sensitivities[key] = sens
 
     # Iterative greedy descent: nudge predictors proportionally to their sensitivity
-    for iteration in range(50):
+    for iteration in range(30):
         result = scenario_predict(best)
         gap = target_level - result['scenario_level']
 

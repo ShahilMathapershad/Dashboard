@@ -13,6 +13,15 @@ const SPRING  = 'cubic-bezier(0.16, 1, 0.3, 1)';   // Expo-out — snappy, smoot
 const SMOOTH  = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'; // Ease-out sine
 const MIN_RESIZE_MS = 180;
 
+/* ─── Debounce utility — coalesce rapid MutationObserver firings ──────── */
+function debounce(fn, ms) {
+    let timer;
+    return function () {
+        clearTimeout(timer);
+        timer = setTimeout(fn, ms);
+    };
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 
     /* ── Three.js: only load on desktop (never parse 3800-line bundle on mobile) ── */
@@ -58,15 +67,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!user || !pass || !btn) return;
             const onEnter = (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
             // Replace listeners idempotently
-            user.replaceEventListener?.('keydown', onEnter)
-                ?? (user.removeEventListener('keydown', user._loginEnter),
-                   user.addEventListener('keydown', user._loginEnter = onEnter));
-            pass.replaceEventListener?.('keydown', onEnter)
-                ?? (pass.removeEventListener('keydown', pass._loginEnter),
-                   pass.addEventListener('keydown', pass._loginEnter = onEnter));
+            user.removeEventListener('keydown', user._loginEnter);
+            user._loginEnter = onEnter;
+            user.addEventListener('keydown', onEnter);
+            pass.removeEventListener('keydown', pass._loginEnter);
+            pass._loginEnter = onEnter;
+            pass.addEventListener('keydown', onEnter);
         };
         bind();
-        new MutationObserver(bind).observe(document.body, { childList: true, subtree: true });
+        new MutationObserver(debounce(bind, 80)).observe(document.body, { childList: true, subtree: true });
     };
 
     /* ── Plot: fade-in on first render — eliminates white-axes flash ────── */
@@ -103,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const scan = () => document.querySelectorAll('.js-plotly-plot').forEach(setup);
         scan();
-        new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+        new MutationObserver(debounce(scan, 80)).observe(document.body, { childList: true, subtree: true });
 
         // Also re-reveal after every external plotlyResize (figure may have changed)
         window.addEventListener('plotlyResize', () => {
@@ -169,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const observeChips = () => {
         // Skip stagger animation on mobile — chips appear instantly
         if (window.innerWidth <= 1024) return;
-        new MutationObserver(() => {
+        new MutationObserver(debounce(() => {
             document.querySelectorAll('.predictor-checkbox-item:not([data-revealed])').forEach((chip, i) => {
                 chip.dataset.revealed = 'true';
                 chip.style.opacity = '0';
@@ -182,7 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(() => { chip.style.willChange = ''; }, 400);
                 }, i * 30);
             });
-        }).observe(document.body, { childList: true, subtree: true });
+        }, 80)).observe(document.body, { childList: true, subtree: true });
     };
 
     /* ── Landing page: SVG trendline injection (desktop only) ─────────── */
@@ -220,7 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </svg>`;
         };
         inject();
-        new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
+        new MutationObserver(debounce(inject, 80)).observe(document.body, { childList: true, subtree: true });
     };
 
     /* ── Landing: scroll trendline + mouse parallax (desktop only) ────── */
@@ -304,7 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '.rc-slider-mark, .rc-slider-dot, .rc-slider-tooltip, .rc-slider-step'
         ).forEach(kill);
         scan();
-        new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+        new MutationObserver(debounce(scan, 80)).observe(document.body, { childList: true, subtree: true });
     };
 
     /* ── Scroll-triggered fade-in (IntersectionObserver) ───────────────── */
@@ -321,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const attach = () =>
             document.querySelectorAll('.fade-in-up:not(.visible)').forEach(el => io.observe(el));
         attach();
-        new MutationObserver(attach).observe(document.body, { childList: true, subtree: true });
+        new MutationObserver(debounce(attach, 80)).observe(document.body, { childList: true, subtree: true });
     };
 
     /* ── Chart mode crossfade — smooth transition between plot modes ────── */
@@ -405,7 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         bindHamburger();
         // Re-bind after Dash SPA navigation (elements may re-render)
-        new MutationObserver(bindHamburger).observe(document.body, { childList: true, subtree: true });
+        new MutationObserver(debounce(bindHamburger, 80)).observe(document.body, { childList: true, subtree: true });
 
         // Close on nav link tap
         document.addEventListener('click', (e) => {

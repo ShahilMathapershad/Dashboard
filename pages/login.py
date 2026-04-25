@@ -1,8 +1,38 @@
 import dash
+import logging
+import time
+from collections import defaultdict
 from dash import html, dcc, callback, Input, Output, State
 from logic.supabase_client import get_supabase
 
+logger = logging.getLogger("Login")
+
 dash.register_page(__name__, path='/')
+
+# ── Rate limiting (per-username, in-memory) ──
+_login_attempts = defaultdict(list)
+_MAX_ATTEMPTS = 5
+_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _check_rate_limit(username):
+    """Return True if the user is allowed to try again. Purges expired/empty entries."""
+    now = time.time()
+    if username in _login_attempts:
+        fresh = [t for t in _login_attempts[username] if now - t < _WINDOW_SECONDS]
+        if fresh:
+            _login_attempts[username] = fresh
+        else:
+            del _login_attempts[username]
+    return len(_login_attempts.get(username, [])) < _MAX_ATTEMPTS
+
+
+def _record_failed_attempt(username):
+    _login_attempts[username].append(time.time())
+
+
+def _clear_attempts(username):
+    _login_attempts.pop(username, None)
 
 
 def layout():
@@ -95,10 +125,10 @@ def layout():
                 html.Form(id='login-form', children=[
                     dcc.Input(id='username', type='text', placeholder='Username',
                               className='form-input', autoComplete='username',
-                              name='username', debounce=True),
+                              name='username'),
                     dcc.Input(id='password', type='password', placeholder='Password',
                               className='form-input', autoComplete='current-password',
-                              name='password', debounce=True),
+                              name='password'),
 
                     html.Button('Sign In', id='login-button', n_clicks=0,
                                 className='login-button data-pulse-btn',
@@ -150,28 +180,34 @@ def update_stage_classes(stage):
     prevent_initial_call=True
 )
 def login_auth(n_clicks, username, password):
-    print(f"DEBUG: login_auth triggered with n_clicks={n_clicks}")
     if n_clicks > 0:
         if not username or not password:
             return None, "Please enter both username and password"
 
+        username = username.strip()
+
+        # Rate limiting: only blocks if too many recent FAILURES.
+        if not _check_rate_limit(username):
+            return None, "Too many login attempts. Please try again in a few minutes."
+
         supabase = get_supabase()
         if not supabase:
-            return None, "System error: Supabase connection not established."
+            return None, "Unable to connect. Please try again later."
 
         try:
-            # Check credentials in Supabase
-            print(f"--- Login: Checking credentials for '{username}' ---")
             response = supabase.table('users').select("username").eq('username', str(username)).eq('password', str(password)).execute()
 
             if response.data:
-                print(f"--- Login: Successful for '{username}' ---")
-                return {'username': username}, ""
+                logger.info("Login successful for '%s'", username)
+                _clear_attempts(username)
+                from logic.session import make_session_token
+                return {'username': username, 'token': make_session_token(username)}, ""
             else:
-                print(f"--- Login: Failed for '{username}' ---")
+                logger.info("Login failed for '%s'", username)
+                _record_failed_attempt(username)
                 return None, "Invalid credentials. Please try again."
         except Exception as e:
-            print(f"--- Login Error: {str(e)} ---")
-            return None, f"System error: {str(e)}"
+            logger.error("Login error: %s", e)
+            return None, "Unable to connect. Please try again later."
 
     return dash.no_update, dash.no_update
