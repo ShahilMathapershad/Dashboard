@@ -581,8 +581,12 @@ dash.clientside_callback(
     Output('topbar-avatar', 'children'),
     Output('topbar-username', 'children'),
     Input('user-session', 'data'),
+    State('_pages_location', 'pathname'),
 )
-def update_topbar_user(session_data):
+def update_topbar_user(session_data, pathname):
+    # Topbar elements only exist on /dashboard.
+    if pathname != '/dashboard':
+        return dash.no_update, dash.no_update
     if session_data and session_data.get('username'):
         username = session_data['username']
         return username[0].upper(), username
@@ -720,10 +724,14 @@ def _generate_data_table(df_all, mode='raw'):
     Input('fetched-data', 'data'),
     Input('fetched-data-status', 'data'),
     Input('table-view-mode', 'data'),
+    State('_pages_location', 'pathname'),
     prevent_initial_call='initial_duplicate'
 )
-def sync_data_tab_ui(active_tab, data, status_info, table_mode):
-    if active_tab != 'data':
+def sync_data_tab_ui(active_tab, data, status_info, table_mode, pathname):
+    # Outputs only exist on /dashboard. If a Store change fires this callback
+    # while we're elsewhere (e.g. on /login), no-op to avoid "nonexistent object"
+    # warnings.
+    if pathname != '/dashboard' or active_tab != 'data':
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     status_msg = ""
@@ -1503,10 +1511,12 @@ def fetch_scenario_baseline(trigger, existing_data):
     Input('dashboard-tab', 'data'),
     Input('model-prediction-data', 'data'),
     State('theme-store', 'data'),
+    State('_pages_location', 'pathname'),
     prevent_initial_call='initial_duplicate'
 )
-def render_model_ui(active_tab, prediction_data, theme):
-    if active_tab != 'model':
+def render_model_ui(active_tab, prediction_data, theme, pathname):
+    # Outputs only exist on /dashboard. Guard against firing on other pages.
+    if pathname != '/dashboard' or active_tab != 'model':
         return [dash.no_update] * 7
 
     if not prediction_data:
@@ -2224,10 +2234,12 @@ SCENARIO_UNITS = {
     Input('dashboard-tab', 'data'),
     Input('scenario-baseline-data', 'data'),
     State('scenario-current-values', 'data'),
+    State('_pages_location', 'pathname'),
     prevent_initial_call='initial_duplicate'
 )
-def sync_scenario_ui(active_tab, existing_baseline, existing_values):
-    if active_tab != 'scenario':
+def sync_scenario_ui(active_tab, existing_baseline, existing_values, pathname):
+    # Outputs only exist on /dashboard. Guard against firing on other pages.
+    if pathname != '/dashboard' or active_tab != 'scenario':
         return [dash.no_update] * 4
 
     if not existing_baseline:
