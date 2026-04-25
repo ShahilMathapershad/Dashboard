@@ -662,18 +662,14 @@ def _generate_data_table(df_all, mode='raw'):
 
     # Build the display DataFrame
     if mode == 'pct':
-        rows = []
-        for i in range(1, len(df_sorted)):
-            row = {'Date': df_sorted.iloc[i]['Date']}
-            for col in all_vars:
-                prev = df_sorted.iloc[i - 1][col]
-                curr = df_sorted.iloc[i][col]
-                if pd.notna(prev) and pd.notna(curr) and prev != 0:
-                    row[col] = ((curr - prev) / prev) * 100
-                else:
-                    row[col] = None
-            rows.append(row)
-        df_display = pd.DataFrame(rows).sort_values('Date', ascending=False)
+        # Vectorized MoM % change replaces the old O(n²) per-cell iloc scan.
+        # pct_change emits inf when prev==0; coerce to NaN to match the original
+        # `prev != 0` guard.
+        import numpy as np
+        pct_vals = df_sorted[all_vars].pct_change() * 100
+        pct_vals = pct_vals.replace([np.inf, -np.inf], np.nan)
+        df_display = pct_vals.assign(Date=df_sorted['Date']).iloc[1:]
+        df_display = df_display.sort_values('Date', ascending=False)
     else:
         df_display = df_sorted.sort_values('Date', ascending=False)
 
@@ -692,7 +688,9 @@ def _generate_data_table(df_all, mode='raw'):
          for c in col_headers]))
 
     body_rows = []
-    for _, row in df_display.iterrows():
+    # to_dict('records') is several times faster than iterrows() because it
+    # avoids constructing a fresh Series per row.
+    for row in df_display.to_dict('records'):
         tds = [html.Td(row['Date'], style={'fontWeight': '500'})]
         for col in all_vars:
             val = row.get(col)
@@ -1002,11 +1000,11 @@ def download_csv(n_clicks, table_mode):
     df = df.sort_values('Date')
 
     if table_mode == 'pct':
+        # Vectorized pct_change across all numeric columns at once instead of
+        # one column at a time.
         numeric_cols = [c for c in df.columns if c != 'Date']
-        pct_df = df[['Date']].iloc[1:].copy()
-        for col in numeric_cols:
-            pct_df[col] = df[col].pct_change().iloc[1:] * 100
-        pct_df = pct_df.round(4)
+        pct_df = (df[numeric_cols].pct_change() * 100).iloc[1:].round(4)
+        pct_df.insert(0, 'Date', df['Date'].iloc[1:].values)
         return dcc.send_data_frame(pct_df.to_csv, 'zar_usd_pct_changes.csv', index=False)
     else:
         return dcc.send_data_frame(df.to_csv, 'zar_usd_raw_data.csv', index=False)
@@ -1356,11 +1354,11 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
     color_idx = 0
 
     def normalize(series):
-        clean = series.dropna()
-        if clean.empty:
+        # min/max already skip NaN in pandas, so an explicit dropna() copy is redundant.
+        min_val = series.min()
+        max_val = series.max()
+        if pd.isna(min_val) or pd.isna(max_val):
             return series * 0
-        min_val = clean.min()
-        max_val = clean.max()
         if max_val == min_val:
             return series * 0 + 50
         return ((series - min_val) / (max_val - min_val)) * 100

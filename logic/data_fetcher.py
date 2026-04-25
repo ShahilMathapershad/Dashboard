@@ -285,18 +285,9 @@ def process_data(final_df, start_date='2009-12-31', end_date=None):
     except ValueError:
         final_df_monthly = final_df.resample('M').last()
     
-    # Forward fill missing values
-    final_df_monthly = final_df_monthly.ffill()
-    
-    # Backfill any remaining NaN values in the first few rows with the first non-NaN value
-    # Use a more robust approach to handle columns that start with NaN
-    for column in final_df_monthly.columns:
-        # Find the first non-NaN value in the column
-        first_valid_idx = final_df_monthly[column].first_valid_index()
-        if first_valid_idx is not None:
-            first_valid_value = final_df_monthly[column].loc[first_valid_idx]
-            # Fill all NaN values before the first valid value with that value
-            final_df_monthly.loc[:first_valid_idx, column] = first_valid_value
+    # Forward fill missing values, then back-fill any leading NaNs in one
+    # vectorized pass (replaces a per-column first_valid_index loop).
+    final_df_monthly = final_df_monthly.ffill().bfill()
     
     # Filter by date range if provided
     final_df_monthly = final_df_monthly.loc[start_date:end_date]
@@ -497,39 +488,54 @@ def is_last_day_of_month():
     next_day = today + datetime.timedelta(days=1)
     return next_day.month != today.month
 
+_should_update_cache = {'value': None, 'time': 0}
+
+
 def should_update_from_api():
     """
     Decide whether to fetch from APIs or pull from Supabase.
     Returns True if today is the last day of the month AND Supabase doesn't have today's month data yet.
+
+    Result is cached in-process for 5 minutes — without this, every dashboard
+    fetch_data invocation pays a ~100–300ms Supabase round-trip just to learn
+    that the answer is "no, use cached data".
     """
     import pandas as pd
+    now_ts = time.time()
+    if _should_update_cache['value'] is not None and (now_ts - _should_update_cache['time'] < 300):
+        return _should_update_cache['value']
+
     if not is_last_day_of_month():
         logger.info("should_update_from_api: False (not last day of month)")
+        _should_update_cache.update({'value': False, 'time': now_ts})
         return False
-    
+
     supabase = get_supabase()
     if not supabase:
         logger.warning("should_update_from_api: True (no Supabase client)")
+        _should_update_cache.update({'value': True, 'time': now_ts})
         return True
-    
+
     try:
-        # Check the latest date in Supabase
-        # We only need the Date, and we can limit to 1
+        # Check the latest date in Supabase. Only need the Date, limit to 1.
         resp = supabase.table('data').select('Date').order('Date', desc=True).limit(1).execute()
         if not resp.data:
             logger.info("should_update_from_api: True (Supabase empty)")
+            _should_update_cache.update({'value': True, 'time': now_ts})
             return True
-        
+
         latest_date_str = resp.data[0]['Date']
         latest_date = pd.to_datetime(latest_date_str)
-        
+
         today = pd.Timestamp.now()
         # If the latest date in Supabase is already from this month or later, don't re-fetch
         if latest_date.year == today.year and latest_date.month == today.month:
             logger.info(f"should_update_from_api: False (Latest date {latest_date.date()} is already from this month)")
+            _should_update_cache.update({'value': False, 'time': now_ts})
             return False
-            
+
         logger.info(f"should_update_from_api: True (Latest date {latest_date.date()} is old)")
+        _should_update_cache.update({'value': True, 'time': now_ts})
         return True
     except Exception as e:
         logger.error(f"Error checking Supabase for latest date: {e}")

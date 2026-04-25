@@ -44,7 +44,14 @@ document.addEventListener('DOMContentLoaded', () => {
             document.head.appendChild(s);
         }
     };
-    loadThreeIfDesktop();
+    /* Defer the 474KB Three.js bundle until the browser is idle — keeps the
+       first paint snappy on slow networks. Falls back to a 600ms timeout if
+       requestIdleCallback isn't available (older Safari). */
+    if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(loadThreeIfDesktop, { timeout: 1500 });
+    } else {
+        setTimeout(loadThreeIfDesktop, 600);
+    }
 
     /* ── Login: Enter key + prevent native form submit ───────────────────── */
     const handleLoginEnterKey = () => {

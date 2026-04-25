@@ -39,6 +39,36 @@ from logic.session import make_session_token, verify_session, _SESSION_SECRET
 
 server = Flask(__name__)
 server.secret_key = _SESSION_SECRET
+
+
+from flask import request as _flask_request
+
+
+# Cache-Control on /assets/* — lets the browser reuse style.css, interactions.js
+# and three-scenes.js across page navs. Dash already appends an `?m=<mtime>`
+# query-string busting param to asset URLs, so it's safe to override the
+# default `no-cache` and let the browser actually cache them for an hour.
+@server.after_request
+def _cache_static_assets(response):
+    if response.status_code < 400 and _flask_request.path.startswith('/assets/'):
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+    return response
+
+
+# Pre-warm Supabase + model caches in a background thread so the first user
+# request hits hot caches instead of paying the ~500ms Supabase round-trip
+# and ~50ms joblib.load. Runs under gunicorn's --preload so all workers benefit.
+def _warm_caches():
+    try:
+        from logic.model import fetch_data_from_supabase, load_model
+        load_model()
+        fetch_data_from_supabase()
+        print("--- Cache warm: complete ---")
+    except Exception as e:
+        print(f"--- Cache warm: failed ({e}) — first request will populate ---")
+
+
+threading.Thread(target=_warm_caches, daemon=True).start()
 app = Dash(
     __name__,
     server=server,
@@ -89,6 +119,32 @@ app.layout = html.Div(id='theme-main-container', children=[
     html.Div(id='data-error', className='error-message'),
     html.Div(id='model-error', className='error-message'),
     html.Div(id='scenario-error', className='error-message'),
+    # Hidden stubs for dashboard-only IDs that globally-registered callbacks
+    # write to. Without these, dash-renderer logs "nonexistent object" warnings
+    # in the browser console whenever the user is on /login or /registration.
+    # Wrapped in a display:none parent so even when a callback overwrites the
+    # stub's `style` prop, the element stays visually hidden — the real element
+    # in the dashboard layout still gets dispatched to and renders normally.
+    html.Div(style={'display': 'none'}, children=[
+        html.Div(id='data-loading'),
+        html.Div(id='model-loading'),
+        html.Div(id='scenario-loading'),
+        html.Div(id='model-results-container'),
+        html.Div(id='scenario-content'),
+        html.Div(id='visualization-container'),
+        html.Div(id='fetch-status-display'),
+        html.Div(id='data-table-body'),
+        html.Div(id='forecast-table-container'),
+        html.Div(id='feature-contributions'),
+        html.Div(id='model-info-content'),
+        html.Div(id='model-description-content'),
+        html.Div(id='scenario-sliders-container'),
+        html.Div(id='scenario-base-value'),
+        html.Div(id='scenario-base-change'),
+        html.Span(id='topbar-avatar'),
+        html.Span(id='topbar-username'),
+        html.Button(id='refresh-data-btn', n_clicks=0),
+    ]),
 
     # ── Global AI Chat Panel (available on all pages) ──
     html.Div(id='chat-panel', className='chat-panel', children=[
@@ -804,30 +860,38 @@ def _build_chat_context(fetched_data, selected_predictors, predictor_options, pl
             if s.empty:
                 continue
             friendly = label_map.get(col, col)
+            n = len(s)
+            # Compute summary stats in one vectorized pass (was 4 separate scans).
+            s_min = s.min()
+            s_max = s.max()
             latest = s.iloc[-1]
             parts = [f"• {friendly} ({col}): latest={latest:.4f}"]
-            parts.append(f"min={s.min():.4f}, max={s.max():.4f}, mean={s.mean():.4f}, std={s.std():.4f}")
+            parts.append(f"min={s_min:.4f}, max={s_max:.4f}, mean={s.mean():.4f}, std={s.std():.4f}")
 
             trend_parts = []
-            if len(s) >= 2:
-                pct_m = ((s.iloc[-1] - s.iloc[-2]) / abs(s.iloc[-2])) * 100 if s.iloc[-2] != 0 else 0
+            if n >= 2:
+                prev = s.iloc[-2]
+                pct_m = ((latest - prev) / abs(prev)) * 100 if prev != 0 else 0
                 trend_parts.append(f"1M: {pct_m:+.2f}%")
-            if len(s) >= 3:
-                pct_3m = ((s.iloc[-1] - s.iloc[-3]) / abs(s.iloc[-3])) * 100 if s.iloc[-3] != 0 else 0
+            if n >= 3:
+                prev = s.iloc[-3]
+                pct_3m = ((latest - prev) / abs(prev)) * 100 if prev != 0 else 0
                 trend_parts.append(f"3M: {pct_3m:+.2f}%")
-            if len(s) >= 6:
-                pct_6m = ((s.iloc[-1] - s.iloc[-6]) / abs(s.iloc[-6])) * 100 if s.iloc[-6] != 0 else 0
+            if n >= 6:
+                prev = s.iloc[-6]
+                pct_6m = ((latest - prev) / abs(prev)) * 100 if prev != 0 else 0
                 trend_parts.append(f"6M: {pct_6m:+.2f}%")
-            if len(s) >= 12:
-                yoy = ((s.iloc[-1] - s.iloc[-12]) / abs(s.iloc[-12])) * 100 if s.iloc[-12] != 0 else 0
+            if n >= 12:
+                prev = s.iloc[-12]
+                yoy = ((latest - prev) / abs(prev)) * 100 if prev != 0 else 0
                 trend_parts.append(f"12M: {yoy:+.2f}%")
             if trend_parts:
                 parts.append(f"Changes: {', '.join(trend_parts)}")
 
-            # Current position within historical range
-            range_span = s.max() - s.min()
+            # Current position within historical range (reuse min/max from above).
+            range_span = s_max - s_min
             if range_span > 0:
-                percentile = (latest - s.min()) / range_span * 100
+                percentile = (latest - s_min) / range_span * 100
                 parts.append(f"Historical percentile: {percentile:.0f}%")
 
             lines.append("  ".join(parts))

@@ -390,14 +390,16 @@ def predict_next_month():
     hist_pred_levels = hist_pred_levels[valid_mask]
     hist_feature_dates = target_recent.index[valid_mask]
 
-    # Chart dates = prediction dates (one month after feature date)
-    hist_chart_dates = []
-    for d in hist_feature_dates:
-        loc = raw_df.index.get_loc(d)
-        if loc + 1 < len(raw_df):
-            hist_chart_dates.append(raw_df.index[loc + 1])
-        else:
-            hist_chart_dates.append(d + pd.offsets.MonthEnd(1))
+    # Chart dates = prediction dates (one month after feature date).
+    # Use vectorized get_indexer instead of per-element get_loc (O(n) vs O(n²)).
+    raw_index = raw_df.index
+    raw_len = len(raw_index)
+    positions = raw_index.get_indexer(hist_feature_dates)
+    hist_chart_dates = [
+        raw_index[p + 1] if (p >= 0 and p + 1 < raw_len)
+        else (hist_feature_dates[i] + pd.offsets.MonthEnd(1))
+        for i, p in enumerate(positions)
+    ]
 
     # Limit to 60 months for UI
     chart_limit = 60
@@ -416,9 +418,12 @@ def predict_next_month():
     directional_accuracy = float(stored_metrics.get('directional_accuracy_test', 0)) * 100
     theils_u = float(stored_metrics.get('theils_u_test', 0))
 
-    # Compute MAPE from historical predictions for display
+    # Compute MAPE from historical predictions for display.
+    # Compute (actual - pred) / actual as a single fused expression to avoid
+    # extra intermediate arrays.
     if len(hist_actual_levels) > 0:
-        mape = float(np.mean(np.abs((hist_actual_levels - hist_pred_levels) / hist_actual_levels)) * 100)
+        diff = hist_actual_levels - hist_pred_levels
+        mape = float(np.mean(np.abs(diff / hist_actual_levels)) * 100)
     else:
         mape = 0.0
 
@@ -441,18 +446,18 @@ def predict_next_month():
         val_pred_arr = val_pred_arr[valid_diag]
 
         val_dates_raw = val_target.index[valid_diag]
-        val_chart_dates = []
-        for d in val_dates_raw:
-            loc = raw_df.index.get_loc(d)
-            if loc + 1 < len(raw_df):
-                val_chart_dates.append(raw_df.index[loc + 1].strftime('%Y-%m-%d'))
-            else:
-                val_chart_dates.append((d + pd.offsets.MonthEnd(1)).strftime('%Y-%m-%d'))
+        # Vectorized lookup of prediction dates (one month after each feature date).
+        val_positions = raw_index.get_indexer(val_dates_raw)
+        val_chart_dates = [
+            raw_index[p + 1].strftime('%Y-%m-%d') if (p >= 0 and p + 1 < raw_len)
+            else (val_dates_raw[i] + pd.offsets.MonthEnd(1)).strftime('%Y-%m-%d')
+            for i, p in enumerate(val_positions)
+        ]
 
         actual_vs_predicted = {
             'dates': val_chart_dates,
-            'actual': [float(a) for a in val_actual_arr],
-            'predicted': [float(p) for p in val_pred_arr],
+            'actual': val_actual_arr.tolist(),
+            'predicted': val_pred_arr.tolist(),
         }
 
         # Partial residual plots for top 5 features
@@ -460,16 +465,18 @@ def predict_next_month():
         X_val_transformed = preprocessor.transform(val_features)
 
         sorted_contribs = sorted(contributions, key=lambda x: abs(x['coefficient']), reverse=True)
+        # Pre-compute feature→index map so we don't call list.index() per iteration.
+        feat_idx_map = {f: i for i, f in enumerate(feature_names)}
         for c in sorted_contribs[:5]:
             feat = c['feature']
-            j = feature_names.index(feat)
+            j = feat_idx_map[feat]
             feat_vals_transformed = X_val_transformed[valid_diag, j]
             feat_coef = regressor.coef_[j]
             partial_residuals = residuals + (feat_coef * feat_vals_transformed)
 
             partial_plots[feat] = {
-                'x': [float(v) for v in feat_vals_transformed],
-                'y': [float(r) for r in partial_residuals],
+                'x': feat_vals_transformed.tolist(),
+                'y': partial_residuals.tolist(),
             }
 
     # ── MULTI-HORIZON FORECASTS ──
@@ -511,10 +518,10 @@ def predict_next_month():
                     break
                 fv_level = float(pipeline.predict(fv_feat.iloc[[-1]][feature_names])[0])
                 fv_date = fv_df.index[-1] + pd.offsets.MonthEnd(1)
-                fv_row = fv_df.iloc[-1].copy()
-                fv_row.name = fv_date
-                fv_row['ZAR_USD'] = fv_level
-                fv_df = pd.concat([fv_df, pd.DataFrame([fv_row])])
+                # In-place row append (avoids the pd.DataFrame([row]) wrapper +
+                # full concat on every iteration).
+                fv_df.loc[fv_date] = fv_df.iloc[-1]
+                fv_df.loc[fv_date, 'ZAR_USD'] = fv_level
             except Exception:
                 break
         return fv_level
@@ -524,6 +531,8 @@ def predict_next_month():
 
     # Iterate up to max horizon, forking at each checkpoint
     max_h = max(horizons.values())
+    # Invert horizons map once for O(1) checkpoint lookup instead of scanning each iteration.
+    horizon_at = {h_val: label for label, h_val in horizons.items()}
     for i in range(1, max_h + 1):
         try:
             df_feat_iter, _ = engineer_features(iterative_df, bypass_cache=True)
@@ -534,16 +543,15 @@ def predict_next_month():
             next_level = float(pipeline.predict(X_iter)[0])
 
             next_date_iter = iterative_df.index[-1] + pd.offsets.MonthEnd(1)
-            new_row = iterative_df.iloc[-1].copy()
-            new_row.name = next_date_iter
-            new_row['ZAR_USD'] = next_level
-            iterative_df = pd.concat([iterative_df, pd.DataFrame([new_row])])
+            # In-place row append (avoids pd.DataFrame([row]) + concat each step).
+            iterative_df.loc[next_date_iter] = iterative_df.iloc[-1]
+            iterative_df.loc[next_date_iter, 'ZAR_USD'] = next_level
 
-            for label, h_val in horizons.items():
-                if i == h_val:
-                    h_levels[label] = (next_level, next_date_iter)
-                    # Fork: converge from THIS horizon's state
-                    h_fair_values[label] = _converge_from(iterative_df, feature_names, pipeline)
+            label = horizon_at.get(i)
+            if label is not None:
+                h_levels[label] = (next_level, next_date_iter)
+                # Fork: converge from THIS horizon's state
+                h_fair_values[label] = _converge_from(iterative_df, feature_names, pipeline)
         except Exception:
             break
 
@@ -630,9 +638,9 @@ def predict_next_month():
             'directional_accuracy': directional_accuracy,
         },
         'history': {
-            'dates': [d.strftime('%Y-%m-%d') for d in hist_chart_dates],
-            'actual': [float(v) for v in hist_actual_levels],
-            'predicted': [float(v) for v in hist_pred_levels],
+            'dates': pd.DatetimeIndex(hist_chart_dates).strftime('%Y-%m-%d').tolist(),
+            'actual': hist_actual_levels.tolist(),
+            'predicted': hist_pred_levels.tolist(),
         },
         'diagnostics': {
             'actual_vs_predicted': actual_vs_predicted,
@@ -868,26 +876,31 @@ def get_test_set_predictions():
     test_pred = test_pred[valid]
     test_dates_raw = test_target.index[valid]
 
-    # Chart dates = prediction dates (one month after feature date)
-    chart_dates = []
-    for d in test_dates_raw:
-        loc = raw_df.index.get_loc(d)
-        if loc + 1 < len(raw_df):
-            chart_dates.append(raw_df.index[loc + 1])
-        else:
-            chart_dates.append(d + pd.offsets.MonthEnd(1))
+    # Chart dates = prediction dates (one month after feature date) — vectorized.
+    raw_index = raw_df.index
+    raw_len = len(raw_index)
+    test_positions = raw_index.get_indexer(test_dates_raw)
+    chart_dates = [
+        raw_index[p + 1] if (p >= 0 and p + 1 < raw_len)
+        else (test_dates_raw[i] + pd.offsets.MonthEnd(1))
+        for i, p in enumerate(test_positions)
+    ]
 
     # Metrics on test set
     mae = float(np.mean(np.abs(test_actual - test_pred)))
-    rmse = float(np.sqrt(np.mean((test_actual - test_pred) ** 2)))
-    ss_res = np.sum((test_actual - test_pred) ** 2)
-    ss_tot = np.sum((test_actual - np.mean(test_actual)) ** 2)
+    # Compute residual array once and reuse for RMSE and R².
+    resid = test_actual - test_pred
+    sq_resid = resid * resid
+    rmse = float(np.sqrt(sq_resid.mean()))
+    ss_res = sq_resid.sum()
+    test_actual_centered = test_actual - test_actual.mean()
+    ss_tot = (test_actual_centered * test_actual_centered).sum()
     r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
 
     result = {
-        'dates': [d.strftime('%Y-%m-%d') for d in chart_dates],
-        'actual': [float(v) for v in test_actual],
-        'predicted': [float(v) for v in test_pred],
+        'dates': pd.DatetimeIndex(chart_dates).strftime('%Y-%m-%d').tolist(),
+        'actual': test_actual.tolist(),
+        'predicted': test_pred.tolist(),
         'n_obs': len(test_actual),
         'train_end': train_end.strftime('%Y-%m-%d'),
         'mae': round(mae, 4),
