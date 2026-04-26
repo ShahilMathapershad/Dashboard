@@ -92,6 +92,12 @@ def merge_sources(fred_df, gold_series, sa_inflation_df) -> pd.DataFrame:
     return df
 
 
-# Plan-named alias.
-def process_to_monthly(final_df, start_date="2009-12-31", end_date=None):
-    return process_data(final_df, start_date=start_date, end_date=end_date)
+def process_to_monthly(fred_df, gold_series, sa_inflation_df,
+                       start_date="2009-12-31", end_date=None):
+    """Merge the three raw sources and process to monthly frequency.
+
+    One-call helper expected by logic.predictions_cache.refresh:
+    merge_sources -> process_data.
+    """
+    merged = merge_sources(fred_df, gold_series, sa_inflation_df)
+    return process_data(merged, start_date=start_date, end_date=end_date)
