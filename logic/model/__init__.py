@@ -28,6 +28,7 @@ from logic.model.scenario import (
     find_scenario_for_target,
 )
 from logic.model.explain import compute_feature_contributions
+from logic.model.payload import compute_full_predictions_payload, MODEL_VERSION
 
 # Re-export Supabase fetch (used by app.py warmup) — actually lives in logic.data
 # but historically callers imported it from logic.model. Preserve that.
@@ -46,6 +47,8 @@ __all__ = [
     "find_scenario_for_target",
     "get_test_set_predictions",
     "compute_feature_contributions",
+    "compute_full_predictions_payload",
+    "MODEL_VERSION",
     "fetch_data_from_supabase",
     "get_friendly_feature_name",
     "get_feature_category",
