@@ -1434,7 +1434,7 @@ def _parse_agent_response(response_text):
     actions = []
     message = response_text
 
-    # Look for ```json ... ``` block
+    # Look for ```json ... ``` blocks
     json_match = re.search(r'```json\s*\n?(.*?)\n?\s*```', response_text, re.DOTALL)
     if json_match:
         try:
