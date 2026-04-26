@@ -82,6 +82,9 @@ app = Dash(
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"}]
 )
 
+from flask_compress import Compress
+Compress(server)
+
 import pathlib
 _CRITICAL_CSS = (pathlib.Path(__file__).parent / "assets" / "critical.css").read_text()
 app.index_string = f"""<!DOCTYPE html>
