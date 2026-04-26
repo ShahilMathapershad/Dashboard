@@ -2,6 +2,10 @@
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from logic.cache_contract import (
     CACHE_CONTRACT_VERSION,
     CachePayload,
