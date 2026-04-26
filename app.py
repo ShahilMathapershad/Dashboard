@@ -74,12 +74,34 @@ app = Dash(
     server=server,
     use_pages=True,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    # interactions.js is auto-served from assets/; three-scenes.js is injected
-    # dynamically (desktop only) by interactions.js itself.
+    # Exclude Three.js (interactions.js loads it conditionally, desktop-only)
+    # and critical.css (inlined via index_string for fast first paint).
+    assets_ignore=r"(three-scenes\.js|critical\.css)",
     suppress_callback_exceptions=True,
     background_callback_manager=background_callback_manager,
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"}]
 )
+
+import pathlib
+_CRITICAL_CSS = (pathlib.Path(__file__).parent / "assets" / "critical.css").read_text()
+app.index_string = f"""<!DOCTYPE html>
+<html>
+  <head>
+    {{%metas%}}
+    <title>{{%title%}}</title>
+    {{%favicon%}}
+    {{%css%}}
+    <style>{_CRITICAL_CSS}</style>
+  </head>
+  <body>
+    {{%app_entry%}}
+    <footer>
+      {{%config%}}
+      {{%scripts%}}
+      {{%renderer%}}
+    </footer>
+  </body>
+</html>"""
 
 app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='user-session', storage_type='session'),
