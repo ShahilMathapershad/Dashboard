@@ -135,6 +135,11 @@ app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='agent-slider-sync', data=0, storage_type='memory'),
     dcc.Store(id='agent-highlight-store', storage_type='memory'),
 
+    # Cache hydration stores (Wave 2 — predictions cache pipeline).
+    dcc.Store(id='cache-metadata-store', storage_type='session'),
+    dcc.Store(id='cache-status-store', data='miss', storage_type='session'),
+    html.Div(id='cache-refresh-spinner', style={'display': 'none'}),
+
     dash.page_container,
 
     # Global error-message stubs. These must always exist in the layout so that
@@ -215,6 +220,10 @@ app.layout = html.Div(id='theme-main-container', children=[
     ),
     html.Div(id='chat-loading-trigger', style={'display': 'none'}),
 ])
+
+
+from core import cache_callbacks
+cache_callbacks.register(app)
 
 
 # Clientside callback: detect system color scheme and apply theme class
