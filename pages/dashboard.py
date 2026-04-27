@@ -781,11 +781,11 @@ dash.clientside_callback(
 
 # Fetch data using hardcoded API keys
 @callback(
-    Output('fetched-data', 'data'),
+    Output('fetched-data', 'data', allow_duplicate=True),
     Output('data-error', 'children', allow_duplicate=True),
-    Output('predictor-dropdown-options-store', 'data'),
-    Output('selected-predictors', 'data'),
-    Output('fetched-data-status', 'data'),
+    Output('predictor-dropdown-options-store', 'data', allow_duplicate=True),
+    Output('selected-predictors', 'data', allow_duplicate=True),
+    Output('fetched-data-status', 'data', allow_duplicate=True),
     Input('fetch-trigger', 'data'),
     Input('force-refresh-trigger', 'data'),
     State('fetched-data', 'data'),
@@ -1461,7 +1461,7 @@ def get_coefficient_unit(feature_name):
 
 # Background callbacks for Model and Scenario calculation (prerendering support)
 @callback(
-    Output('model-prediction-data', 'data'),
+    Output('model-prediction-data', 'data', allow_duplicate=True),
     Output('model-error', 'children', allow_duplicate=True),
     Input('model-prediction-trigger', 'data'),
     State('model-prediction-data', 'data'),
@@ -1480,7 +1480,7 @@ def fetch_model_prediction(trigger, existing_data):
 
 
 @callback(
-    Output('scenario-baseline-data', 'data'),
+    Output('scenario-baseline-data', 'data', allow_duplicate=True),
     Output('scenario-error', 'children', allow_duplicate=True),
     Input('scenario-trigger', 'data'),
     State('scenario-baseline-data', 'data'),

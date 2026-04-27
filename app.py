@@ -68,7 +68,13 @@ def _warm_caches():
         print(f"--- Cache warm: failed ({e}) — first request will populate ---")
 
 
-threading.Thread(target=_warm_caches, daemon=True).start()
+# Only warm in the actual serving process. Skip in:
+#   - DiskcacheManager spawn workers (would race the worker's own Supabase
+#     call, two threads sharing the singleton client → EAGAIN on SSL socket)
+#   - Flask dev-mode reloader's parent watcher (it doesn't serve requests, so
+#     warming there just doubles network traffic on every restart).
+if multiprocess.parent_process() is None:
+    threading.Thread(target=_warm_caches, daemon=True).start()
 app = Dash(
     __name__,
     server=server,
@@ -138,6 +144,10 @@ app.layout = html.Div(id='theme-main-container', children=[
     # Cache hydration stores (Wave 2 — predictions cache pipeline).
     dcc.Store(id='cache-metadata-store', storage_type='session'),
     dcc.Store(id='cache-status-store', data='miss', storage_type='session'),
+    # Prewarm-on-Get-Started: populates the diskcaches behind
+    # fetch_data_from_supabase / predict_next_month / get_scenario_baseline
+    # while the user is filling the login form, so post-login hydrate is hot.
+    dcc.Store(id='prewarm-status-store', data='idle', storage_type='memory'),
     html.Div(id='cache-refresh-spinner', style={'display': 'none'}),
 
     dash.page_container,
@@ -263,50 +273,10 @@ app.clientside_callback(
 )
 
 
-# Global prerender trigger - starts fetching data as soon as the user is authenticated
-# Also fires when the agent navigates to /dashboard from another page
-@callback(
-    Output('fetch-trigger', 'data', allow_duplicate=True),
-    Output('model-prediction-trigger', 'data', allow_duplicate=True),
-    Output('scenario-trigger', 'data', allow_duplicate=True),
-    Input('_pages_location', 'pathname'),
-    Input('user-session', 'data'),
-    State('fetch-trigger', 'data'),
-    State('model-prediction-trigger', 'data'),
-    State('scenario-trigger', 'data'),
-    prevent_initial_call=True
-)
-def global_prerender_trigger(pathname, session_data, f_trig, m_trig, s_trig):
-    # Only fire on /dashboard so downstream UI callbacks (render_model_ui,
-    # sync_scenario_ui) don't try to write to dashboard-only IDs from /login.
-    if pathname == '/dashboard' and verify_session(session_data) and (f_trig or 0) == 0:
-        return 1, dash.no_update, dash.no_update
-    return dash.no_update, dash.no_update, dash.no_update
-
-
-# Sequential background callback chaining - reduces peak memory spikes on Render (512MB)
-@callback(
-    Output('model-prediction-trigger', 'data', allow_duplicate=True),
-    Input('fetched-data', 'data'),
-    State('model-prediction-trigger', 'data'),
-    prevent_initial_call=True
-)
-def chain_model_prediction(fetched_data, current_trigger):
-    if fetched_data and (current_trigger or 0) == 0:
-        return 1
-    return dash.no_update
-
-
-@callback(
-    Output('scenario-trigger', 'data', allow_duplicate=True),
-    Input('model-prediction-data', 'data'),
-    State('scenario-trigger', 'data'),
-    prevent_initial_call=True
-)
-def chain_scenario_baseline(model_data, current_trigger):
-    if model_data and (current_trigger or 0) == 0:
-        return 1
-    return dash.no_update
+# Hydrate of fetched-data / model-prediction-data / scenario-baseline-data is
+# handled by core.cache_callbacks.hydrate_dashboard (registered above). The
+# legacy three-step trigger chain that lived here was removed in the cache-first
+# cutover.
 
 # Global auth and navigation guard
 @callback(
