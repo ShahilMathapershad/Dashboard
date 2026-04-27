@@ -50,7 +50,7 @@ def register(app: dash.Dash) -> None:
         Input("user-session", "data"),
         State("fetched-data", "data"),
         prevent_initial_call="initial_duplicate",
-        background=True,
+        background=False,
     )
     def hydrate_dashboard(pathname, session_data, existing_fetched):
         """Single-shot hydrate of every dashboard store on /dashboard nav."""

@@ -17,8 +17,8 @@ try:
         if sys.platform == 'darwin':
             multiprocess.set_start_method('spawn')
         else:
-            # Default to fork for Linux (Render) to save RAM and start faster
-            multiprocess.set_start_method('fork')
+            # Change 'fork' to 'spawn' to ensure clean process creation
+            multiprocess.set_start_method('spawn')
 except RuntimeError:
     # Already set
     pass
@@ -87,8 +87,8 @@ def _warm_caches():
 #     call, two threads sharing the singleton client → EAGAIN on SSL socket)
 #   - Flask dev-mode reloader's parent watcher (it doesn't serve requests, so
 #     warming there just doubles network traffic on every restart).
-if multiprocess.parent_process() is None:
-    threading.Thread(target=_warm_caches, daemon=True).start()
+# if multiprocess.parent_process() is None:
+#     threading.Thread(target=_warm_caches, daemon=True).start()
 app = Dash(
     __name__,
     server=server,
