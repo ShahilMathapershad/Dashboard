@@ -55,6 +55,20 @@ def _cache_static_assets(response):
     return response
 
 
+# Stale-callback handler. After a deploy that adds/removes `allow_duplicate=True`
+# or otherwise changes a callback signature, browsers cached on the previous
+# build POST `/_dash-update-component` with old `@<hash>` callback IDs. Dash
+# raises KeyError("Callback function not found ...") which becomes a 500. The
+# request is harmless — the browser will pick up fresh IDs on its next page
+# load — so swallow it as 204 to keep logs clean and avoid surfacing 500s.
+@server.errorhandler(KeyError)
+def _handle_stale_callback(error):
+    if (_flask_request.path == '/_dash-update-component'
+            and 'Callback function not found' in str(error)):
+        return ('', 204)
+    raise error
+
+
 # Pre-warm Supabase + model caches in a background thread so the first user
 # request hits hot caches instead of paying the ~500ms Supabase round-trip
 # and ~50ms joblib.load. Runs under gunicorn's --preload so all workers benefit.

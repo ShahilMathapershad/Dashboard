@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 from logic.data_fetcher import (
     fetch_fred_data, fetch_world_bank_gold_data, fetch_sa_inflation_hardcoded,
     process_data, save_to_supabase, replace_gold_price_column_in_supabase,
-    FRED_API_KEY, SERIES_CONFIG, should_update_from_api, fetch_and_save_data
+    FRED_API_KEY, SERIES_CONFIG,
 )
 from logic.model import (predict_next_month, fetch_data_from_supabase, get_scenario_baseline,
                          scenario_predict, get_friendly_feature_name as model_get_friendly_name,
@@ -605,39 +605,6 @@ def perform_signout(signout_clicks):
     return dash.no_update
 
 
-# Trigger data fetch and model prediction automatically (fallback/sync)
-@callback(
-    Output('fetch-trigger', 'data', allow_duplicate=True),
-    Output('model-prediction-trigger', 'data', allow_duplicate=True),
-    Output('scenario-trigger', 'data', allow_duplicate=True),
-    Input('dashboard-tab', 'data'),
-    State('fetch-trigger', 'data'),
-    State('model-prediction-trigger', 'data'),
-    State('scenario-trigger', 'data'),
-    State('fetched-data', 'data'),
-    State('model-prediction-data', 'data'),
-    State('scenario-baseline-data', 'data'),
-    prevent_initial_call=True
-)
-def auto_trigger_callbacks(active_tab, current_fetch_trigger, current_model_trigger, current_scenario_trigger,
-                           existing_data, existing_model_data, existing_scenario_data):
-    fetch_trigger = dash.no_update
-    model_trigger = dash.no_update
-    scenario_trigger = dash.no_update
-
-    # Fallback: if data is missing, ensure trigger is at least 1
-    if active_tab == 'data' and not existing_data:
-        fetch_trigger = (current_fetch_trigger or 0) + 1
-
-    if active_tab == 'model' and not existing_model_data:
-        model_trigger = (current_model_trigger or 0) + 1
-
-    if active_tab == 'scenario' and not existing_scenario_data:
-        scenario_trigger = (current_scenario_trigger or 0) + 1
-
-    return fetch_trigger, model_trigger, scenario_trigger
-
-
 def _prepare_table_df(df_all):
     """Convert raw data list/df to a sorted DataFrame with proper Date column."""
     if df_all is None or (isinstance(df_all, pd.DataFrame) and df_all.empty) or (
@@ -779,107 +746,74 @@ dash.clientside_callback(
 )
 
 
-# Fetch data using hardcoded API keys
+# Refresh button → re-fetch from APIs and overwrite Supabase. Initial /dashboard
+# hydration is handled by core.cache_callbacks.hydrate_dashboard; this callback
+# only fires when the user explicitly clicks Refresh.
 @callback(
     Output('fetched-data', 'data', allow_duplicate=True),
     Output('data-error', 'children', allow_duplicate=True),
     Output('predictor-dropdown-options-store', 'data', allow_duplicate=True),
     Output('selected-predictors', 'data', allow_duplicate=True),
     Output('fetched-data-status', 'data', allow_duplicate=True),
-    Input('fetch-trigger', 'data'),
     Input('force-refresh-trigger', 'data'),
-    State('fetched-data', 'data'),
-    State('predictor-dropdown-options-store', 'data'),
-    State('selected-predictors', 'data'),
-    State('fetched-data-status', 'data'),
     background=True,
-    prevent_initial_call='initial_duplicate',
+    prevent_initial_call=True,
 )
-def fetch_data(trigger_value, force_refresh, existing_data, existing_options, existing_selected, existing_status):
+def fetch_data(force_refresh):
     import pandas as pd
-    import time
 
-    ctx = dash.callback_context
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else ''
-    is_forced = triggered_id == 'force-refresh-trigger' and (force_refresh or 0) > 0
+    if not force_refresh:
+        return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update
 
-    if trigger_value or is_forced:
-        # If we already have data and this is NOT a forced refresh, reuse it
-        if existing_data and not is_forced:
-            return existing_data, "", existing_options, existing_selected, existing_status
+    try:
+        fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
+        raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=None)
+
+        wb_gold = fetch_world_bank_gold_data(start_date='2009-12-31')
+        if not wb_gold.empty:
+            raw = pd.concat([raw, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
+
+        sa_inflation = fetch_sa_inflation_hardcoded()
+        raw = pd.concat([raw, sa_inflation], axis=1)
+
+        if raw.empty:
+            return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
+
+        processed = process_data(raw, start_date='2009-12-31')
+        status_data = {'text': '● Updated from API', 'color': '#3B82F6'}
+
+        if processed.empty:
+            return dash.no_update, 'No data available.', dash.no_update, dash.no_update, dash.no_update
 
         try:
-            # Force refresh always hits APIs; normal load checks should_update_from_api
-            use_api = True if is_forced else should_update_from_api()
-
-            if not use_api:
-                processed = fetch_data_from_supabase()
-                status_data = {'text': '● Live (Supabase)', 'color': '#10B981'}
-                wb_gold = pd.Series()
-            else:
-                # Use unified configuration from data_fetcher
-                fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
-
-                raw = fetch_fred_data(fred_series, api_key=FRED_API_KEY, progress_callback=None)
-
-                # Fetch GOLD_PRICE from World Bank monthly commodity data.
-                wb_gold = fetch_world_bank_gold_data(start_date='2009-12-31')
-                if not wb_gold.empty:
-                    # Use concat instead of assignment to allow the index to expand to the latest available data.
-                    raw = pd.concat([raw, wb_gold.to_frame(name='GOLD_PRICE')], axis=1)
-
-                # Fetch SA_INFLATION (Hardcoded)
-                sa_inflation = (fetch_sa_inflation_hardcoded
-                                ())
-                raw = pd.concat([raw, sa_inflation], axis=1)
-
-                if raw.empty:
-                    return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
-
-                processed = process_data(raw, start_date='2009-12-31')
-                status_data = {'text': '● Updated from API', 'color': '#3B82F6'}
-
-            if processed.empty:
-                return dash.no_update, 'No data available.', dash.no_update, dash.no_update, dash.no_update
-
-            # Save to Supabase only if we fetched from API
-            if use_api:
-                try:
-                    save_to_supabase(processed)
-                    if not wb_gold.empty:
-                        replace_gold_price_column_in_supabase(wb_gold)
-                except Exception as e:
-                    print(f"Warning: Could not save to Supabase: {e}")
-                    status_data = {'text': '● Updated (Supabase error)', 'color': '#F59E0B'}
-
-            # Prepare for display
-            df_all = processed.reset_index()
-            df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
-
-            # Round numeric columns to reduce JSON payload size in dcc.Store
-            numeric_cols = df_all.select_dtypes(include='number').columns
-            df_all[numeric_cols] = df_all[numeric_cols].round(6)
-
-            # Get all variables (all columns except Date), ZAR/USD first
-            all_vars = [c for c in df_all.columns if c != 'Date']
-            # Put ZAR_USD first if present
-            if 'ZAR_USD' in all_vars:
-                all_vars.remove('ZAR_USD')
-                all_vars.insert(0, 'ZAR_USD')
-
-            # Use labels from SERIES_CONFIG for the options
-            dropdown_options = [
-                {'label': SERIES_CONFIG.get(p, {}).get('label', p) if p != 'ZAR_USD' else 'ZAR/USD Exchange Rate', 'value': p}
-                for p in all_vars
-            ]
-            # Default: ZAR_USD + first predictor selected
-            default_predictors = ['ZAR_USD'] + all_vars[1:2] if len(all_vars) >= 2 else all_vars[:1]
-
-            return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data
+            save_to_supabase(processed)
+            if not wb_gold.empty:
+                replace_gold_price_column_in_supabase(wb_gold)
         except Exception as e:
-            traceback.print_exc()
-            return dash.no_update, f'Error: {str(e)}', dash.no_update, dash.no_update, dash.no_update
-    return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update
+            print(f"Warning: Could not save to Supabase: {e}")
+            status_data = {'text': '● Updated (Supabase error)', 'color': '#F59E0B'}
+
+        df_all = processed.reset_index()
+        df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
+
+        numeric_cols = df_all.select_dtypes(include='number').columns
+        df_all[numeric_cols] = df_all[numeric_cols].round(6)
+
+        all_vars = [c for c in df_all.columns if c != 'Date']
+        if 'ZAR_USD' in all_vars:
+            all_vars.remove('ZAR_USD')
+            all_vars.insert(0, 'ZAR_USD')
+
+        dropdown_options = [
+            {'label': SERIES_CONFIG.get(p, {}).get('label', p) if p != 'ZAR_USD' else 'ZAR/USD Exchange Rate', 'value': p}
+            for p in all_vars
+        ]
+        default_predictors = ['ZAR_USD'] + all_vars[1:2] if len(all_vars) >= 2 else all_vars[:1]
+
+        return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data
+    except Exception as e:
+        traceback.print_exc()
+        return dash.no_update, f'Error: {str(e)}', dash.no_update, dash.no_update, dash.no_update
 
 
 @callback(
@@ -1457,45 +1391,6 @@ def get_friendly_feature_name(feature_name, _transform_type=None):
 def get_coefficient_unit(feature_name):
     """Return appropriate unit label for interpretable coefficients."""
     return model_get_coef_unit(feature_name)
-
-
-# Background callbacks for Model and Scenario calculation (prerendering support)
-@callback(
-    Output('model-prediction-data', 'data', allow_duplicate=True),
-    Output('model-error', 'children', allow_duplicate=True),
-    Input('model-prediction-trigger', 'data'),
-    State('model-prediction-data', 'data'),
-    background=True,
-    prevent_initial_call='initial_duplicate',
-)
-def fetch_model_prediction(trigger, existing_data):
-    if trigger and not existing_data:
-        try:
-            result = predict_next_month()
-            return {'raw_result': result}, ""
-        except Exception as e:
-            traceback.print_exc()
-            return dash.no_update, f"Model Prediction Failed: {str(e)}"
-    return dash.no_update, dash.no_update
-
-
-@callback(
-    Output('scenario-baseline-data', 'data', allow_duplicate=True),
-    Output('scenario-error', 'children', allow_duplicate=True),
-    Input('scenario-trigger', 'data'),
-    State('scenario-baseline-data', 'data'),
-    background=True,
-    prevent_initial_call='initial_duplicate',
-)
-def fetch_scenario_baseline(trigger, existing_data):
-    if trigger and not existing_data:
-        try:
-            result = get_scenario_baseline()
-            return result, ""
-        except Exception as e:
-            traceback.print_exc()
-            return dash.no_update, f"Scenario engine load failed: {str(e)}"
-    return dash.no_update, dash.no_update
 
 
 @callback(
@@ -2584,18 +2479,14 @@ def _build_scenario_summary_table(predictors, current_values, baseline):
 
 @callback(
     Output('scenario-current-values', 'data', allow_duplicate=True),
-    Output('scenario-trigger', 'data', allow_duplicate=True),
     Input('scenario-reset-btn', 'n_clicks'),
     State('scenario-baseline-data', 'data'),
-    State('scenario-trigger', 'data'),
     prevent_initial_call=True
 )
-def reset_scenario(n_clicks, baseline, current_trigger):
+def reset_scenario(n_clicks, baseline):
     if not n_clicks or not baseline:
-        return dash.no_update, dash.no_update
-    # Reset current values to baseline current values and bump trigger to re-render sliders
-    current_vals = {p['raw_col']: p['current_value'] for p in baseline.get('predictors', [])}
-    return current_vals, (current_trigger or 0) + 1
+        return dash.no_update
+    return {p['raw_col']: p['current_value'] for p in baseline.get('predictors', [])}
 
 
 @callback(
