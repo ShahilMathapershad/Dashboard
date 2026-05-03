@@ -2094,107 +2094,134 @@ def render_legacy_inference(active_tab, sub_tab, theme):
 
     rows = data.get('rows', [])
     summary = data.get('summary', {})
-    is_dark = (theme == 'dark') if theme else True
 
-    _MONTH_LABELS = {
-        '2025-02-28': 'Feb 2025', '2025-03-31': 'Mar 2025', '2025-04-30': 'Apr 2025',
-    }
-    _CUTOFF_LABELS = {
-        '2025-01-31': 'Jan 2025', '2025-02-28': 'Feb 2025', '2025-03-31': 'Mar 2025',
-    }
-
-    col_style = {
-        'padding': '10px 14px', 'fontSize': '0.8125rem',
-        'borderBottom': '1px solid var(--border)',
-        'color': 'var(--text-1)', 'verticalAlign': 'middle',
-    }
-    hdr_style = {
-        **col_style,
-        'fontWeight': '600', 'color': 'var(--text-2)',
-        'fontSize': '0.75rem', 'textTransform': 'uppercase', 'letterSpacing': '0.04em',
-        'backgroundColor': 'var(--surface-2)',
-    }
-    num_style = {**col_style, 'fontFamily': "'SF Mono', 'Fira Mono', monospace", 'textAlign': 'right'}
+    def _fmt_month(iso):
+        try:
+            import datetime
+            d = datetime.date.fromisoformat(iso)
+            return d.strftime('%b %Y')
+        except Exception:
+            return iso
 
     def _dir_badge(correct):
         if correct is None:
-            return html.Span('—', style={'color': 'var(--text-muted)'})
+            return html.Span('—', style={'color': 'var(--text-3)'})
         if correct:
             return html.Span('HIT', style={
-                'backgroundColor': 'rgba(16,185,129,0.15)', 'color': '#10B981',
-                'padding': '2px 8px', 'borderRadius': '4px', 'fontSize': '0.7rem', 'fontWeight': '600',
+                'background': 'rgba(16,185,129,0.15)', 'color': '#10B981',
+                'padding': '2px 9px', 'borderRadius': '4px',
+                'fontSize': '0.6875rem', 'fontWeight': '700', 'letterSpacing': '0.03em',
             })
         return html.Span('MISS', style={
-            'backgroundColor': 'rgba(239,68,68,0.12)', 'color': '#ef4444',
-            'padding': '2px 8px', 'borderRadius': '4px', 'fontSize': '0.7rem', 'fontWeight': '600',
+            'background': 'rgba(239,68,68,0.12)', 'color': '#ef4444',
+            'padding': '2px 9px', 'borderRadius': '4px',
+            'fontSize': '0.6875rem', 'fontWeight': '700', 'letterSpacing': '0.03em',
         })
 
     def _err_color(error):
         if error is None:
             return 'var(--text-1)'
-        return '#ef4444' if abs(error) > 0.2 else '#10B981' if abs(error) < 0.1 else '#f59e0b'
+        return '#ef4444' if abs(error) > 0.5 else '#10B981' if abs(error) < 0.2 else '#f59e0b'
+
+    # Shared cell base — applied via style on each td
+    _td = {'verticalAlign': 'middle'}
+    _num = {**_td, 'textAlign': 'right', 'fontVariantNumeric': 'tabular-nums'}
 
     table_rows = []
     for r in rows:
         err = r.get('error')
         pct = r.get('pct_error')
-        table_rows.append(html.Tr(children=[
-            html.Td(_MONTH_LABELS.get(r['predict_month'], r['predict_month']), style=col_style),
-            html.Td(_CUTOFF_LABELS.get(r['cutoff'], r['cutoff']), style={**col_style, 'color': 'var(--text-2)'}),
-            html.Td(f"R {r['spot_at_cutoff']:.4f}", style=num_style),
-            html.Td(f"R {r['predicted']:.4f}", style={**num_style, 'color': '#5b8def'}),
-            html.Td(f"R {r['actual']:.4f}" if r['actual'] else '—', style=num_style),
-            html.Td(
-                f"{err:+.4f}" if err is not None else '—',
-                style={**num_style, 'color': _err_color(err)},
-            ),
-            html.Td(
-                f"{pct:+.2f}%" if pct is not None else '—',
-                style={**num_style, 'color': _err_color(err)},
-            ),
-            html.Td(_dir_badge(r.get('direction_correct')), style={**col_style, 'textAlign': 'center'}),
-            html.Td(r.get('model_name', '').replace('_', ' '), style={**col_style, 'color': 'var(--text-3)', 'fontSize': '0.7rem'}),
+        err_col = _err_color(err)
+        table_rows.append(html.Tr(className='ev-row', children=[
+            # Forecast month
+            html.Td(style=_td, children=[
+                html.Span(_fmt_month(r['predict_month']),
+                          style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-1)'}),
+            ]),
+            # Trained to
+            html.Td(style=_td, children=[
+                html.Span(_fmt_month(r['cutoff']),
+                          style={'fontSize': '0.8rem', 'color': 'var(--text-2)'}),
+            ]),
+            # Spot (S_t-1 anchor)
+            html.Td(style=_num, children=[
+                html.Span(f"R {r['spot_at_cutoff']:.4f}",
+                          style={'fontSize': '0.8125rem', 'color': 'var(--text-2)'}),
+            ]),
+            # Predicted
+            html.Td(style=_num, children=[
+                html.Span(f"R {r['predicted']:.4f}",
+                          style={'fontSize': '0.8125rem', 'fontWeight': '600',
+                                 'color': 'var(--accent)'}),
+            ]),
+            # Actual
+            html.Td(style=_num, children=[
+                html.Span(
+                    f"R {r['actual']:.4f}" if r['actual'] else '—',
+                    style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-1)'},
+                ),
+            ]),
+            # Error — ZAR + % stacked
+            html.Td(style=_num, children=[
+                html.Div([
+                    html.Span(
+                        f"{err:+.4f}" if err is not None else '—',
+                        style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': err_col},
+                    ),
+                    html.Span(
+                        f"  {pct:+.2f}%" if pct is not None else '',
+                        style={'fontSize': '0.7rem', 'color': err_col, 'opacity': '0.75',
+                               'marginLeft': '5px'},
+                    ),
+                ], style={'display': 'flex', 'alignItems': 'baseline', 'justifyContent': 'flex-end'}),
+            ]),
+            # Direction
+            html.Td(style={**_td, 'textAlign': 'center'},
+                    children=[_dir_badge(r.get('direction_correct'))]),
+            # Model name
+            html.Td(style=_td, children=[
+                html.Span(r.get('model_name', '').replace('_', ' '),
+                          style={'fontSize': '0.7rem', 'color': 'var(--text-3)'}),
+            ]),
         ]))
 
     table = html.Div(style={'overflowX': 'auto'}, children=[
-        html.Table(style={'width': '100%', 'borderCollapse': 'collapse'}, children=[
-            html.Thead(html.Tr(children=[
-                html.Th('Forecast Month', style=hdr_style),
-                html.Th('Trained Through', style=hdr_style),
-                html.Th('Spot at Cutoff', style={**hdr_style, 'textAlign': 'right'}),
-                html.Th('Predicted', style={**hdr_style, 'textAlign': 'right'}),
-                html.Th('Actual', style={**hdr_style, 'textAlign': 'right'}),
-                html.Th('Error (ZAR)', style={**hdr_style, 'textAlign': 'right'}),
-                html.Th('Error (%)', style={**hdr_style, 'textAlign': 'right'}),
-                html.Th('Direction', style={**hdr_style, 'textAlign': 'center'}),
-                html.Th('Model', style={**hdr_style, 'fontSize': '0.7rem'}),
+        html.Table(className='ev-table', children=[
+            html.Thead(html.Tr([
+                html.Th('Forecast', className='ev-th'),
+                html.Th('Trained To', className='ev-th'),
+                html.Th('Spot', className='ev-th', style={'textAlign': 'right'}),
+                html.Th('Predicted', className='ev-th', style={'textAlign': 'right'}),
+                html.Th('Actual', className='ev-th', style={'textAlign': 'right'}),
+                html.Th('Error', className='ev-th', style={'textAlign': 'right'}),
+                html.Th('Dir.', className='ev-th', style={'textAlign': 'center'}),
+                html.Th('Model', className='ev-th'),
             ])),
             html.Tbody(table_rows),
         ]),
     ])
 
     metrics_pills = html.Div(className='model-info-grid', style={'marginTop': '20px'}, children=[
-        _info_pill('N Forecasts', str(summary.get('n', 0)),
+        _info_pill('Forecasts', str(summary.get('n', 0)),
                    'Number of point-in-time monthly forecasts evaluated against actuals.'),
-        _info_pill('MAE', f"ZAR {summary.get('mae', 0):.4f}",
-                   'Mean Absolute Error across all legacy forecasts.'),
-        _info_pill('RMSE', f"ZAR {summary.get('rmse', 0):.4f}",
+        _info_pill('MAE', f"R {summary.get('mae', 0):.4f}",
+                   'Mean Absolute Error across all forecasts.'),
+        _info_pill('RMSE', f"R {summary.get('rmse', 0):.4f}",
                    'Root Mean Squared Error — penalises larger misses more heavily.'),
-        _info_pill('MSE', f"{summary.get('mse', 0):.4f}",
-                   'Mean Squared Error of the legacy forecast set.'),
-        _info_pill('MAD', f"ZAR {summary.get('mad', 0):.4f}",
-                   'Median Absolute Deviation — robust to outliers; median of |errors|.'),
+        _info_pill('MAD', f"R {summary.get('mad', 0):.4f}",
+                   'Median Absolute Deviation — robust measure; median of |errors|.'),
         _info_pill('MAPE', f"{summary.get('mape', 0):.2f}%",
-                   'Mean Absolute Percentage Error relative to realised ZAR/USD level.'),
+                   'Mean Absolute Percentage Error relative to realised ZAR/USD.'),
         _info_pill('Direction Hit Rate', f"{summary.get('hit_rate', 0)*100:.1f}%",
-                   'Proportion of forecasts that correctly predicted ZAR strengthen vs weaken.'),
+                   'Proportion of forecasts that correctly called ZAR direction.'),
     ])
 
     note = html.P(
         f"Generated {data.get('generated_at', '')[:10]}. "
-        "Each model was trained independently using the full GridSearchCV pipeline on data "
-        "available at that calendar month-end, then immediately used for a single out-of-sample forecast.",
-        style={'fontSize': '0.75rem', 'color': 'var(--text-muted)', 'marginTop': '16px'},
+        "Each model was independently trained via GridSearchCV on data available at that month-end, "
+        "then used for a single one-step-ahead forecast.",
+        style={'fontSize': '0.75rem', 'color': 'var(--text-3)', 'marginTop': '16px',
+               'lineHeight': '1.5'},
     )
 
     return html.Div([table, metrics_pills, note])
