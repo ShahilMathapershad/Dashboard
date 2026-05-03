@@ -142,8 +142,8 @@ def engineer_features(df, bypass_cache=False):
 
     # 4. ZAR_USD_zscore12 = (S_{t-1} - mean_12) / std_12
     zar_lagged = df['ZAR_USD'].shift(1)
-    zar_roll_mean = zar_lagged.rolling(12).mean()
-    zar_roll_std = zar_lagged.rolling(12).std(ddof=1)
+    zar_roll_mean = zar_lagged.rolling(12, min_periods=12).mean()
+    zar_roll_std = zar_lagged.rolling(12, min_periods=12).std(ddof=1).replace(0, np.nan)
     features['ZAR_USD_zscore12'] = (zar_lagged - zar_roll_mean) / zar_roll_std
 
     # 5. VIX level
@@ -154,8 +154,8 @@ def engineer_features(df, bypass_cache=False):
 
     # 7. VIX_zscore12 = z-score of VIX_{t-1}
     vix_lagged = df['VIX'].shift(1)
-    vix_roll_mean = vix_lagged.rolling(12).mean()
-    vix_roll_std = vix_lagged.rolling(12).std(ddof=1)
+    vix_roll_mean = vix_lagged.rolling(12, min_periods=12).mean()
+    vix_roll_std = vix_lagged.rolling(12, min_periods=12).std(ddof=1).replace(0, np.nan)
     features['VIX_zscore12'] = (vix_lagged - vix_roll_mean) / vix_roll_std
 
     # 8. EPU_USA

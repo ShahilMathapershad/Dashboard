@@ -32,6 +32,8 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 MODEL_OUTPUT_PATH = os.path.join(_SCRIPT_DIR, "zar_usd_forecast_model.pkl")
+TRAIN_ONLY_MODEL_PATH = os.path.join(_SCRIPT_DIR, "zar_usd_forecast_model_train_only.pkl")
+TRAIN_ONLY_CUTOFF_DATE = "2023-04-30"  # test set = 2023-05-31 onwards
 
 # ─────────────────────────────────────────────────────────────
 # 1. LOAD DATA
@@ -507,6 +509,13 @@ def main():
     adj_r2_test = compute_adjusted_r2(y_test, pred_test, n_feats)
     print(f"\n  Adjusted R²  TRAIN={adj_r2_train:.4f}  TEST={adj_r2_test:.4f}")
 
+    mape_train = float(np.mean(np.abs((y_train.values - pred_train) / y_train.values)) * 100)
+    mape_test  = float(np.mean(np.abs((y_test.values  - pred_test)  / y_test.values))  * 100)
+    print(f"\n  MAPE  TRAIN={mape_train:.4f}%  TEST={mape_test:.4f}%")
+
+    train_metrics["MAPE"] = mape_train
+    test_metrics["MAPE"]  = mape_test
+
     metrics = {
         "train": train_metrics,
         "test": test_metrics,
@@ -550,10 +559,75 @@ def main():
     final_pipeline = refit_full_model(model_class, model_params, feature_list,
                                        X_full, y_full)
 
-    # ── Save ──
+    # ── Save production model (full data refit) ──
     save_model(final_pipeline, feature_list, metrics,
                f"{best['fs_name']}_{best['model_name']}",
                model_params, dates, path=MODEL_OUTPUT_PATH)
+
+    # ── Train-only model (fixed cutoff for reproducible test-set metrics) ──
+    print(f"\n>>> Fitting train-only model (cutoff: {TRAIN_ONLY_CUTOFF_DATE})")
+    X_full_to = pd.concat([X_train, X_test]).reset_index(drop=True)
+    y_full_to = pd.concat([y_train, y_test]).reset_index(drop=True)
+    dates_full_to = pd.concat([best["dates_train"], best["dates_test"]]).reset_index(drop=True)
+    zar_full_to = pd.concat([zar_train, zar_test]).reset_index(drop=True)
+
+    cutoff_ts = pd.Timestamp(TRAIN_ONLY_CUTOFF_DATE, tz="UTC")
+    if dates_full_to.dt.tz is None:
+        cutoff_ts = cutoff_ts.tz_localize(None)
+    train_mask_to = dates_full_to <= cutoff_ts
+
+    X_to_tr = X_full_to[train_mask_to]
+    y_to_tr = y_full_to[train_mask_to]
+    X_to_te = X_full_to[~train_mask_to]
+    y_to_te = y_full_to[~train_mask_to]
+    zar_to_tr = zar_full_to[train_mask_to]
+    zar_to_te = zar_full_to[~train_mask_to]
+    dates_to_tr = dates_full_to[train_mask_to]
+
+    print(f"  Train rows : {len(X_to_tr)}  "
+          f"({dates_to_tr.iloc[0].date()} to {dates_to_tr.iloc[-1].date()})")
+    print(f"  Test rows  : {len(X_to_te)}  "
+          f"({dates_full_to[~train_mask_to].iloc[0].date()} to "
+          f"{dates_full_to[~train_mask_to].iloc[-1].date()})")
+
+    to_pipeline = refit_full_model(model_class, model_params, feature_list,
+                                   X_to_tr, y_to_tr)
+
+    pred_to_tr = to_pipeline.predict(X_to_tr)
+    pred_to_te = to_pipeline.predict(X_to_te)
+
+    to_train_metrics = evaluate_predictions(y_to_tr, pred_to_tr, "TRAIN")
+    to_test_metrics  = evaluate_predictions(y_to_te, pred_to_te, "TEST ")
+
+    to_u_train = compute_theils_u(y_to_tr, pred_to_tr, zar_to_tr.values)
+    to_u_test  = compute_theils_u(y_to_te, pred_to_te, zar_to_te.values)
+    to_da_train = compute_directional_accuracy(y_to_tr, pred_to_tr, zar_to_tr.values)
+    to_da_test  = compute_directional_accuracy(y_to_te, pred_to_te, zar_to_te.values)
+    to_adj_r2_train = compute_adjusted_r2(y_to_tr, pred_to_tr, len(feature_list))
+    to_adj_r2_test  = compute_adjusted_r2(y_to_te, pred_to_te, len(feature_list))
+    to_mape_train = float(np.mean(np.abs((y_to_tr.values - pred_to_tr) / y_to_tr.values)) * 100)
+    to_mape_test  = float(np.mean(np.abs((y_to_te.values - pred_to_te) / y_to_te.values)) * 100)
+    to_train_metrics["MAPE"] = to_mape_train
+    to_test_metrics["MAPE"]  = to_mape_test
+
+    print(f"  Theil's U        TRAIN={to_u_train:.4f}  TEST={to_u_test:.4f}")
+    print(f"  Directional Acc  TRAIN={to_da_train:.4f}  TEST={to_da_test:.4f}")
+    print(f"  MAPE             TRAIN={to_mape_train:.4f}%  TEST={to_mape_test:.4f}%")
+
+    to_metrics = {
+        "train": to_train_metrics,
+        "test": to_test_metrics,
+        "theils_u_train": to_u_train,
+        "theils_u_test": to_u_test,
+        "directional_accuracy_train": to_da_train,
+        "directional_accuracy_test": to_da_test,
+        "adjusted_r2_train": to_adj_r2_train,
+        "adjusted_r2_test": to_adj_r2_test,
+    }
+
+    save_model(to_pipeline, feature_list, to_metrics,
+               f"{best['fs_name']}_{best['model_name']}",
+               model_params, dates_to_tr, path=TRAIN_ONLY_MODEL_PATH)
 
     print("\n" + "=" * 70)
     print("DONE")

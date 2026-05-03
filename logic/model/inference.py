@@ -181,7 +181,7 @@ def predict_next_month():
         hist_pred_levels = hist_pred_levels[-chart_limit:]
 
     # ── VALIDATION METRICS ──
-    # Use stored test metrics from the model report (proper out-of-sample evaluation)
+    # All metrics loaded from pkl (computed on the proper OOS test split at train time).
     test_metrics = stored_metrics.get('test', {})
     mae = float(test_metrics.get('MAE', 0))
     rmse = float(test_metrics.get('RMSE', 0))
@@ -189,67 +189,60 @@ def predict_next_month():
     adjusted_r2 = float(stored_metrics.get('adjusted_r2_test', 0))
     directional_accuracy = float(stored_metrics.get('directional_accuracy_test', 0)) * 100
     theils_u = float(stored_metrics.get('theils_u_test', 0))
-
-    # Compute MAPE from historical predictions for display.
-    # Compute (actual - pred) / actual as a single fused expression to avoid
-    # extra intermediate arrays.
-    if len(hist_actual_levels) > 0:
-        diff = hist_actual_levels - hist_pred_levels
-        mape = float(np.mean(np.abs(diff / hist_actual_levels)) * 100)
-    else:
-        mape = 0.0
+    mape = float(test_metrics.get('MAPE', 0))
 
     # ── DIAGNOSTIC PLOTS DATA ──
-    # Use last 20% of data for validation diagnostics
-    n_total = len(target_aligned)
-    val_start = int(n_total * 0.8)
-    val_target = target_aligned.iloc[val_start:]
-    val_features = df_features.loc[val_target.index, feature_names]
-    val_pred = pipeline.predict(val_features)
-
-    actual_vs_predicted = {}
+    # Use the train-only model evaluated on its held-out test set (post-train_end rows).
+    # This is the only correct way to produce an OOS actual-vs-predicted diagnostic:
+    # the production model was refit on all data, so any window overlapping its training
+    # period would be in-sample and artificially tight.
     partial_plots = {}
 
-    if len(val_target) > 0:
-        val_actual_arr = val_target.values
-        val_pred_arr = val_pred
-        valid_diag = ~(np.isnan(val_actual_arr) | np.isnan(val_pred_arr))
-        val_actual_arr = val_actual_arr[valid_diag]
-        val_pred_arr = val_pred_arr[valid_diag]
+    try:
+        loaded_to = joblib.load(TRAIN_ONLY_MODEL_PATH)
+        to_pipeline    = loaded_to['pipeline']
+        to_feat_names  = loaded_to['feature_list']
+        to_regressor   = to_pipeline.named_steps['model']
+        to_preprocessor = to_pipeline.named_steps['preprocessor']
+        to_train_range = loaded_to.get('training_date_range', ())
+        to_train_end   = (pd.Timestamp(to_train_range[1])
+                          if to_train_range and len(to_train_range) >= 2
+                          else pd.Timestamp('2023-04-30'))
+        if to_train_end.tzinfo is None and target_aligned.index.tzinfo is not None:
+            to_train_end = to_train_end.tz_localize(target_aligned.index.tzinfo)
+        elif to_train_end.tzinfo is not None and target_aligned.index.tzinfo is None:
+            to_train_end = to_train_end.tz_convert(None)
 
-        val_dates_raw = val_target.index[valid_diag]
-        # Vectorized lookup of prediction dates (one month after each feature date).
-        val_positions = raw_index.get_indexer(val_dates_raw)
-        val_chart_dates = [
-            raw_index[p + 1].strftime('%Y-%m-%d') if (p >= 0 and p + 1 < raw_len)
-            else (val_dates_raw[i] + pd.offsets.MonthEnd(1)).strftime('%Y-%m-%d')
-            for i, p in enumerate(val_positions)
-        ]
+        val_target   = target_aligned[target_aligned.index > to_train_end]
+        val_features = df_features.loc[val_target.index, to_feat_names]
+        val_pred     = to_pipeline.predict(val_features)
 
-        actual_vs_predicted = {
-            'dates': val_chart_dates,
-            'actual': val_actual_arr.tolist(),
-            'predicted': val_pred_arr.tolist(),
-        }
+        if len(val_target) > 0:
+            val_actual_arr = val_target.values
+            val_pred_arr   = val_pred
+            valid_diag = ~(np.isnan(val_actual_arr) | np.isnan(val_pred_arr))
+            val_actual_arr = val_actual_arr[valid_diag]
+            val_pred_arr   = val_pred_arr[valid_diag]
 
-        # Partial residual plots for top 5 features
-        residuals = val_actual_arr - val_pred_arr
-        X_val_transformed = preprocessor.transform(val_features)
-
-        sorted_contribs = sorted(contributions, key=lambda x: abs(x['coefficient']), reverse=True)
-        # Pre-compute feature→index map so we don't call list.index() per iteration.
-        feat_idx_map = {f: i for i, f in enumerate(feature_names)}
-        for c in sorted_contribs[:5]:
-            feat = c['feature']
-            j = feat_idx_map[feat]
-            feat_vals_transformed = X_val_transformed[valid_diag, j]
-            feat_coef = regressor.coef_[j]
-            partial_residuals = residuals + (feat_coef * feat_vals_transformed)
-
-            partial_plots[feat] = {
-                'x': feat_vals_transformed.tolist(),
-                'y': partial_residuals.tolist(),
-            }
+            # Partial residual plots for top 5 features (use train-only model coefficients)
+            residuals = val_actual_arr - val_pred_arr
+            X_val_transformed = to_preprocessor.transform(val_features)
+            sorted_contribs = sorted(contributions, key=lambda x: abs(x['coefficient']), reverse=True)
+            feat_idx_map = {f: i for i, f in enumerate(to_feat_names)}
+            for c in sorted_contribs[:5]:
+                feat = c['feature']
+                j = feat_idx_map.get(feat)
+                if j is None:
+                    continue
+                feat_vals_transformed = X_val_transformed[valid_diag, j]
+                feat_coef = float(to_regressor.coef_[j])
+                partial_residuals = residuals + (feat_coef * feat_vals_transformed)
+                partial_plots[feat] = {
+                    'x': feat_vals_transformed.tolist(),
+                    'y': partial_residuals.tolist(),
+                }
+    except Exception:
+        logger.exception("diagnostics: failed to build OOS diagnostic plots")
 
     # ── MULTI-HORIZON FORECASTS ──
     last_date = raw_df.index[-1]
@@ -415,7 +408,6 @@ def predict_next_month():
             'predicted': hist_pred_levels.tolist(),
         },
         'diagnostics': {
-            'actual_vs_predicted': actual_vs_predicted,
             'partial_plots': partial_plots,
         },
     }
@@ -469,6 +461,12 @@ def get_test_set_predictions():
 
     target = raw_df['ZAR_USD'].shift(-1)
     target_aligned = target.reindex(df_features.index).dropna()
+
+    # Ensure timezone consistency for comparison
+    if train_end.tzinfo is None and target_aligned.index.tzinfo is not None:
+        train_end = train_end.tz_localize(target_aligned.index.tzinfo)
+    elif train_end.tzinfo is not None and target_aligned.index.tzinfo is None:
+        train_end = train_end.tz_convert(None)
 
     test_mask = target_aligned.index > train_end
     test_target = target_aligned[test_mask]

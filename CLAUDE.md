@@ -20,8 +20,12 @@ Dash (v4) multi-page web application for ZAR/USD exchange rate forecasting, depl
 ```
 app.py              — Entry point (Dash init, auth, chat, global callbacks)
 pages/              — Dash page modules (login, registration, dashboard, profile)
-logic/              — Backend logic (supabase_client, data_fetcher, model)
+logic/              — Backend logic (supabase_client, data_fetcher, model/)
+logic/model/        — Split ML logic: inference.py, features.py
 models/             — Serialized ML artifacts (.pkl + report PDF)
+models/legacy/      — Point-in-time snapshot pkls + inference_comparison.json
+models/model.py     — Training script (produces both production and train-only pkls)
+models/train_legacy_snapshots.py — Trains legacy cutoff models for validation
 assets/             — Static files auto-served by Dash (CSS, JS, SVG logos)
 src/three/          — Three.js TypeScript source (builds to assets/three-scenes.js)
 docs/               — Project documentation (ARCHITECTURE, API, DATABASE, DEPLOYMENT, CONTRIBUTING)
@@ -38,7 +42,8 @@ docs/               — Project documentation (ARCHITECTURE, API, DATABASE, DEPL
 3. **Logic (`logic/`):**
    - `supabase_client.py` — Lazy-initialized Supabase client singleton. Uses env vars `SUPABASE_URL` and `SUPABASE_KEY`.
    - `data_fetcher.py` — Fetches macroeconomic data from FRED API, World Bank (gold price Excel scrape), and hardcoded SA inflation. Processes to monthly frequency, saves to Supabase `data` table.
-   - `model.py` — ML inference using a frozen HuberRegressor pipeline in `models/zar_usd_forecast_model.pkl`. Feature engineering pipeline (11 features). Scenario analysis with slider-driven what-if predictions.
+   - `model/features.py` — Feature engineering: builds all 11 features from raw Supabase data. Owns FEATURE_LIST, BASE_FEATURE_NAMES, FEATURE_CATEGORIES, SCENARIO_RAW_PREDICTORS, and `engineer_features()`.
+   - `model/inference.py` — ML inference using the frozen HuberRegressor pipeline. Loads both production and train-only pkls. MAPE is read from stored OOS metrics (not computed in-sample). Diagnostic plots use the train-only model evaluated on the held-out test period.
 
 ### Key Architectural Patterns
 
@@ -50,14 +55,17 @@ docs/               — Project documentation (ARCHITECTURE, API, DATABASE, DEPL
 
 ### Model Details (HuberRegressor — Error-Correction Framework)
 
-- Frozen model: `frozen models/zar_usd_forecast_model.pkl` (sklearn Pipeline: ColumnTransformer + HuberRegressor)
+- Production model: `models/zar_usd_forecast_model.pkl` (sklearn Pipeline: ColumnTransformer + HuberRegressor, retrained on data through 2026-04-30)
+- Train-only model: `models/zar_usd_forecast_model_train_only.pkl` (same architecture, trained on data ≤ 2023-04-30, used for OOS diagnostic plots)
 - Target: ZAR/USD level directly (not log-return). Equation: Ŝ_{t+1} = β₀ + β₁·S_{t-1} + Σ β_j·x̃_j(t)
 - Since β₁ ≈ 0.96, the model behaves as a random-walk anchor with small error-correction adjustments
 - 11 features: ZAR_USD_lag1 (passthrough/unscaled), ZAR_USD_logret1, ZAR_USD_change3, ZAR_USD_zscore12, VIX, VIX_change1, VIX_zscore12, EPU_USA, WUIZAF_SA, bond_spread_change1, GOLD_PRICE_logret1
 - Pipeline: ColumnTransformer (passthrough for lag1 + StandardScaler for remaining 10) → HuberRegressor (α=7.906, ε=1.1)
 - SA Inflation, US CPI, Brent Oil deliberately excluded (trending non-stationary series that cause train-test distribution shift)
-- Test R²=0.6157, Theil's U=0.9969, Directional Accuracy=67.65%
+- Test R²=0.6238, Theil's U=1.0510, Directional Accuracy=64.71%, MAPE=2.18% (OOS test set: May 2023 → Apr 2026)
 - Multi-horizon forecasts (1M, 3M, 6M) iterate predictions assuming macro drivers persist
+- Legacy snapshot models: `models/legacy/prod_2026_0{1,2,3}.pkl` — models trained at Jan/Feb/Mar 2026 cutoffs for point-in-time inference validation. Results in `models/legacy/inference_comparison.json`.
+- Spot vs Predicted distinction: ZAR_USD_lag1 uses S_{t-1} (prior month), not the current spot S_t. So the predicted value is anchored to the previous month's rate, not the cutoff spot.
 
 ### Dashboard Tab Structure
 

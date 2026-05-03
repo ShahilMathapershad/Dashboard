@@ -36,14 +36,14 @@ def fetch_sa_inflation_hardcoded() -> pd.DataFrame:
         # 2025: derived from 2024 index × (1 + YoY/100)
         # YoY rates: 5.3, 5.6, 5.3, 5.2, 4.6, 5.1, 4.8, 4.4, 3.8, 3.4, 3.5, 3.6
         102.4, 103.6, 104.1, 104.3, 103.9, 104.5, 104.6, 104.3, 103.8, 103.3, 103.4, 103.6,
-        # 2026 Jan-Feb: YoY 3.5, 3.0
-        106.0, 106.7,
+        # 2026 Jan-Mar: YoY 3.5, 3.0, 3.1
+        106.0, 106.7, 107.3,
     ]
 
     try:
-        dates = pd.date_range(start="2009-12-31", end="2026-02-28", freq="ME")
+        dates = pd.date_range(start="2009-12-31", end="2026-03-31", freq="ME")
     except ValueError:
-        dates = pd.date_range(start="2009-12-31", end="2026-02-28", freq="M")
+        dates = pd.date_range(start="2009-12-31", end="2026-03-31", freq="M")
 
     df_cpi = pd.DataFrame({"SA_INFLATION": cpi_values}, index=dates)
     df_cpi.index.name = "Date"

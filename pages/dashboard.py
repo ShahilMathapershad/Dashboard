@@ -323,6 +323,33 @@ def model_tab_content(existing_model_data=None):
                            className='card-subtitle'),
                     html.Div(id='diagnostics-container'),
                 ]),
+
+                # Legacy Inference Comparison
+                html.Div(className='model-card', children=[
+                    html.H4('Live Forecast Inference — Jan/Feb/Mar 2026', className='card-title'),
+                    html.P(
+                        'Production models retrained at each month-end snapshot (Jan 2026, Feb 2026, '
+                        'Mar 2026) then evaluated against the realised ZAR/USD one month later. '
+                        'Measures real-world point-in-time forecast accuracy.',
+                        className='card-subtitle',
+                    ),
+                    html.Div(
+                        className='info-box',
+                        style={'marginBottom': '12px', 'padding': '10px 14px',
+                               'borderRadius': '8px', 'fontSize': '0.82rem', 'lineHeight': '1.55'},
+                        children=[
+                            html.Strong('Spot at Cutoff vs Predicted: '),
+                            'Spot at cutoff is the actual ZAR/USD rate on the last day the model had data '
+                            '(e.g. Jan 31, 2026). Predicted is the model\'s forecast for the following '
+                            'month-end (e.g. Feb 28, 2026). The key subtlety: the passthrough feature '
+                            'ZAR_USD_lag1 is Sₜ₋₁ (the prior month\'s rate), not the current '
+                            'spot. So even though β₁ ≈ 0.96, the predicted value is anchored '
+                            'to the previous month\'s rate — meaning spot and predicted can diverge '
+                            'meaningfully when the last two months moved sharply.',
+                        ],
+                    ),
+                    html.Div(id='legacy-inference-container'),
+                ]),
             ]),
         ]),
     ])
@@ -755,6 +782,8 @@ dash.clientside_callback(
     Output('predictor-dropdown-options-store', 'data', allow_duplicate=True),
     Output('selected-predictors', 'data', allow_duplicate=True),
     Output('fetched-data-status', 'data', allow_duplicate=True),
+    Output('model-prediction-data', 'data', allow_duplicate=True),
+    Output('scenario-baseline-data', 'data', allow_duplicate=True),
     Input('force-refresh-trigger', 'data'),
     background=True,
     prevent_initial_call=True,
@@ -762,8 +791,10 @@ dash.clientside_callback(
 def fetch_data(force_refresh):
     import pandas as pd
 
+    _no_update_7 = (dash.no_update,) * 7
+
     if not force_refresh:
-        return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, '', dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     try:
         fred_series = {name: cfg['id'] for name, cfg in SERIES_CONFIG.items() if cfg['source'] == 'FRED'}
@@ -777,14 +808,15 @@ def fetch_data(force_refresh):
         raw = pd.concat([raw, sa_inflation], axis=1)
 
         if raw.empty:
-            return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, 'Failed to fetch data from APIs.', dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         processed = process_data(raw, start_date='2009-12-31')
         status_data = {'text': '● Updated from API', 'color': '#3B82F6'}
 
         if processed.empty:
-            return dash.no_update, 'No data available.', dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, 'No data available.', dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
+        supabase_ok = True
         try:
             save_to_supabase(processed)
             if not wb_gold.empty:
@@ -792,6 +824,7 @@ def fetch_data(force_refresh):
         except Exception as e:
             print(f"Warning: Could not save to Supabase: {e}")
             status_data = {'text': '● Updated (Supabase error)', 'color': '#F59E0B'}
+            supabase_ok = False
 
         df_all = processed.reset_index()
         df_all['Date'] = pd.to_datetime(df_all['Date']).dt.strftime('%Y-%m-%d')
@@ -810,10 +843,42 @@ def fetch_data(force_refresh):
         ]
         default_predictors = ['ZAR_USD'] + all_vars[1:2] if len(all_vars) >= 2 else all_vars[:1]
 
-        return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data
+        # Invalidate model diskcache so predictions reflect the newly saved data.
+        model_pred = dash.no_update
+        scenario_base = dash.no_update
+        if supabase_ok:
+            try:
+                from logic.model.loading import _persistent_cache
+                for key in ('supabase_data_df', 'predict_next_month_result',
+                            'test_set_predictions', 'scenario_baseline_result'):
+                    try:
+                        del _persistent_cache[key]
+                    except KeyError:
+                        pass
+                # Also invalidate the data-storage in-memory cache for this process.
+                from logic.data.storage import _fetched_cache
+                _fetched_cache['df'] = None
+                _fetched_cache['time'] = 0
+            except Exception as cache_err:
+                print(f"Warning: Could not clear model caches: {cache_err}")
+
+            # Re-run predictions against the freshly saved data so the Model and
+            # Scenario tabs reflect the latest numbers without requiring a full
+            # page reload.
+            try:
+                model_pred = {'raw_result': predict_next_month()}
+            except Exception as pred_err:
+                print(f"Warning: Model re-prediction after refresh failed: {pred_err}")
+
+            try:
+                scenario_base = get_scenario_baseline()
+            except Exception as scen_err:
+                print(f"Warning: Scenario re-baseline after refresh failed: {scen_err}")
+
+        return df_all.to_dict('records'), "", dropdown_options, default_predictors, status_data, model_pred, scenario_base
     except Exception as e:
         traceback.print_exc()
-        return dash.no_update, f'Error: {str(e)}', dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, f'Error: {str(e)}', dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
 
 @callback(
@@ -1786,90 +1851,6 @@ def _build_diagnostic_plots(diagnostics_data, theme):
     grid_color = 'rgba(255,255,255,0.03)' if is_dark else 'rgba(0,0,0,0.03)'
     line_color = 'rgba(255,255,255,0.06)' if is_dark else 'rgba(0,0,0,0.06)'
 
-    # Actual vs Predicted Plot (Replaces QQ Plot)
-    avp_data = diagnostics_data.get('actual_vs_predicted', {})
-    avp_plot = html.Div('No comparison data available', style={'color': text_muted})
-    
-    if avp_data and avp_data.get('actual') and avp_data.get('predicted'):
-        avp_fig = go.Figure()
-
-        dates = avp_data.get('dates', list(range(len(avp_data['actual']))))
-        actual = avp_data['actual']
-        predicted = avp_data['predicted']
-        font_family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif"
-
-        avp_fig.add_trace(go.Scatter(
-            x=dates, y=actual,
-            name='Actual',
-            mode='lines+markers',
-            line=dict(color='#E8E8E8' if is_dark else '#1A1A1A', width=2.5, shape='spline'),
-            marker=dict(size=5, color='#E8E8E8' if is_dark else '#1A1A1A'),
-            hovertemplate='<b>Actual</b>: R %{y:.4f}<br>%{x}<extra></extra>',
-        ))
-
-        avp_fig.add_trace(go.Scatter(
-            x=dates, y=predicted,
-            name='Predicted',
-            mode='lines+markers',
-            line=dict(color='#5b8def', width=2.5, shape='spline', dash='dot'),
-            marker=dict(size=5, color='#5b8def', symbol='diamond'),
-            hovertemplate='<b>Predicted</b>: R %{y:.4f}<br>%{x}<extra></extra>',
-        ))
-
-        avp_fig.add_trace(go.Scatter(
-            x=dates + dates[::-1],
-            y=actual + predicted[::-1],
-            fill='toself',
-            fillcolor='rgba(91,141,239,0.08)' if is_dark else 'rgba(91,141,239,0.12)',
-            line=dict(width=0),
-            hoverinfo='skip',
-            showlegend=False,
-        ))
-
-        avp_fig.update_layout(
-            template=None,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            autosize=True,
-            margin=dict(l=60, r=30, t=30, b=60),
-            height=400,
-            font=dict(family=font_family, size=12, color=text_color),
-            modebar=dict(bgcolor='rgba(0,0,0,0)', color=text_muted,
-                         activecolor='#5b8def' if is_dark else '#4f7df3', orientation='v'),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-                font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
-            ),
-            hovermode="x unified",
-            hoverlabel=dict(
-                bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
-                font_size=12, font_family="Inter", font_color=text_color,
-                bordercolor=line_color, namelength=-1,
-            ),
-            xaxis=dict(
-                title=dict(text='Date', font=dict(size=11, color=text_muted)),
-                showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
-                zeroline=False, showline=True, linewidth=1, linecolor=line_color,
-                tickfont=dict(size=10, color=text_muted),
-            ),
-            yaxis=dict(
-                title=dict(text='ZAR / USD', font=dict(size=11, color=text_muted)),
-                showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
-                zeroline=False, showline=True, linewidth=1, linecolor=line_color,
-                tickfont=dict(size=10, color=text_muted),
-                tickformat=".2f",
-            ),
-        )
-
-        avp_plot = html.Div(className='diagnostic-plot-container', children=[
-            html.H5('Actual vs Predicted ZAR/USD (Validation Set)',
-                    style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px'}),
-            html.P('Time series comparison of model predictions against realised exchange rates.',
-                   style={'fontSize': '0.8125rem', 'color': text_muted, 'marginBottom': '12px'}),
-            dcc.Graph(id='diag-avp-plot', figure=avp_fig.to_dict(), style={'height': '400px'},
-                      config={'displayModeBar': 'hover', 'displaylogo': False, 'responsive': True})
-        ])
-
     # Partial Plots
     partial_plot_children = []
     partial_plots_data = diagnostics_data.get('partial_plots', {})
@@ -1939,7 +1920,6 @@ def _build_diagnostic_plots(diagnostics_data, theme):
 
     # Combine into a grid layout to prevent horizontal stretching
     return html.Div(className='diagnostics-grid', children=[
-        html.Div(avp_plot, className='diagnostics-full-width'),
         html.Div(className='partial-plots-section', children=[
             html.H5('Partial Residual Plots',
                     style={'fontSize': '0.9375rem', 'fontWeight': '600', 'marginBottom': '8px', 'marginTop': '32px'}),
@@ -2086,6 +2066,140 @@ def render_test_set_chart(active_tab, sub_tab, theme):
     ])
 
 
+@callback(
+    Output('legacy-inference-container', 'children'),
+    Input('dashboard-tab', 'data'),
+    Input('model-sub-tab', 'data'),
+    State('theme-store', 'data'),
+    prevent_initial_call='initial_duplicate',
+)
+def render_legacy_inference(active_tab, sub_tab, theme):
+    if active_tab != 'model' or sub_tab != 'specifications':
+        return dash.no_update
+
+    import json as _json
+    _JSON_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'models', 'legacy', 'inference_comparison.json',
+    )
+    try:
+        with open(_JSON_PATH) as f:
+            data = _json.load(f)
+    except FileNotFoundError:
+        return html.P('Legacy inference data not found.',
+                      style={'color': 'var(--text-muted)', 'padding': '20px'})
+    except Exception as exc:
+        return html.P(f'Error loading legacy data: {exc}',
+                      style={'color': 'var(--text-muted)', 'padding': '20px'})
+
+    rows = data.get('rows', [])
+    summary = data.get('summary', {})
+    is_dark = (theme == 'dark') if theme else True
+
+    _MONTH_LABELS = {
+        '2025-02-28': 'Feb 2025', '2025-03-31': 'Mar 2025', '2025-04-30': 'Apr 2025',
+    }
+    _CUTOFF_LABELS = {
+        '2025-01-31': 'Jan 2025', '2025-02-28': 'Feb 2025', '2025-03-31': 'Mar 2025',
+    }
+
+    col_style = {
+        'padding': '10px 14px', 'fontSize': '0.8125rem',
+        'borderBottom': '1px solid var(--border)',
+        'color': 'var(--text-1)', 'verticalAlign': 'middle',
+    }
+    hdr_style = {
+        **col_style,
+        'fontWeight': '600', 'color': 'var(--text-2)',
+        'fontSize': '0.75rem', 'textTransform': 'uppercase', 'letterSpacing': '0.04em',
+        'backgroundColor': 'var(--surface-2)',
+    }
+    num_style = {**col_style, 'fontFamily': "'SF Mono', 'Fira Mono', monospace", 'textAlign': 'right'}
+
+    def _dir_badge(correct):
+        if correct is None:
+            return html.Span('—', style={'color': 'var(--text-muted)'})
+        if correct:
+            return html.Span('HIT', style={
+                'backgroundColor': 'rgba(16,185,129,0.15)', 'color': '#10B981',
+                'padding': '2px 8px', 'borderRadius': '4px', 'fontSize': '0.7rem', 'fontWeight': '600',
+            })
+        return html.Span('MISS', style={
+            'backgroundColor': 'rgba(239,68,68,0.12)', 'color': '#ef4444',
+            'padding': '2px 8px', 'borderRadius': '4px', 'fontSize': '0.7rem', 'fontWeight': '600',
+        })
+
+    def _err_color(error):
+        if error is None:
+            return 'var(--text-1)'
+        return '#ef4444' if abs(error) > 0.2 else '#10B981' if abs(error) < 0.1 else '#f59e0b'
+
+    table_rows = []
+    for r in rows:
+        err = r.get('error')
+        pct = r.get('pct_error')
+        table_rows.append(html.Tr(children=[
+            html.Td(_MONTH_LABELS.get(r['predict_month'], r['predict_month']), style=col_style),
+            html.Td(_CUTOFF_LABELS.get(r['cutoff'], r['cutoff']), style={**col_style, 'color': 'var(--text-2)'}),
+            html.Td(f"R {r['spot_at_cutoff']:.4f}", style=num_style),
+            html.Td(f"R {r['predicted']:.4f}", style={**num_style, 'color': '#5b8def'}),
+            html.Td(f"R {r['actual']:.4f}" if r['actual'] else '—', style=num_style),
+            html.Td(
+                f"{err:+.4f}" if err is not None else '—',
+                style={**num_style, 'color': _err_color(err)},
+            ),
+            html.Td(
+                f"{pct:+.2f}%" if pct is not None else '—',
+                style={**num_style, 'color': _err_color(err)},
+            ),
+            html.Td(_dir_badge(r.get('direction_correct')), style={**col_style, 'textAlign': 'center'}),
+            html.Td(r.get('model_name', '').replace('_', ' '), style={**col_style, 'color': 'var(--text-3)', 'fontSize': '0.7rem'}),
+        ]))
+
+    table = html.Div(style={'overflowX': 'auto'}, children=[
+        html.Table(style={'width': '100%', 'borderCollapse': 'collapse'}, children=[
+            html.Thead(html.Tr(children=[
+                html.Th('Forecast Month', style=hdr_style),
+                html.Th('Trained Through', style=hdr_style),
+                html.Th('Spot at Cutoff', style={**hdr_style, 'textAlign': 'right'}),
+                html.Th('Predicted', style={**hdr_style, 'textAlign': 'right'}),
+                html.Th('Actual', style={**hdr_style, 'textAlign': 'right'}),
+                html.Th('Error (ZAR)', style={**hdr_style, 'textAlign': 'right'}),
+                html.Th('Error (%)', style={**hdr_style, 'textAlign': 'right'}),
+                html.Th('Direction', style={**hdr_style, 'textAlign': 'center'}),
+                html.Th('Model', style={**hdr_style, 'fontSize': '0.7rem'}),
+            ])),
+            html.Tbody(table_rows),
+        ]),
+    ])
+
+    metrics_pills = html.Div(className='model-info-grid', style={'marginTop': '20px'}, children=[
+        _info_pill('N Forecasts', str(summary.get('n', 0)),
+                   'Number of point-in-time monthly forecasts evaluated against actuals.'),
+        _info_pill('MAE', f"ZAR {summary.get('mae', 0):.4f}",
+                   'Mean Absolute Error across all legacy forecasts.'),
+        _info_pill('RMSE', f"ZAR {summary.get('rmse', 0):.4f}",
+                   'Root Mean Squared Error — penalises larger misses more heavily.'),
+        _info_pill('MSE', f"{summary.get('mse', 0):.4f}",
+                   'Mean Squared Error of the legacy forecast set.'),
+        _info_pill('MAD', f"ZAR {summary.get('mad', 0):.4f}",
+                   'Median Absolute Deviation — robust to outliers; median of |errors|.'),
+        _info_pill('MAPE', f"{summary.get('mape', 0):.2f}%",
+                   'Mean Absolute Percentage Error relative to realised ZAR/USD level.'),
+        _info_pill('Direction Hit Rate', f"{summary.get('hit_rate', 0)*100:.1f}%",
+                   'Proportion of forecasts that correctly predicted ZAR strengthen vs weaken.'),
+    ])
+
+    note = html.P(
+        f"Generated {data.get('generated_at', '')[:10]}. "
+        "Each model was trained independently using the full GridSearchCV pipeline on data "
+        "available at that calendar month-end, then immediately used for a single out-of-sample forecast.",
+        style={'fontSize': '0.75rem', 'color': 'var(--text-muted)', 'marginTop': '16px'},
+    )
+
+    return html.Div([table, metrics_pills, note])
+
+
 def _info_pill(label, value, description=None):
     return html.Div(className='info-pill', children=[
         html.Div(className='info-pill-header', children=[
@@ -2208,24 +2322,21 @@ def render_scenario_sliders(baseline, _agent_sync, current_values):
 @callback(
     Output('scenario-current-values', 'data', allow_duplicate=True),
     Input({'type': 'scenario-slider', 'index': dash.ALL}, 'value'),
+    State({'type': 'scenario-slider', 'index': dash.ALL}, 'id'),
     State('scenario-baseline-data', 'data'),
     prevent_initial_call=True
 )
-def update_scenario_values(slider_values, baseline):
-    if not baseline or not slider_values:
+def update_scenario_values(slider_values, slider_ids, baseline):
+    if not baseline or not slider_ids:
         return dash.no_update
 
-    predictors = baseline.get('predictors', [])
-    updated = {}
+    # Start with baseline values
+    updated = {p['raw_col']: p['current_value'] for p in baseline.get('predictors', [])}
 
-    for i, pred in enumerate(predictors):
-        raw_col = pred['raw_col']
-
-        if i < len(slider_values) and slider_values[i] is not None:
-            val = slider_values[i]
-            updated[raw_col] = val
-        else:
-            updated[raw_col] = pred['current_value']
+    # Overwrite with current slider positions, matched by index
+    for val, id_dict in zip(slider_values, slider_ids):
+        if val is not None:
+            updated[id_dict['index']] = val
 
     return updated
 
@@ -2233,18 +2344,29 @@ def update_scenario_values(slider_values, baseline):
 @callback(
     Output({'type': 'scenario-value-display', 'index': dash.ALL}, 'children'),
     Input('scenario-current-values', 'data'),
+    State({'type': 'scenario-value-display', 'index': dash.ALL}, 'id'),
     State('scenario-baseline-data', 'data'),
     prevent_initial_call=True
 )
-def update_value_displays(current_values, baseline):
-    if not baseline or not current_values:
-        return dash.no_update
+def update_value_displays(current_values, display_ids, baseline):
+    if not display_ids:
+        return []
 
-    predictors = baseline.get('predictors', [])
+    if not baseline or not current_values:
+        return [dash.no_update] * len(display_ids)
+
+    # Map raw_col to predictor config for easy lookup
+    predictors = {p['raw_col']: p for p in baseline.get('predictors', [])}
     display_values = []
 
-    for pred in predictors:
-        raw_col = pred['raw_col']
+    for id_dict in display_ids:
+        raw_col = id_dict['index']
+        pred = predictors.get(raw_col)
+
+        if not pred:
+            display_values.append(dash.no_update)
+            continue
+
         unit = SCENARIO_UNITS.get(raw_col, '')
         val = current_values.get(raw_col, pred['current_value'])
 
@@ -2257,7 +2379,10 @@ def update_value_displays(current_values, baseline):
         else:
             decimals = 2
 
-        display_values.append(f"{val:.{decimals}f} {unit}".strip())
+        try:
+            display_values.append(f"{float(val):.{decimals}f} {unit}".strip())
+        except (ValueError, TypeError):
+            display_values.append(str(val))
 
     return display_values
 

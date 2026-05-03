@@ -36,10 +36,16 @@ Dash/
 ├── logic/                         # Business logic (no UI code)
 │   ├── supabase_client.py         #   Database connection singleton
 │   ├── data_fetcher.py            #   Data pipeline (FRED, World Bank, StatsSA)
-│   └── model.py                   #   ML inference + scenario analysis
+│   └── model/                     #   ML inference + scenario analysis
+│       ├── features.py            #     Feature engineering (11 features, FEATURE_LIST)
+│       └── inference.py           #     Prediction, diagnostics, scenario analysis
 ├── models/                        # Serialized ML artifacts
-│   ├── zar_usd_forecast_model.pkl #   sklearn Pipeline (ColumnTransformer + HuberRegressor)
-│   └── ZAR_USD_Model_Report.pdf   #   Model documentation
+│   ├── zar_usd_forecast_model.pkl          #   Production model (full data through 2026-04-30)
+│   ├── zar_usd_forecast_model_train_only.pkl #   Train-only model (cutoff 2023-04-30, for OOS diagnostics)
+│   ├── model.py                            #   Training script (GridSearchCV + full refit)
+│   ├── train_legacy_snapshots.py           #   Point-in-time snapshot training
+│   ├── legacy/                             #   Snapshot pkl files + inference_comparison.json
+│   └── ZAR_USD_Model_Report.pdf            #   Model documentation
 ├── assets/                        # Static files (auto-served by Dash)
 │   ├── style.css                  #   Global styles (dark/light theme)
 │   ├── interactions.js            #   Client-side JavaScript
@@ -189,17 +195,32 @@ ColumnTransformer:
 
 SA Inflation, US CPI, and Brent Oil are excluded because they are trending non-stationary series that cause train-test distribution shift.
 
-### Performance Metrics (Out-of-Sample)
+### Performance Metrics (Out-of-Sample, test set: May 2023 → Apr 2026)
 
 | Metric | Value |
 |--------|-------|
-| MAE | Stored in model artifact |
-| RMSE | Stored in model artifact |
-| R² | 0.6157 |
-| Theil's U | 0.9969 |
-| Directional Accuracy | 67.65% |
-| Training Observations | 134 |
-| Test Observations | 34 |
+| MAE | 0.3899 |
+| RMSE | 0.5283 |
+| R² | 0.6238 |
+| Adjusted R² | 0.4357 |
+| Theil's U | 1.0510 |
+| Directional Accuracy | 64.71% |
+| MAPE | 2.18% |
+| Training Observations | 132 |
+| Test Observations | 35 |
+
+### Model Artifacts
+
+| File | Description |
+|------|-------------|
+| `models/zar_usd_forecast_model.pkl` | Production model — refitted on all data through 2026-04-30 |
+| `models/zar_usd_forecast_model_train_only.pkl` | Train-only model — cutoff 2023-04-30, test set held out for OOS diagnostics and MAPE reporting |
+| `models/legacy/prod_2026_0{1,2,3}.pkl` | Point-in-time snapshot models trained at Jan/Feb/Mar 2026 cutoffs |
+| `models/legacy/inference_comparison.json` | Predicted vs actual comparison for the 3 legacy snapshots |
+
+### Spot vs Predicted Distinction
+
+The passthrough feature `ZAR_USD_lag1` is S_{t-1} (the prior month's rate), not the current spot S_t. This means the predicted value is anchored to the *previous* month's rate. Even with β₁ ≈ 0.96, spot and predicted can diverge meaningfully when the last two months moved sharply in opposite directions.
 
 ## Dashboard Tabs
 
@@ -216,8 +237,9 @@ SA Inflation, US CPI, and Brent Oil are excluded because they are trending non-s
 - Feature contribution bar chart (sorted by absolute impact)
 - Historical fit chart (60-month window, actual vs predicted)
 - Model specification card (HuberRegressor parameters)
-- Performance metrics (MAE, RMSE, R², Theil's U, directional accuracy, MAPE)
-- Diagnostic plots (actual vs predicted scatter, partial residual plots)
+- Performance metrics (MAE, RMSE, R², Theil's U, directional accuracy, MAPE — all OOS from train-only model)
+- Diagnostic plots (actual vs predicted scatter, partial residual plots — use train-only model on held-out test period to avoid in-sample contamination)
+- Live Forecast Inference card: point-in-time predicted vs actual table for Jan/Feb/Mar 2026 snapshots, with error, direction hit/miss, and summary metrics
 
 ### Scenario Tab
 

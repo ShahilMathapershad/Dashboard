@@ -87,10 +87,16 @@ Dash/
 ├── logic/                    # Backend logic
 │   ├── supabase_client.py    # Lazy-initialized Supabase singleton
 │   ├── data_fetcher.py       # FRED/World Bank/StatsSA data pipeline
-│   └── model.py              # ML inference, feature engineering, scenarios
+│   └── model/                # ML inference split into two modules
+│       ├── features.py       #   Feature engineering (11 features)
+│       └── inference.py      #   Prediction, diagnostics, scenario analysis
 │
 ├── models/                   # Serialized ML artifacts
-│   ├── zar_usd_forecast_model.pkl
+│   ├── zar_usd_forecast_model.pkl          # Production model (through 2026-04-30)
+│   ├── zar_usd_forecast_model_train_only.pkl # Train-only model (cutoff 2023-04-30)
+│   ├── model.py                            # Training script
+│   ├── train_legacy_snapshots.py           # Legacy snapshot trainer
+│   ├── legacy/                             # Point-in-time snapshot pkls + JSON
 │   └── ZAR_USD_Model_Report.pdf
 │
 ├── assets/                   # Static assets (auto-served by Dash)
@@ -132,10 +138,12 @@ The frozen HuberRegressor pipeline uses an error-correction framework:
 
 With `B1 ~ 0.96`, the model behaves as a random-walk anchor with small corrections from 10 macro signals. Multi-horizon forecasts (1M, 3M, 6M) iterate predictions forward assuming macro drivers persist.
 
-**Performance (out-of-sample test set):**
-- Test R² = 0.6157
-- Theil's U = 0.9969
-- Directional Accuracy = 67.65%
+**Performance (out-of-sample test set, May 2023 → Apr 2026):**
+- Test R² = 0.6238, Adjusted R² = 0.4357
+- Theil's U = 1.051, Directional Accuracy = 64.71%
+- MAE = 0.39, RMSE = 0.53, MAPE = 2.18%
+
+A train-only model (cutoff 2023-04-30) is kept alongside the production model so that all reported OOS metrics and diagnostic plots are genuinely out-of-sample. Legacy snapshot models trained at Jan/Feb/Mar 2026 cutoffs provide additional point-in-time forecast validation.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for detailed model documentation.
 
