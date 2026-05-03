@@ -1280,7 +1280,7 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
                 (sub[compare_x].values, sub[compare_y].values),
                 sub[compare_z].values,
                 (xi_grid, yi_grid),
-                method='cubic',
+                method='linear',
             )
             # Fill NaN edges with nearest-neighbor
             zi_nearest = griddata(
@@ -1326,20 +1326,18 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             )
             return fig
 
-        # ── 2D: scatter — X = predictor 1, Y = predictor 2 ──
-        # Use markers (not a connected line) since macroeconomic months are not
-        # a function of one variable; sorting by X to draw a line crosses time
-        # arbitrarily and misrepresents the relationship.
-        pair = df[['Date', compare_x, compare_y]].dropna()
+        # ── 2D: line plot — X = predictor 1, Y = predictor 2 ──
+        # Sorted by X to ensure a "one-to-one function" appearance, matching the
+        # expectation for a non-temporal line plot.
+        pair = df[['Date', compare_x, compare_y]].dropna().sort_values(compare_x)
         corr_val = pair[compare_x].corr(pair[compare_y]) if len(pair) >= 2 else None
 
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
                 x=pair[compare_x], y=pair[compare_y],
-                mode='markers',
-                marker=dict(color=color_palette[0], size=6, opacity=0.75,
-                            line=dict(width=0.5, color=line_color)),
+                mode='lines',
+                line=dict(color=color_palette[0], width=3, shape='spline'),
                 customdata=pair['Date'].dt.strftime('%Y-%m'),
                 hovertemplate=(f'<b>%{{customdata}}</b><br>'
                                f'{x_label}: %{{x:.4f}}<br>'
