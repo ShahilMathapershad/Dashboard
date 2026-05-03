@@ -1114,7 +1114,29 @@ def init_compare_defaults(options, existing):
         return dash.no_update
     if not options:
         return []
-    # Default: ZAR_USD + first other variable
+    defaults = ['ZAR_USD']
+    for o in options:
+        if o['value'] != 'ZAR_USD':
+            defaults.append(o['value'])
+            break
+    return defaults
+
+
+# Ensure defaults are checked when user switches to compare mode
+@callback(
+    Output('selected-compare-vars', 'data', allow_duplicate=True),
+    Input('plot-mode', 'data'),
+    State('predictor-dropdown-options-store', 'data'),
+    State('selected-compare-vars', 'data'),
+    prevent_initial_call=True
+)
+def ensure_compare_defaults_on_switch(plot_mode, options, existing):
+    if plot_mode != 'compare':
+        return dash.no_update
+    if existing and len(existing) >= 2:
+        return dash.no_update
+    if not options:
+        return dash.no_update
     defaults = ['ZAR_USD']
     for o in options:
         if o['value'] != 'ZAR_USD':
