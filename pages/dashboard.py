@@ -1220,6 +1220,12 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         # Filter to valid columns
         cmp = [v for v in compare_vars if v in df.columns]
         if len(cmp) < 2:
+            # Auto-default: ZAR_USD vs first available other column
+            available = [c for c in df.columns if c != 'Date' and df[c].notna().sum() > 0]
+            if 'ZAR_USD' in available:
+                available = ['ZAR_USD'] + [c for c in available if c != 'ZAR_USD']
+            cmp = available[:2]
+        if len(cmp) < 2:
             return go.Figure()
 
         compare_x = cmp[0]
