@@ -1,0 +1,53 @@
+{
+  "generated_at": "2026-05-03T15:27:33.797484",
+  "rows": [
+    {
+      "cutoff": "2026-01-31",
+      "predict_month": "2026-02-28",
+      "spot_at_cutoff": 16.0354,
+      "predicted": 16.5829,
+      "actual": 15.9167,
+      "error": 0.6662,
+      "abs_error": 0.6662,
+      "pct_error": 4.1856,
+      "direction_correct": false,
+      "model_name": "extended_Huber",
+      "pkl_file": "prod_2026_01.pkl"
+    },
+    {
+      "cutoff": "2026-02-28",
+      "predict_month": "2026-03-31",
+      "spot_at_cutoff": 15.9167,
+      "predicted": 15.9938,
+      "actual": 17.0824,
+      "error": -1.0886,
+      "abs_error": 1.0886,
+      "pct_error": -6.3724,
+      "direction_correct": true,
+      "model_name": "extended_Huber",
+      "pkl_file": "prod_2026_02.pkl"
+    },
+    {
+      "cutoff": "2026-03-31",
+      "predict_month": "2026-04-30",
+      "spot_at_cutoff": 17.0824,
+      "predicted": 15.8838,
+      "actual": 16.4929,
+      "error": -0.6091,
+      "abs_error": 0.6091,
+      "pct_error": -3.6929,
+      "direction_correct": true,
+      "model_name": "extended_Huber",
+      "pkl_file": "prod_2026_03.pkl"
+    }
+  ],
+  "summary": {
+    "mae": 0.788,
+    "mse": 0.6666,
+    "rmse": 0.8165,
+    "mad": 0.6662,
+    "mape": 4.7504,
+    "hit_rate": 0.6667,
+    "n": 3
+  }
+}
