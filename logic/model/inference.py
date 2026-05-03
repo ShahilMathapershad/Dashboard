@@ -224,16 +224,19 @@ def predict_next_month():
             val_actual_arr = val_actual_arr[valid_diag]
             val_pred_arr   = val_pred_arr[valid_diag]
 
-            # Partial residual plots for top 5 features (use train-only model coefficients)
+            # Partial residual plots for top 5 features. Both the ranking and
+            # the coefficient must come from the train-only model — the
+            # residuals are this model's residuals, so mixing in the production
+            # model's ranking would pair train-only residuals with features
+            # that are merely the most influential under the production fit.
             residuals = val_actual_arr - val_pred_arr
             X_val_transformed = to_preprocessor.transform(val_features)
-            sorted_contribs = sorted(contributions, key=lambda x: abs(x['coefficient']), reverse=True)
-            feat_idx_map = {f: i for i, f in enumerate(to_feat_names)}
-            for c in sorted_contribs[:5]:
-                feat = c['feature']
-                j = feat_idx_map.get(feat)
-                if j is None:
-                    continue
+            to_sorted = sorted(
+                enumerate(to_feat_names),
+                key=lambda ij: abs(float(to_regressor.coef_[ij[0]])),
+                reverse=True,
+            )
+            for j, feat in to_sorted[:5]:
                 feat_vals_transformed = X_val_transformed[valid_diag, j]
                 feat_coef = float(to_regressor.coef_[j])
                 partial_residuals = residuals + (feat_coef * feat_vals_transformed)

@@ -1133,7 +1133,10 @@ def init_compare_defaults(options, existing):
 def ensure_compare_defaults_on_switch(plot_mode, options, existing):
     if plot_mode != 'compare':
         return dash.no_update
-    if existing and len(existing) >= 2:
+    # Only backfill when the selection is genuinely empty. If the user has at
+    # least one variable picked we leave them alone — the graph callback will
+    # auto-default the missing axis when rendering.
+    if existing:
         return dash.no_update
     if not options:
         return dash.no_update
@@ -1206,8 +1209,11 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         friendly_names = [n[:20] + '…' if len(n) > 20 else n for n in friendly_names]
 
         corr = df[numeric_cols].corr(min_periods=12)
-        corr = corr.fillna(0)
         z = corr.values
+        # Render NaN cells as '—' (insufficient overlap) instead of disguising
+        # them as a genuine zero correlation. Plotly will leave the z-cell
+        # blank when the value is NaN.
+        text_grid = np.where(np.isnan(z), '—', np.round(z, 2).astype(str))
 
         fig = go.Figure(data=go.Heatmap(
             z=z,
@@ -1215,7 +1221,7 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             y=friendly_names,
             colorscale=[[0, '#EF4444'], [0.5, '#1a1a2e' if is_dark else '#f8f8fc'], [1, '#10B981']],
             zmin=-1, zmax=1,
-            text=np.round(z, 2),
+            text=text_grid,
             texttemplate='%{text}',
             textfont=dict(size=10, color=text_color),
             hovertemplate='%{x} vs %{y}<br>r = %{z:.3f}<extra></extra>',
@@ -1320,18 +1326,24 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             )
             return fig
 
-        # ── 2D: line plot — X = predictor 1, Y = predictor 2 ──
-        pair = df[[compare_x, compare_y]].dropna().sort_values(compare_x)
+        # ── 2D: scatter — X = predictor 1, Y = predictor 2 ──
+        # Use markers (not a connected line) since macroeconomic months are not
+        # a function of one variable; sorting by X to draw a line crosses time
+        # arbitrarily and misrepresents the relationship.
+        pair = df[['Date', compare_x, compare_y]].dropna()
         corr_val = pair[compare_x].corr(pair[compare_y]) if len(pair) >= 2 else None
 
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
                 x=pair[compare_x], y=pair[compare_y],
-                mode='lines',
-                line=dict(color=color_palette[0], width=2.5, shape='spline'),
-                hovertemplate=(f'<b>{x_label}</b>: %{{x:.4f}}<br>'
-                               f'<b>{y_label}</b>: %{{y:.4f}}<extra></extra>'),
+                mode='markers',
+                marker=dict(color=color_palette[0], size=6, opacity=0.75,
+                            line=dict(width=0.5, color=line_color)),
+                customdata=pair['Date'].dt.strftime('%Y-%m'),
+                hovertemplate=(f'<b>%{{customdata}}</b><br>'
+                               f'{x_label}: %{{x:.4f}}<br>'
+                               f'{y_label}: %{{y:.4f}}<extra></extra>'),
             )
         )
 
@@ -1538,12 +1550,14 @@ def render_model_ui(active_tab, prediction_data, theme, pathname):
     fv_misalign_pct = result.get('fair_value_misalignment_pct', 0)
     fv_signal = result.get('fair_value_signal', 'fairly_valued')
 
+    # fv_signal == 'undervalued' means the rate (R per USD) is below fair value,
+    # i.e. ZAR is currently too strong → ZAR Overvalued. The opposite for 'overvalued'.
     if fv_signal == 'undervalued':
         signal_color = '#EF4444'
-        signal_label = 'ZAR Undervalued'
+        signal_label = 'ZAR Overvalued'
     elif fv_signal == 'overvalued':
         signal_color = '#10B981'
-        signal_label = 'ZAR Overvalued'
+        signal_label = 'ZAR Undervalued'
     else:
         signal_color = '#6b6b6b'
         signal_label = 'Fairly Valued'
@@ -1781,8 +1795,9 @@ def render_model_ui(active_tab, prediction_data, theme, pathname):
         ]),
     ])
 
-    # Dynamic Description Generation
-    top_feature = result['contributions'][0] if result['contributions'] else None
+    # Dynamic Description Generation — show the top *correction* driver, not the
+    # lag1 random-walk anchor (which always dominates the raw contributions list).
+    top_feature = correction_contribs[0] if correction_contribs else None
     feature_impact_text = ""
     if top_feature:
         feat_name = get_friendly_feature_name(top_feature['feature'])
@@ -2709,8 +2724,20 @@ def manage_saved_scenarios(save_clicks, clear_clicks, current_values, baseline, 
 
             # Create scenario snapshot
             import datetime
-            scenario_name = f"Scenario {len(saved_scenarios) + 1}"
             timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+
+            # Monotonically increasing counter survives the max-5 trim. Pulled
+            # from the highest 'Scenario N' suffix already in the list.
+            existing_nums = []
+            for s in (saved_scenarios or []):
+                nm = s.get('name', '')
+                if nm.startswith('Scenario '):
+                    try:
+                        existing_nums.append(int(nm.split(' ', 1)[1]))
+                    except (ValueError, IndexError):
+                        pass
+            next_num = (max(existing_nums) + 1) if existing_nums else 1
+            scenario_name = f"Scenario {next_num}"
 
             scenario_snapshot = {
                 'name': scenario_name,

@@ -1468,9 +1468,11 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
     current_messages = current_messages or []
     chat_history = chat_history or []
 
-    # Cap chat history to prevent unbounded growth in session storage
-    if len(chat_history) > 40:
-        chat_history = chat_history[-40:]
+    # Cap chat history to prevent unbounded growth in session storage. Cap is
+    # re-applied after the AI response is appended (see end of callback).
+    CHAT_HISTORY_CAP = 40
+    if len(chat_history) > CHAT_HISTORY_CAP:
+        chat_history = chat_history[-CHAT_HISTORY_CAP:]
 
     current_messages.append(
         html.Div(className='chat-message chat-message-user', children=[

@@ -20,7 +20,10 @@ from logic.supabase_client import get_supabase
 
 # Persistent cache for Supabase data + model results. Shared across separate
 # background processes (gunicorn workers + Dash background callbacks).
-_persistent_cache = diskcache.Cache("./.cache/data", size_limit=2**25)  # 32MB
+# Anchor to the project root so workers spawned with a different cwd still
+# share one cache directory.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_persistent_cache = diskcache.Cache(os.path.join(_PROJECT_ROOT, '.cache', 'data'), size_limit=2**25)  # 32MB
 
 try:
     import joblib
@@ -31,14 +34,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised at deploy tim
 
 logger = logging.getLogger("ModelPredictor")
 
-MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    'models', 'zar_usd_forecast_model.pkl',
-)
-TRAIN_ONLY_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    'models', 'zar_usd_forecast_model_train_only.pkl',
-)
+MODEL_PATH = os.path.join(_PROJECT_ROOT, 'models', 'zar_usd_forecast_model.pkl')
+TRAIN_ONLY_MODEL_PATH = os.path.join(_PROJECT_ROOT, 'models', 'zar_usd_forecast_model_train_only.pkl')
 
 _MODEL_CACHE_KEY = 'model_data'
 _model_cache = {}
