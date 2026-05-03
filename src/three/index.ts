@@ -5,15 +5,13 @@
  * Three.js scenes and interaction modules.
  *
  * Landing page  → LandingScene (3D globe + flowing mesh)
- * Dashboard     → ChartTilt + CardDepth (interactive 3D depth)
+ * Dashboard     → CardDepth (interactive depth)
  */
 
 import { LandingScene } from './LandingScene';
-import { ChartTilt } from './ChartTilt';
 import { CardDepth } from './CardDepth';
 
 let landingScene: LandingScene | null = null;
-let chartTilt: ChartTilt | null = null;
 let cardDepth: CardDepth | null = null;
 
 function initLanding(): void {
@@ -28,7 +26,6 @@ function initLanding(): void {
 }
 
 function initDashboard(): void {
-  if (!chartTilt) chartTilt = new ChartTilt();
   if (!cardDepth) cardDepth = new CardDepth();
 }
 
@@ -64,10 +61,9 @@ pageObserver.observe(document.body, { childList: true, subtree: true });
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
   landingScene?.destroy();
-  chartTilt?.destroy();
   cardDepth?.destroy();
   pageObserver.disconnect();
 });
 
 // Export for debugging
-(window as any).DashScenes = { landingScene, chartTilt, cardDepth };
+(window as any).DashScenes = { landingScene, cardDepth };

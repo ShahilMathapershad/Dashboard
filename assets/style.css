@@ -3924,29 +3924,6 @@ p  { margin: 0; color: var(--text-2); }
     }
 }
 
-/* ── Chart 3D Tilt System ── */
-.chart-3d {
-    transform-style: preserve-3d;
-    will-change: transform;
-    /* Spring-back on leave handled by ChartTilt.ts */
-}
-
-/* Glass-shine highlight that follows cursor on chart-3d */
-.chart-3d-shine {
-    position: absolute;
-    width: 280px;
-    height: 280px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%);
-    pointer-events: none;
-    z-index: 3;
-    opacity: 0;
-    transition: opacity 0.4s var(--spring);
-    mix-blend-mode: screen;
-}
-.light-theme .chart-3d-shine {
-    background: radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%);
-}
 
 /* ── 3D Chart Background — Spotlight gradient ── */
 .hero-chart .js-plotly-plot,
@@ -4162,12 +4139,3 @@ p  { margin: 0; color: var(--text-2); }
     backdrop-filter: blur(12px) saturate(160%);
 }
 
-/* ── Disable 3D tilt on touch / small screens ── */
-@media (pointer: coarse), (max-width: 768px) {
-    .chart-3d {
-        transform: none !important;
-    }
-    .chart-3d-shine {
-        display: none !important;
-    }
-}

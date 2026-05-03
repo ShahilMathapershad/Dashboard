@@ -204,10 +204,9 @@ def data_tab_content(existing_data=None):
                 ]),
             ]),
 
-            # Hero Chart — 3D tilt-enabled
             dcc.Graph(
                 id='zar-graph',
-                className='hero-chart chart-3d',
+                className='hero-chart',
                 style={'height': 'clamp(300px, 55vh, 760px)', 'width': '100%'},
                 config={
                     'displayModeBar': 'hover',
@@ -426,7 +425,7 @@ def scenario_tab_content():
                 ]),
 
                 # Waterfall chart — 3D tilt
-                html.Div(className='model-card scenario-waterfall-panel chart-3d', children=[
+                html.Div(className='model-card scenario-waterfall-panel', children=[
                     html.H4('Impact Waterfall', className='card-title'),
                     html.P('Contribution change per feature from base to scenario (scaled space)',
                            className='card-subtitle'),
