@@ -746,7 +746,7 @@ def populate_explainable_registry(fetched_data):
     pages/dashboard.py:877. We derive column names from the first record's keys.
     """
     corr_vars = []
-    if fetched_data and isinstance(fetched_data, list) and fetched_data:
+    if isinstance(fetched_data, list) and fetched_data:
         corr_vars = [k for k in fetched_data[0].keys() if k != 'Date']
     return serialize_for_store(corr_vars)
 
