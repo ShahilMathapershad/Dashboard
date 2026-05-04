@@ -1624,6 +1624,8 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
         ai_text = f"Sorry, I couldn't process that request. ({type(e).__name__}: {e})"
 
     chat_history.append({'role': 'model', 'parts': [ai_text]})
+    if len(chat_history) > CHAT_HISTORY_CAP:
+        chat_history = chat_history[-CHAT_HISTORY_CAP:]
 
     current_messages.append(
         html.Div(className='chat-message chat-message-ai', children=[

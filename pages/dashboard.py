@@ -1415,14 +1415,17 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             color_idx += 1
 
         var_normalized = normalize(df[var])
+        custom = list(zip(df[var].tolist(), df['Date'].dt.strftime('%Y-%m').tolist()))
         fig.add_trace(
             go.Scatter(
                 x=df['Date'], y=var_normalized,
                 name=var_label,
                 line=dict(color=color, width=width, shape='spline'),
                 mode='lines',
-                customdata=df[var],
-                hovertemplate=f'<b>{var_label}</b>: %{{customdata:.4f}}<br><span style="color:#86868b">Normalized: %{{y:.1f}}</span><extra></extra>',
+                customdata=custom,
+                hovertemplate=(f'<b>%{{customdata[1]}}</b><br>'
+                               f'{var_label}: %{{customdata[0]:.4f}}<br>'
+                               f'<span style="color:#86868b">Normalized: %{{y:.1f}}</span><extra></extra>'),
             )
         )
 
@@ -1435,7 +1438,7 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
             bgcolor='rgba(0,0,0,0)', borderwidth=0,
             itemsizing='constant', itemwidth=30, tracegroupgap=8,
         ),
-        hovermode="x unified",
+        hovermode="closest",
         hoverlabel=dict(
             bgcolor='rgba(18,18,20,0.75)' if is_dark else 'rgba(248,248,252,0.75)',
             font_size=12, font_family="Inter", font_color=text_color,
@@ -1444,8 +1447,6 @@ def update_graph(selected_predictors, data, active_tab, plot_mode, compare_vars,
         xaxis=dict(
             showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor=line_color,
             tickfont=dict(size=10, color=text_muted), title=None,
-            showspikes=True, spikemode='across', spikesnap='cursor',
-            spikedash='dot', spikethickness=1, spikecolor=spike_color,
         ),
         dragmode='zoom',
     )
