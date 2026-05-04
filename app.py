@@ -36,6 +36,11 @@ if PROJECT_ROOT not in sys.path:
 load_dotenv()
 
 from logic.session import make_session_token, verify_session, _SESSION_SECRET
+from logic.explainable_registry import (
+    EXPLAINABLE_VALUES,
+    serialize_for_store,
+    build_system_prompt_snippet,
+)
 
 server = Flask(__name__)
 server.secret_key = _SESSION_SECRET
@@ -145,6 +150,7 @@ app.layout = html.Div(id='theme-main-container', children=[
     dcc.Store(id='scenario-current-values', storage_type='session'),
     dcc.Store(id='saved-scenarios', data=[], storage_type='session'),
     dcc.Store(id='chat-history', data=[], storage_type='session'),
+    dcc.Store(id='explainable-registry-store', storage_type='memory'),
     dcc.Store(id='plot-mode', data='timeseries', storage_type='session'),
     dcc.Store(id='selected-compare-vars', data=[], storage_type='session'),
     dcc.Store(id='force-refresh-trigger', data=0, storage_type='memory'),
@@ -725,6 +731,25 @@ app.clientside_callback(
     Input('chat-close-btn', 'n_clicks'),
     prevent_initial_call=True
 )
+
+
+@callback(
+    Output('explainable-registry-store', 'data'),
+    Input('fetched-data', 'data'),  # Fires once data is loaded; varies by tab
+    prevent_initial_call=False,
+)
+def populate_explainable_registry(fetched_data):
+    """Build the per-session registry (static entries + heatmap cells for the
+    columns currently in the data store) and ship to the browser.
+
+    `fetched-data` is a list of records (df.to_dict('records')), see
+    pages/dashboard.py:877. We derive column names from the first record's keys.
+    """
+    corr_vars = []
+    if fetched_data and isinstance(fetched_data, list) and fetched_data:
+        corr_vars = [k for k in fetched_data[0].keys() if k != 'Date']
+    return serialize_for_store(corr_vars)
+
 
 # Auto-scroll + typewriter animation on new messages
 app.clientside_callback(
@@ -1408,6 +1433,15 @@ CHAT_SYSTEM_PROMPT = (
     "execute dashboard actions like adjusting sliders, switching tabs, or setting up charts.\n"
     "Keep answers concise (2-4 sentences) unless the user asks for detail."
 )
+
+# Build once at import time. Heatmap entries are added per-session by the
+# populate callback (system prompt is static, so we use a small placeholder).
+_CITATION_SNIPPET = "\n\n" + build_system_prompt_snippet(
+    corr_matrix_vars=["VIX", "ZAR_USD"],  # Placeholder — model just needs the pattern.
+)
+
+CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT + _CITATION_SNIPPET
+AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT + _CITATION_SNIPPET
 
 
 def _parse_agent_response(response_text):
