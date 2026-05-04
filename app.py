@@ -1,3 +1,4 @@
+import re
 import dash
 from dash import Dash, html, dcc, Input, Output, State, callback, callback_context, DiskcacheManager
 import dash_bootstrap_components as dbc
@@ -1444,10 +1445,69 @@ CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT + _CITATION_SNIPPET
 AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT + _CITATION_SNIPPET
 
 
+CITATION_PATTERN = re.compile(r'\[\[([a-zA-Z0-9_]+)\|([^\]]+)\]\]')
+
+
+def _build_citation_children(text: str, registry: dict, message_idx: int) -> tuple[list, bool]:
+    """Parse [[id|value]] markup in text and return (Dash children list, has_citations).
+
+    If text contains no citations, returns ([text], False) so the caller can keep
+    using the typewriter animation. If citations exist, returns a list of
+    alternating html.Span text blocks and citation chip components, plus True.
+
+    `message_idx` is the position of this message in chat-history; combined with
+    eid + occurrence_idx it forms a globally-unique pattern-matching index so
+    chips from older messages don't collide with new ones.
+
+    Unknown IDs gracefully degrade to plain text.
+    """
+    if not text:
+        return [text or ''], False
+
+    matches = list(CITATION_PATTERN.finditer(text))
+    if not matches:
+        return [text], False
+
+    children = []
+    cursor = 0
+    occurrence_idx = 0
+
+    for m in matches:
+        eid, value = m.group(1), m.group(2)
+        # Plain text before this match
+        if m.start() > cursor:
+            children.append(text[cursor:m.start()])
+
+        entry = registry.get(eid) if registry else None
+        if entry:
+            children.append(html.Span(
+                id={'type': 'citation-chip',
+                    'index': f'{eid}::{message_idx}::{occurrence_idx}'},
+                className='chat-citation-chip',
+                title=entry.get('label', eid),
+                n_clicks=0,
+                children=[
+                    html.Span(value, className='chat-citation-value'),
+                    html.Span('↗', className='chat-citation-arrow'),
+                ],
+            ))
+            occurrence_idx += 1
+        else:
+            # Unknown ID — render the value as plain text
+            children.append(value)
+
+        cursor = m.end()
+
+    # Trailing text
+    if cursor < len(text):
+        children.append(text[cursor:])
+
+    return children, True
+
+
 def _parse_agent_response(response_text):
     """Parse agent response to extract actions JSON and display message."""
     import json
-    import re
 
     actions = []
     message = response_text
@@ -1661,11 +1721,29 @@ def handle_chat_send(send_clicks, n_submit, user_msg, current_messages, chat_his
     if len(chat_history) > CHAT_HISTORY_CAP:
         chat_history = chat_history[-CHAT_HISTORY_CAP:]
 
+    # Build the same registry the browser uses (static + dynamic heatmap cells)
+    # so correlation citations parse correctly. fetched_data is already a State
+    # of this callback (see app.py:1447).
+    _corr_vars = []
+    if isinstance(fetched_data, list) and fetched_data:
+        _corr_vars = [k for k in fetched_data[0].keys() if k != 'Date']
+    chat_registry = serialize_for_store(_corr_vars)
+
+    # message_idx is the position this message will occupy in chat-history once
+    # appended — used for unique chip pattern-matching indexes across history.
+    message_idx = len(current_messages)
+    citation_children, has_citations = _build_citation_children(
+        ai_text, chat_registry, message_idx,
+    )
+    if has_citations:
+        # Skip typewriter for citation messages — chips are real Dash components,
+        # not animatable text.
+        ai_bubble = html.Div(citation_children, className='chat-bubble chat-bubble-ai')
+    else:
+        ai_bubble = html.Div('', className='chat-bubble chat-bubble-ai chat-typewriter',
+                             **{'data-fulltext': ai_text})
     current_messages.append(
-        html.Div(className='chat-message chat-message-ai', children=[
-            html.Div('', className='chat-bubble chat-bubble-ai chat-typewriter',
-                     **{'data-fulltext': ai_text})
-        ])
+        html.Div(className='chat-message chat-message-ai', children=[ai_bubble])
     )
 
     return current_messages, '', chat_history, agent_actions
