@@ -1773,9 +1773,9 @@ def render_model_ui(active_tab, prediction_data, theme, pathname):
             _info_pill('MAPE', f"{metrics.get('mape', 0):.2f}%",
                        'Mean Absolute Percentage Error: Average error relative to the exchange rate level.'),
             _info_pill("Theil's U", f"{metrics.get('theils_u', 0):.4f}",
-                       'Model RMSE / random-walk RMSE. U < 1 means the model beats the naïve forecast (U = 0.9969).'),
+                       'Model RMSE divided by the no-change (random walk) RMSE. U < 1 means the model beats the naïve forecast; U ≈ 1 means parity; U > 1 means the random walk is better.'),
             _info_pill('Directional Accuracy', f"{metrics.get('directional_accuracy', 0):.1f}%",
-                       'Correctly predicted direction in 67.65% of test months (vs 50% random guessing).'),
+                       'Share of test months where the predicted ZAR/USD direction matched the realised direction. Benchmark is 50% (random guessing).'),
         ]),
         html.H5('Valuation & Forward Estimates',
                 style={'fontSize': '0.8125rem', 'fontWeight': '600', 'color': 'var(--text-2)', 'marginTop': '24px',
@@ -1811,9 +1811,16 @@ def render_model_ui(active_tab, prediction_data, theme, pathname):
     else:
         direction_text = "The model expects the ZAR/USD exchange rate to remain relatively stable."
 
+    theils_u_val = metrics.get('theils_u', 0)
+    if theils_u_val and theils_u_val < 0.98:
+        rw_phrase = 'beating the random walk'
+    elif theils_u_val and theils_u_val > 1.02:
+        rw_phrase = 'marginally underperforming the random walk'
+    else:
+        rw_phrase = 'essentially in line with the random-walk benchmark'
     perf_text = (
         f"On the out-of-sample test set, this model achieved a directional accuracy of {metrics.get('directional_accuracy', 0):.1f}%, "
-        f"Theil's U of {metrics.get('theils_u', 0):.4f} (marginally beating the random walk), "
+        f"Theil's U of {theils_u_val:.4f} ({rw_phrase}), "
         f"and a mean absolute error (MAE) of ZAR {metrics.get('mae', 0):.4f}."
     )
 
@@ -2021,7 +2028,7 @@ def render_test_set_chart(active_tab, sub_tab, theme):
     # Actual line
     fig.add_trace(go.Scatter(
         x=dates, y=actual,
-        name='Actual',
+        name='<b>Actual</b>',
         mode='lines+markers',
         line=dict(color='#E8E8E8' if is_dark else '#1A1A1A', width=2.5, shape='spline'),
         marker=dict(size=5, color='#E8E8E8' if is_dark else '#1A1A1A'),
@@ -2031,7 +2038,7 @@ def render_test_set_chart(active_tab, sub_tab, theme):
     # Predicted line
     fig.add_trace(go.Scatter(
         x=dates, y=predicted,
-        name='Predicted',
+        name='<b>Predicted</b>',
         mode='lines+markers',
         line=dict(color='#5b8def', width=2.5, shape='spline', dash='dot'),
         marker=dict(size=5, color='#5b8def', symbol='diamond'),
@@ -2054,14 +2061,14 @@ def render_test_set_chart(active_tab, sub_tab, theme):
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         autosize=True,
-        font=dict(family=font_family, size=12, color=text_color),
+        font=dict(family=font_family, size=14, color='#000000'),
         modebar=dict(bgcolor='rgba(0,0,0,0)', color=text_muted,
                      activecolor='#5b8def' if is_dark else '#4f7df3', orientation='v'),
         margin=dict(l=60, r=30, t=30, b=60),
         height=420,
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-            font=dict(size=11, color=text_muted), bgcolor='rgba(0,0,0,0)',
+            font=dict(size=12, color='#000000'), bgcolor='rgba(0,0,0,0)',
         ),
         hovermode="x unified",
         hoverlabel=dict(
@@ -2070,16 +2077,16 @@ def render_test_set_chart(active_tab, sub_tab, theme):
             bordercolor=line_color, namelength=-1,
         ),
         xaxis=dict(
-            title=dict(text='Date', font=dict(size=11, color=text_muted)),
+            title=dict(text='<b>Date</b>', font=dict(size=15, color='#000000')),
             showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
             zeroline=False, showline=True, linewidth=1, linecolor=line_color,
-            tickfont=dict(size=10, color=text_muted),
+            tickfont=dict(size=13, color='#000000'),
         ),
         yaxis=dict(
-            title=dict(text='ZAR / USD', font=dict(size=11, color=text_muted)),
+            title=dict(text='<b>ZAR / USD</b>', font=dict(size=15, color='#000000')),
             showgrid=True, gridwidth=1, gridcolor=grid_color, griddash='dot',
             zeroline=False, showline=True, linewidth=1, linecolor=line_color,
-            tickfont=dict(size=10, color=text_muted),
+            tickfont=dict(size=13, color='#000000'),
             tickformat=".2f",
         ),
     )

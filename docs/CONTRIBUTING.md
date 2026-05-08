@@ -85,7 +85,7 @@ npm run watch   # Auto-rebuild on save
 
 - Raw Supabase columns match the source naming: `EPU(USA)`, `WUIZAF(SA)`, `10_YEAR_BOND_RATES(SA)`.
 - Engineered features use snake_case: `ZAR_USD_lag1`, `VIX_zscore12`, `bond_spread_change1`.
-- The mapping between raw and engineered names is defined in `logic/model.py` (`FEATURE_LIST`, `BASE_FEATURE_NAMES`).
+- The mapping between raw and engineered names is defined in `logic/model/features.py` (`FEATURE_LIST`, `BASE_FEATURE_NAMES`, `FEATURE_CATEGORIES`).
 
 ### File Naming
 
@@ -97,23 +97,25 @@ npm run watch   # Auto-rebuild on save
 
 When making changes, keep these constraints in mind:
 
-1. **512MB RAM limit** -- The app runs on Render's starter tier. Avoid loading large datasets into memory simultaneously. Background callbacks must run sequentially (not in parallel).
+1. **512MB RAM limit** -- The app runs on Render's starter tier. Avoid loading large datasets into memory simultaneously. The dashboard is hydrated cache-first from the `predictions` Supabase table; expensive recomputes happen in `opportunistic_refresh` (background, single-flight).
 
 2. **Single worker** -- Only one gunicorn worker with 4 threads. No inter-process state sharing except via DiskCache or Supabase.
 
-3. **Frozen model** -- The ML model in `models/zar_usd_forecast_model.pkl` is a trained artifact. Changing feature engineering in `logic/model.py` without retraining the model will produce incorrect predictions.
+3. **Frozen model** -- The ML model in `models/zar_usd_forecast_model.pkl` is a trained artifact. Changing feature engineering in `logic/model/features.py` without retraining the model will produce incorrect predictions. After retraining, also bump `MODEL_VERSION` in `logic/model/payload.py` so the predictions cache invalidates atomically.
 
-4. **Monthly data refresh** -- Data is fetched from external APIs only on the last day of each month. Don't add polling or frequent refresh logic.
+4. **Monthly data refresh** -- Data is fetched from external APIs only on the last day of each month (`should_update_from_api()` in `logic/data/freshness.py`). Don't add polling or frequent refresh logic.
 
-5. **No test suite** -- There are no automated tests. Test changes manually by running the app locally.
+5. **Hard timeouts on external I/O** -- Every Supabase / FRED / World Bank call has a hard timeout. Don't add new external calls without one — see `_with_supabase_timeout` (`logic/data/storage.py`) and the `concurrent.futures` patterns in `logic/predictions_cache/refresh.py`.
+
+6. **No test suite** -- There are no automated tests. Test changes manually by running the app locally.
 
 ## Adding a New Data Variable
 
-1. Add the series configuration to `SERIES_CONFIG` in `logic/data_fetcher.py`.
-2. Add the column name to the `valid_columns` set in `save_to_supabase()`.
-3. Add the column to the `columns_to_keep` list in `process_data()`.
+1. Add the series configuration to `SERIES_CONFIG` in `logic/data/__init__.py` (also exported from the back-compat shim `logic/data_fetcher.py`).
+2. Add the column name to the `valid_columns` set in `save_to_supabase()` (`logic/data/storage.py`).
+3. Add the column to the `columns_to_keep` list in `process_data()` (`logic/data/processing.py`).
 4. Add the corresponding column to the Supabase `data` table schema.
-5. If the variable feeds into the model, update `engineer_features()` in `logic/model.py` and retrain the model.
+5. If the variable feeds into the model, update `engineer_features()` and `FEATURE_LIST` in `logic/model/features.py`, retrain the model, and bump `MODEL_VERSION` in `logic/model/payload.py`.
 
 ## Adding a New Dashboard Tab
 
@@ -121,6 +123,15 @@ When making changes, keep these constraints in mind:
 2. Add the tab content layout (similar to existing `data_content`, `model_content`, `scenario_content` sections).
 3. Add visibility toggle callbacks.
 4. Update `dashboard-tab` store handling.
+
+## Adding a New Citable / Explainable Value
+
+Any number that should be hover-explainable (✦) or citable inline by the AI chat needs a registry entry:
+
+1. Add an entry to `EXPLAINABLE_VALUES` in `logic/explainable_registry.py` with `label`, `tab`, optional `sub_tab`, `dom_target` (CSS selector), `starter_question` template, `value_source` (dotted path into a dcc.Store or `"none"`), and `navigate_actions` (list of agent actions).
+2. Set the matching `id` on the rendered DOM element so the citation chip can scroll to it.
+3. The system-prompt snippet (`build_system_prompt_snippet`) is regenerated automatically at module import — Gemini will start citing the new ID once the next chat turn fires.
+4. For values that depend on session-specific data (e.g. heatmap correlations), add a generator to `expand_dynamic_entries()` instead of the static dict.
 
 ## Git Workflow
 

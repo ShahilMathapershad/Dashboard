@@ -10,7 +10,7 @@ The application is deployed on [Render](https://render.com/) as a Web Service.
 |---------|-------|
 | **Runtime** | Python |
 | **Build Command** | `pip install -r requirements.txt` |
-| **Start Command** | `gunicorn app:server -b 0.0.0.0:10000 --workers 1 --threads 4 --worker-class gthread --timeout 120 --preload` |
+| **Start Command** | `gunicorn app:server -b 0.0.0.0:10000 --workers 1 --threads 4 --worker-class gthread --timeout 120` |
 | **Instance Type** | Free or Starter (512MB RAM) |
 | **Port** | 10000 |
 
@@ -24,6 +24,7 @@ Set these in the Render dashboard under **Environment**:
 | `SUPABASE_KEY` | Supabase service role key | Yes |
 | `FRED_API_KEY` | FRED API key ([request here](https://fred.stlouisfed.org/docs/api/api_key.html)) | Yes |
 | `GOOGLE_API_KEY` | Google Gemini API key (for AI chat) | Yes |
+| `SESSION_SECRET` | Long random string (e.g. `openssl rand -hex 32`) used to HMAC session tokens. **Required** when `RENDER` or `FLASK_ENV=production` is set; without it the app refuses to boot in production. | Yes (production) |
 | `PORT` | Server port (Render sets this automatically) | No (default: 10000) |
 
 ### Procfile
@@ -31,7 +32,7 @@ Set these in the Render dashboard under **Environment**:
 The repository includes a `Procfile` for Render:
 
 ```
-web: gunicorn app:server -b 0.0.0.0:10000 --workers 1 --threads 4 --worker-class gthread --timeout 120 --preload
+web: gunicorn app:server -b 0.0.0.0:10000 --workers 1 --threads 4 --worker-class gthread --timeout 120
 ```
 
 **Key flags:**
@@ -39,14 +40,16 @@ web: gunicorn app:server -b 0.0.0.0:10000 --workers 1 --threads 4 --worker-class
 - `--threads 4` -- Four threads per worker for concurrent request handling.
 - `--worker-class gthread` -- Threaded worker class (more memory-efficient than `sync` for I/O-bound work).
 - `--timeout 120` -- 2-minute timeout for long-running requests (initial data fetch can take 30-60 seconds).
-- `--preload` -- Load the app before forking workers to share memory via copy-on-write.
 
 ## Memory Optimization
 
 The 512MB RAM constraint on Render drives several architectural decisions:
 
-### Sequential Background Callbacks
-Instead of running data fetch, model prediction, and scenario baseline in parallel, they execute sequentially to avoid peak memory spikes. Each step completes and releases memory before the next begins.
+### Cache-First Hydrate
+The dashboard reads precomputed forecasts/contributions/fit-history/scenario-baseline from the Supabase `predictions` table on `/dashboard` nav (one DB round-trip), instead of running the full pipeline on every page load. Refresh runs opportunistically in a background callback when the cache is stale (>24h). This replaced the older sequential trigger chain that recomputed everything on every load.
+
+### Single-Worker, Single-Flight Refresh
+Only one gunicorn worker holds the model + data in memory. `refresh_async()` uses a process-local threading.Lock so concurrent refreshes don't double-fetch. Hard timeouts (FRED 20s, World Bank 25s, Supabase 10s) prevent a hung upstream from wedging the worker.
 
 ### Data Limiting
 `process_data()` in `data_fetcher.py` limits data to 15 years (from the end date backwards), even if more historical data is available from FRED.
@@ -67,9 +70,14 @@ On Linux (Render), the app uses `fork` instead of `spawn` for background process
 1. Push the repository to GitHub (or connect a Git provider to Render).
 2. Create a new **Web Service** on Render.
 3. Connect the repository.
-4. Set the environment variables listed above.
+4. Set the environment variables listed above (don't forget `SESSION_SECRET`).
 5. Render will automatically detect the `Procfile` and `requirements.txt`.
 6. Deploy.
+7. (One-off) Bootstrap the predictions cache so the first user doesn't pay the cold-start cost. Run via Render Shell or locally with the production env vars:
+   ```bash
+   python -m logic.predictions_cache.bootstrap
+   ```
+   This typically takes 30-60 seconds and writes one row to the `predictions` Supabase table. Subsequent stale-refreshes happen automatically via `opportunistic_refresh`.
 
 ### Subsequent Deployments
 
@@ -112,9 +120,13 @@ Render performs health checks on the root URL. The app responds at `/` with the 
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| App killed with OOM | Memory exceeded 512MB | Check for parallel background callbacks; ensure sequential chaining is intact |
-| Data fetch timeout | FRED API slow or rate-limited | The 120s gunicorn timeout should accommodate this; if not, increase `--timeout` |
+| App refuses to boot in production | `SESSION_SECRET` not set when `RENDER` or `FLASK_ENV=production` | Set `SESSION_SECRET` to `openssl rand -hex 32` in Render env |
+| App killed with OOM | Memory exceeded 512MB | Check for runaway background work; verify only one gunicorn worker is configured |
+| Data fetch timeout | FRED or World Bank slow | `refresh_async()` already enforces 20s/25s timeouts and falls back to last-known cache. Check Render logs for `cache.refresh.failed reason=fred_timeout` / `worldbank_timeout` |
 | "Supabase client not initialized" | Missing env vars | Verify `SUPABASE_URL` and `SUPABASE_KEY` are set in Render environment |
+| `predictions` table empty / 24h+ stale | Bootstrap never ran or refresh failing | Run `python -m logic.predictions_cache.bootstrap` from Render Shell. Check `cache.refresh.failed` logs for the underlying reason |
+| Cache shows stale forever after retraining | New model file but `MODEL_VERSION` unchanged | Bump `MODEL_VERSION` in `logic/model/payload.py` so the lookup misses and `opportunistic_refresh` writes a fresh row |
 | Model file not found | `models/` missing from deploy | Ensure the directory and `.pkl` file are committed to Git (not in `.gitignore`) |
 | Gold price missing | World Bank changed their Excel URL | `_get_world_bank_gold_excel_url()` scrapes the page dynamically; check if the page structure changed |
 | Chat returns error | Missing or invalid `GOOGLE_API_KEY` | Set the key in environment variables |
+| `KeyError: "Callback function not found"` after deploy | Stale browser POSTing old callback IDs | Already handled — `app.py` swallows these as 204 silently. No action needed; user's next page load picks up fresh IDs |

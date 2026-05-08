@@ -56,7 +56,7 @@ Stores processed monthly macroeconomic time series data. Each row represents one
 
 **Used by:**
 - `logic/data_fetcher.py` -- Writes processed data after fetching from APIs. On refresh, the entire table is cleared and rewritten via upsert.
-- `logic/model.py` -- Reads data for feature engineering and model inference. Cached in-memory (5-min TTL) and on disk (DiskCache, 5-min TTL).
+- `logic/model/loading.py` (`fetch_data_from_supabase`) and `logic/data/storage.py` -- Read data for feature engineering and model inference. Cached in-memory (5-min TTL) and on disk via DiskCache (5-min TTL).
 - `pages/dashboard.py` -- Reads data for the Data tab charts and tables.
 
 **Data flow:**
@@ -93,13 +93,45 @@ FRED API + World Bank + StatsSA
 
 **Row count:** ~180 rows (15 years x 12 months).
 
+---
+
+### `predictions`
+
+Persistent cache of the dashboard payload (forecasts, contributions, fit history, scenario baseline). Read once per `/dashboard` hydrate so the UI doesn't re-run the model on every page load. Lives across deploys; invalidated atomically by bumping `CACHE_CONTRACT_VERSION` or `MODEL_VERSION`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `model_version` | text (PK) | E.g. `huber-v1-2026-03-29`. Defined in `logic/model/payload.py`. UPSERT key. |
+| `cache_contract_version` | int | E.g. `1`. Defined in `logic/cache_contract.py`. Bump to force-invalidate. |
+| `computed_at` | timestamptz | When the payload was generated (UTC). Used by `is_stale()` (24h TTL). |
+| `data_through` | date | Latest data row included in the payload. |
+| `refresh_status` | text | `'success'`, `'stale'`, or `'bootstrap'`. |
+| `forecasts` | jsonb | List of `{horizon_months, forecast_zar_usd, forecast_date}` for 1M/3M/6M. |
+| `feature_contributions` | jsonb | List of `{feature, contribution, value}` per of 11 features. |
+| `fit_history` | jsonb | List of `{date, actual, predicted}` for the trailing 60 months. |
+| `scenario_baseline` | jsonb | `{feature_values, baseline_forecast_1m, baseline_date}`. |
+
+**Used by:**
+- `logic/predictions_cache/read.py` -- `read_cached()` returns the row matching the active `MODEL_VERSION`. Returns `None` on contract-version mismatch, empty table, or Supabase failure.
+- `logic/predictions_cache/write.py` -- `write_payload()` UPSERTs on `model_version` (idempotent across concurrent refreshes).
+- `logic/predictions_cache/refresh.py` -- `refresh_async()` orchestrates the FRED + World Bank fetch and writes the new payload. Single-flight via threading.Lock; concurrent calls return `status='skipped'`.
+- `logic/predictions_cache/freshness.py` -- `is_stale(metadata)` returns True if older than 24h.
+- `core/cache_callbacks.py` -- `hydrate_dashboard` reads on `/dashboard` nav; `opportunistic_refresh` triggers `refresh_async` when stale.
+
+**Bootstrap:** First deploy needs an initial population. Run:
+```bash
+python -m logic.predictions_cache.bootstrap
+```
+
+**Row count:** 1 row per active `model_version` (typically just one).
+
 ## Data Access Patterns
 
 ### Read Path (Model / Dashboard)
 
 ```python
-# logic/model.py
-supabase.table('data').select('*').order('Date', desc=True).limit(250).execute()
+# logic/data/storage.py (and the local rehost in logic/model/loading.py)
+supabase.table('data').select('*').order('Date', desc=True).limit(500).execute()
 ```
 
 Results are cached at two layers:
@@ -135,19 +167,19 @@ supabase.table('users').update({'password': new_pw}).eq('username', username).ex
 ## Entity Relationship
 
 ```
-users                          data
-┌──────────────────┐          ┌──────────────────────┐
-│ username (PK)    │          │ Date (PK)            │
-│ password         │          │ EPU(USA)             │
-└──────────────────┘          │ WUIZAF(SA)           │
-                              │ 10_YEAR_BOND_RATES.. │
-   (no foreign key            │ VIX                  │
-    relationship)             │ GOLD_PRICE           │
-                              │ BRENT_OIL_PRICE      │
-                              │ US_CPI               │
-                              │ SA_INFLATION         │
-                              │ ZAR_USD              │
+users                          data                          predictions
+┌──────────────────┐          ┌──────────────────────┐       ┌────────────────────────────┐
+│ username (PK)    │          │ Date (PK)            │       │ model_version (PK)         │
+│ password         │          │ EPU(USA)             │       │ cache_contract_version     │
+└──────────────────┘          │ WUIZAF(SA)           │       │ computed_at                │
+                              │ 10_YEAR_BOND_RATES.. │       │ data_through               │
+   (no foreign key            │ VIX                  │       │ refresh_status             │
+    relationships)            │ GOLD_PRICE           │       │ forecasts (jsonb)          │
+                              │ BRENT_OIL_PRICE      │       │ feature_contributions      │
+                              │ US_CPI               │       │ fit_history                │
+                              │ SA_INFLATION         │       │ scenario_baseline          │
+                              │ ZAR_USD              │       └────────────────────────────┘
                               └──────────────────────┘
 ```
 
-The two tables are independent -- there is no foreign key relationship between `users` and `data`. All authenticated users see the same dataset.
+The three tables are independent -- there are no foreign-key relationships. `predictions` is a derived/cached projection of `data` keyed by the active `model_version`; refreshes recompute the payload from `data` and UPSERT.

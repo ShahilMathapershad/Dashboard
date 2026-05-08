@@ -28,7 +28,7 @@ This application does not expose a REST API. It is a server-rendered Dash applic
 
 **Usage in code:**
 ```python
-# logic/data_fetcher.py
+# logic/data/fred_source.py  (re-exported from logic/data_fetcher for back-compat)
 from fredapi import Fred
 fred = Fred(api_key=FRED_API_KEY)
 series = fred.get_series(series_id, observation_start='2009-12-31')
@@ -58,7 +58,7 @@ fetch_fred_data()
 
 **Usage in code:**
 ```python
-# logic/data_fetcher.py
+# logic/data/worldbank_source.py
 def _get_world_bank_gold_excel_url():
     """Scrape the commodity markets page for the latest workbook URL."""
     response = requests.get("https://www.worldbank.org/en/research/commodity-markets")
@@ -79,12 +79,12 @@ def fetch_world_bank_gold_data(start_date='2009-12-31'):
 
 ### 3. Statistics South Africa (Hardcoded)
 
-**Method:** No API call -- data is hardcoded in `logic/data_fetcher.py`.
+**Method:** No API call -- data is hardcoded in `logic/data/static_inputs.py`.
 
 The SA Headline CPI Index (Base: Dec 2024 = 100) is maintained as a Python list of monthly values from December 2009 through February 2026. Values for 2025-2026 are derived from official StatsSA year-over-year percentage changes applied to the 2024 base index.
 
 ```python
-# logic/data_fetcher.py
+# logic/data/static_inputs.py
 def fetch_sa_inflation_hardcoded():
     cpi_values = [48.0, 48.1, ...]  # ~195 monthly values
     dates = pd.date_range(start="2009-12-31", end="2026-02-28", freq="ME")
@@ -101,7 +101,11 @@ def fetch_sa_inflation_hardcoded():
 **Model:** `gemini-2.5-flash`
 **Authentication:** API key via `GOOGLE_API_KEY` environment variable
 
-**Usage:** Powers the AI chat assistant embedded in the dashboard. Each chat message sends the full conversation history plus a system prompt containing the current dashboard state (data, predictions, scenario values).
+**Usage:** Powers the global AI chat assistant + Agent Mode embedded in the dashboard. Each chat message sends the full conversation history plus a system prompt containing the current dashboard state (data, predictions, scenario values) and the citation-markup catalog generated from `logic.explainable_registry.build_system_prompt_snippet`.
+
+The header toggle picks one of two system prompts:
+- `CHAT_SYSTEM_PROMPT` — plain Q&A; replies may include `[[id|value]]` citation chips that get post-processed into clickable React elements by `_build_citation_children`.
+- `AGENT_SYSTEM_PROMPT` — the model returns a JSON action plan (`navigate_tab`, `set_scenario_sliders`, `set_compare_variables`, `highlight_model`, `select_predictors`, `set_plot_mode`, `reset_scenario`) plus a natural-language reply. Actions are dispatched via `agent-action-store` and executed by `execute_agent_actions`.
 
 ```python
 # app.py
@@ -146,26 +150,27 @@ Dash callbacks are the internal "endpoints" of the application. They are Python 
 
 | Callback | Triggers | Outputs | Location |
 |----------|----------|---------|----------|
-| `global_prerender_trigger` | Page navigation to `/dashboard` | `fetch-trigger` | `app.py` |
-| `chain_model_prediction` | `fetched-data` populated | `model-prediction-trigger` | `app.py` |
-| `chain_scenario_baseline` | `model-prediction-data` populated | `scenario-trigger` | `app.py` |
-| `auth_redirection` | Page navigation, session change | Pathname redirect | `app.py` |
-| `handle_chat_send` | Chat send button, input submit | Chat messages, history | `app.py` |
-| `login_auth` | Login button click | `user-session`, error message | `pages/login.py` |
+| `hydrate_dashboard` | Page navigation to `/dashboard`, session change | 8 stores: `fetched-data`, `fetched-data-status`, `predictor-dropdown-options-store`, `selected-predictors`, `model-prediction-data`, `scenario-baseline-data`, `cache-metadata-store`, `cache-status-store` | `core/cache_callbacks.py` |
+| `prewarm_on_get_started` | "Get Started" button click on landing | `prewarm-status-store` (background; warms diskcaches) | `core/cache_callbacks.py` |
+| `opportunistic_refresh` | `cache-status-store` change | Background refresh of `predictions` table; flips status `'stale' → 'hit'` | `core/cache_callbacks.py` |
+| `auth_redirection` | Page navigation, session change | Pathname redirect (verifies HMAC token) | `app.py` |
+| `clear_data_on_logout` | `user-session` cleared | Wipes chat history + saved scenarios | `app.py` |
+| `populate_explainable_registry` | `fetched-data` change | `explainable-registry-store` (static + heatmap-cell entries) | `app.py` |
+| `execute_agent_actions` | `agent-action-store` change | Tab, slider values, predictors, plot mode, compare vars, pathname, highlight | `app.py` |
+| `handle_chat_send` | Chat send button, input submit | `chat-messages`, `chat-history`, optional `agent-action-store` | `app.py` |
+| `login_auth` | Login button click | `user-session` (`{username, token}` HMAC), error message | `pages/login.py` |
 | `register_user` | Register button click | Success/error message | `pages/registration.py` |
 | `update_password` | Update password button | Success/error message | `pages/profile.py` |
-| `fetch_data_background` | `fetch-trigger` | `fetched-data` | `pages/dashboard.py` |
-| `run_model_prediction` | `model-prediction-trigger` | `model-prediction-data` | `pages/dashboard.py` |
-| `compute_scenario_baseline` | `scenario-trigger` | `scenario-baseline-data` | `pages/dashboard.py` |
 | `run_scenario_prediction` | Scenario slider changes | Scenario results | `pages/dashboard.py` |
+
+> **Removed:** `global_prerender_trigger`, `chain_model_prediction`, `chain_scenario_baseline`, `fetch_data_background`, `run_model_prediction`, `compute_scenario_baseline` — the old three-step trigger chain was retired in favour of the unified cache-first hydrate. The `fetch-trigger` / `model-prediction-trigger` / `scenario-trigger` stores are still in the layout as no-op stubs for back-compat with browsers cached on the previous build.
 
 ### Background Callbacks
 
-Three callbacks use Dash's `background=True` with DiskCache to run in separate processes:
+Two callbacks now use Dash's `background=True` with DiskCache to run in separate processes:
 
-1. **Data fetch** -- Fetches from APIs or Supabase, reports progress via progress bar.
-2. **Model prediction** -- Loads frozen model, engineers features, generates forecasts.
-3. **Scenario baseline** -- Computes slider ranges and base prediction.
+1. **`prewarm_on_get_started`** -- Fired when the landing-page "Get Started" button is clicked. Calls `fetch_data_from_supabase()`, `predict_next_month()`, and `get_scenario_baseline()` to populate diskcaches in advance of post-login hydrate.
+2. **`opportunistic_refresh`** -- Fired by changes to `cache-status-store`. If the cache is missing or stale (>24h), triggers `refresh_async()` (single-flight via threading.Lock) which re-fetches FRED + World Bank with hard timeouts, recomputes the payload, and UPSERTs the `predictions` row.
 
 ### Clientside Callbacks (No Server Roundtrip)
 
